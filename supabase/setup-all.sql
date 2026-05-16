@@ -1184,10 +1184,6 @@ begin
   on conflict (user_id, slug) do nothing;
 
   --------------------------------------------------------------------
-  -- custody locations
-  --------------------------------------------------------------------
-  insert into public.custody_locations (user_id, name, slug, kind) values
-  --------------------------------------------------------------------
   -- custody locations — TR banka set'i + broker/crypto/kasa
   -- (kullanıcı kendi ihtiyacına göre Ayarlar'dan ekler/siler)
   --------------------------------------------------------------------
