@@ -3,6 +3,29 @@
 Kişisel ERP ve yatırım terminali. Nakit akışı, çoklu portföy varlık takibi ve
 BIST için teknik+temel screener — tek arayüzde.
 
+## Canlı Demo / Deploy
+
+Vercel'e tek tıkla deploy:
+
+**[Deploy to Vercel ↗](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fdrmavsar%2Fportfoy&project-name=mehmet-assets&repository-name=portfoy)**
+
+Adımlar:
+
+1. Yukarıdaki linke tıkla
+2. GitHub ile Vercel'e giriş yap
+3. Project Name: `mehmet-assets` (veya istediğin)
+4. Framework: Next.js (otomatik tanır)
+5. Region: **fra1** (Frankfurt — TR'ye en yakın, `vercel.json`'da default)
+6. Env vars'ı şu an boş geç → Deploy
+7. ~90 saniyede `https://mehmet-assets-xxx.vercel.app` hazır
+
+Demo şu an **sample data** ile gelir (Hasan Hanesi: Ben/Ahmet Burak/Salih, ASELS/THYAO/BIMAS pozisyonları, vs.).
+
+Supabase'i daha sonra bağlayınca env vars'ı Vercel dashboard'dan ekleyebilirsin:
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY` (opsiyonel, ETL için)
+
 ## Mimari
 
 ```
