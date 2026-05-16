@@ -40,7 +40,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="brand-mark">M·A</div>
           <div>
             <div className="brand-name">Mehmet&apos;s Assets</div>
-            <div className="brand-sub">Hasan Hanesi</div>
+            <div className="brand-sub">Varlık</div>
           </div>
         </div>
 
