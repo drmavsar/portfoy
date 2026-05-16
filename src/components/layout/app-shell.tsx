@@ -67,16 +67,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           );
         })}
 
-        <button className="cta-add">
-          <Icon name="plus" size={14} /> İşlem Ekle
-          <span
-            className="kbd"
-            style={{ marginLeft: "auto", color: "rgba(0,0,0,0.5)", borderColor: "rgba(0,0,0,0.15)" }}
-          >
-            N
-          </span>
-        </button>
-
         <div className="sidebar-foot">
           <div className="avatar">M</div>
           <div style={{ flex: 1, minWidth: 0 }}>
