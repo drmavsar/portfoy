@@ -25,6 +25,7 @@ create table if not exists public.accounts (
 create index if not exists accounts_user_idx on public.accounts(user_id);
 create index if not exists accounts_portfolio_idx on public.accounts(portfolio_id);
 
+drop trigger if exists accounts_set_updated_at on public.accounts;
 create trigger accounts_set_updated_at
   before update on public.accounts
   for each row execute function public.tg_set_updated_at();
@@ -50,6 +51,7 @@ create table if not exists public.statement_imports (
 
 create index if not exists statement_imports_user_idx on public.statement_imports(user_id);
 
+drop trigger if exists statement_imports_set_updated_at on public.statement_imports;
 create trigger statement_imports_set_updated_at
   before update on public.statement_imports
   for each row execute function public.tg_set_updated_at();
@@ -108,6 +110,7 @@ create index if not exists transactions_beneficiary_idx
 create index if not exists transactions_merchant_trgm
   on public.transactions using gin (merchant_clean public.gin_trgm_ops);
 
+drop trigger if exists transactions_set_updated_at on public.transactions;
 create trigger transactions_set_updated_at
   before update on public.transactions
   for each row execute function public.tg_set_updated_at();
@@ -154,6 +157,7 @@ create index if not exists drafts_user_import_idx
 create index if not exists drafts_decision_idx
   on public.transaction_drafts(decision);
 
+drop trigger if exists drafts_set_updated_at on public.transaction_drafts;
 create trigger drafts_set_updated_at
   before update on public.transaction_drafts
   for each row execute function public.tg_set_updated_at();
@@ -178,6 +182,7 @@ create table if not exists public.recurring_schedules (
   updated_at      timestamptz not null default now()
 );
 
+drop trigger if exists recurring_set_updated_at on public.recurring_schedules;
 create trigger recurring_set_updated_at
   before update on public.recurring_schedules
   for each row execute function public.tg_set_updated_at();
@@ -203,6 +208,7 @@ create unique index if not exists budgets_unique_period
                     coalesce(beneficiary_id, '00000000-0000-0000-0000-000000000000'),
                     period_year, coalesce(period_month, 0));
 
+drop trigger if exists budgets_set_updated_at on public.budgets;
 create trigger budgets_set_updated_at
   before update on public.budgets
   for each row execute function public.tg_set_updated_at();

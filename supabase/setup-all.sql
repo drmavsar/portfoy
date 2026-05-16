@@ -1,13 +1,10 @@
 -- ============================================================
--- Mehmet's Assets — All-in-one Supabase setup
--- Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
---
+-- Mehmet's Assets — All-in-one Supabase setup (idempotent)
+-- ============================================================
 -- Usage: Supabase Dashboard → SQL Editor → New Query →
 -- Paste this whole file → Run.
---
--- Order: migrations 0001..0009 → seed 0001..0002
+-- Re-runnable: triggers/tables use IF EXISTS / IF NOT EXISTS.
 -- ============================================================
-
 
 -- ============================================================
 -- FILE: supabase/migrations/0001_extensions_and_enums.sql
@@ -112,6 +109,7 @@ create table if not exists public.portfolios (
   unique (user_id, slug)
 );
 
+drop trigger if exists portfolios_set_updated_at on public.portfolios;
 create trigger portfolios_set_updated_at
   before update on public.portfolios
   for each row execute function public.tg_set_updated_at();
@@ -130,6 +128,7 @@ create table if not exists public.beneficiaries (
   unique (user_id, slug)
 );
 
+drop trigger if exists beneficiaries_set_updated_at on public.beneficiaries;
 create trigger beneficiaries_set_updated_at
   before update on public.beneficiaries
   for each row execute function public.tg_set_updated_at();
@@ -152,6 +151,7 @@ create table if not exists public.categories (
 
 create index if not exists categories_parent_idx on public.categories(parent_id);
 
+drop trigger if exists categories_set_updated_at on public.categories;
 create trigger categories_set_updated_at
   before update on public.categories
   for each row execute function public.tg_set_updated_at();
@@ -170,6 +170,7 @@ create table if not exists public.custody_locations (
   unique (user_id, slug)
 );
 
+drop trigger if exists custody_locations_set_updated_at on public.custody_locations;
 create trigger custody_locations_set_updated_at
   before update on public.custody_locations
   for each row execute function public.tg_set_updated_at();
@@ -215,6 +216,7 @@ create table if not exists public.accounts (
 create index if not exists accounts_user_idx on public.accounts(user_id);
 create index if not exists accounts_portfolio_idx on public.accounts(portfolio_id);
 
+drop trigger if exists accounts_set_updated_at on public.accounts;
 create trigger accounts_set_updated_at
   before update on public.accounts
   for each row execute function public.tg_set_updated_at();
@@ -240,6 +242,7 @@ create table if not exists public.statement_imports (
 
 create index if not exists statement_imports_user_idx on public.statement_imports(user_id);
 
+drop trigger if exists statement_imports_set_updated_at on public.statement_imports;
 create trigger statement_imports_set_updated_at
   before update on public.statement_imports
   for each row execute function public.tg_set_updated_at();
@@ -298,6 +301,7 @@ create index if not exists transactions_beneficiary_idx
 create index if not exists transactions_merchant_trgm
   on public.transactions using gin (merchant_clean public.gin_trgm_ops);
 
+drop trigger if exists transactions_set_updated_at on public.transactions;
 create trigger transactions_set_updated_at
   before update on public.transactions
   for each row execute function public.tg_set_updated_at();
@@ -344,6 +348,7 @@ create index if not exists drafts_user_import_idx
 create index if not exists drafts_decision_idx
   on public.transaction_drafts(decision);
 
+drop trigger if exists drafts_set_updated_at on public.transaction_drafts;
 create trigger drafts_set_updated_at
   before update on public.transaction_drafts
   for each row execute function public.tg_set_updated_at();
@@ -368,6 +373,7 @@ create table if not exists public.recurring_schedules (
   updated_at      timestamptz not null default now()
 );
 
+drop trigger if exists recurring_set_updated_at on public.recurring_schedules;
 create trigger recurring_set_updated_at
   before update on public.recurring_schedules
   for each row execute function public.tg_set_updated_at();
@@ -393,6 +399,7 @@ create unique index if not exists budgets_unique_period
                     coalesce(beneficiary_id, '00000000-0000-0000-0000-000000000000'),
                     period_year, coalesce(period_month, 0));
 
+drop trigger if exists budgets_set_updated_at on public.budgets;
 create trigger budgets_set_updated_at
   before update on public.budgets
   for each row execute function public.tg_set_updated_at();
@@ -446,6 +453,7 @@ create table if not exists public.classification_rules (
 create index if not exists rules_user_priority_idx
   on public.classification_rules(user_id, priority);
 
+drop trigger if exists rules_set_updated_at on public.classification_rules;
 create trigger rules_set_updated_at
   before update on public.classification_rules
   for each row execute function public.tg_set_updated_at();
@@ -497,6 +505,7 @@ create table if not exists public.assets (
 create index if not exists assets_class_idx on public.assets(asset_class);
 create index if not exists assets_symbol_trgm on public.assets using gin (symbol public.gin_trgm_ops);
 
+drop trigger if exists assets_set_updated_at on public.assets;
 create trigger assets_set_updated_at
   before update on public.assets
   for each row execute function public.tg_set_updated_at();
@@ -529,6 +538,7 @@ create index if not exists trades_user_asset_idx
 create index if not exists trades_portfolio_idx
   on public.trades(portfolio_id, executed_at);
 
+drop trigger if exists trades_set_updated_at on public.trades;
 create trigger trades_set_updated_at
   before update on public.trades
   for each row execute function public.tg_set_updated_at();

@@ -24,6 +24,7 @@ create table if not exists public.assets (
 create index if not exists assets_class_idx on public.assets(asset_class);
 create index if not exists assets_symbol_trgm on public.assets using gin (symbol public.gin_trgm_ops);
 
+drop trigger if exists assets_set_updated_at on public.assets;
 create trigger assets_set_updated_at
   before update on public.assets
   for each row execute function public.tg_set_updated_at();
@@ -56,6 +57,7 @@ create index if not exists trades_user_asset_idx
 create index if not exists trades_portfolio_idx
   on public.trades(portfolio_id, executed_at);
 
+drop trigger if exists trades_set_updated_at on public.trades;
 create trigger trades_set_updated_at
   before update on public.trades
   for each row execute function public.tg_set_updated_at();

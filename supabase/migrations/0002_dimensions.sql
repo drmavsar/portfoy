@@ -22,6 +22,7 @@ create table if not exists public.portfolios (
   unique (user_id, slug)
 );
 
+drop trigger if exists portfolios_set_updated_at on public.portfolios;
 create trigger portfolios_set_updated_at
   before update on public.portfolios
   for each row execute function public.tg_set_updated_at();
@@ -40,6 +41,7 @@ create table if not exists public.beneficiaries (
   unique (user_id, slug)
 );
 
+drop trigger if exists beneficiaries_set_updated_at on public.beneficiaries;
 create trigger beneficiaries_set_updated_at
   before update on public.beneficiaries
   for each row execute function public.tg_set_updated_at();
@@ -62,6 +64,7 @@ create table if not exists public.categories (
 
 create index if not exists categories_parent_idx on public.categories(parent_id);
 
+drop trigger if exists categories_set_updated_at on public.categories;
 create trigger categories_set_updated_at
   before update on public.categories
   for each row execute function public.tg_set_updated_at();
@@ -80,6 +83,7 @@ create table if not exists public.custody_locations (
   unique (user_id, slug)
 );
 
+drop trigger if exists custody_locations_set_updated_at on public.custody_locations;
 create trigger custody_locations_set_updated_at
   before update on public.custody_locations
   for each row execute function public.tg_set_updated_at();
