@@ -94,7 +94,7 @@ input, select, textarea { font-family: inherit; }
    ============================================================ */
 .shell {
   display: grid;
-  grid-template-columns: 224px 1fr;
+  grid-template-columns: 224px minmax(0, 1fr);
   grid-template-rows: 52px 1fr;
   grid-template-areas:
     "sidebar topbar"
@@ -209,17 +209,20 @@ input, select, textarea { font-family: inherit; }
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border-soft);
   display: flex; align-items: center;
-  padding: 0 20px;
-  gap: 14px;
+  padding: 0 16px;
+  gap: 10px;
+  min-width: 0;
 }
 .crumb {
   display: flex; align-items: center; gap: 6px;
-  font-size: 13px; color: var(--muted);
+  font-size: 12px; color: var(--muted);
+  flex-shrink: 0;
 }
-.crumb b { color: var(--fg); font-weight: 600; }
+.crumb b { color: var(--fg); font-weight: 600; font-size: 13px; }
 .topbar-filters {
   margin-left: auto;
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 6px;
+  flex-shrink: 0;
 }
 .tb-filter {
   display: inline-flex; align-items: center; gap: 6px;
@@ -238,8 +241,8 @@ input, select, textarea { font-family: inherit; }
   border: 1px solid var(--border-soft);
   border-radius: 6px;
   display: flex; align-items: center; gap: 6px;
-  padding: 5px 10px;
-  width: 220px;
+  padding: 4px 8px;
+  width: 160px;
 }
 .search input {
   background: transparent; border: none; outline: none; color: var(--fg);
@@ -515,4 +518,150 @@ input, select, textarea { font-family: inherit; }
   color: var(--fg);
   pointer-events: none;
   z-index: 10;
+}
+
+/* ============================================================
+   FX Strip (topbar live ticker)
+   ============================================================ */
+.fx-strip {
+  display: flex; align-items: stretch; height: 32px;
+  margin: 0 12px;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 12px;
+}
+.fx-live {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 0 10px;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.12em;
+  color: var(--muted);
+  background: var(--surface-2);
+  border-right: 1px solid var(--border-soft);
+}
+.fx-live .sd { width: 6px; height: 6px; animation: blink 1.4s ease-in-out infinite; }
+@keyframes blink { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }
+.fx-tick {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 0 12px;
+  border-right: 1px solid var(--border-soft);
+  transition: background 0.3s ease;
+}
+.fx-tick:last-child { border-right: none; }
+.fx-tick.flash-up { background: color-mix(in oklab, var(--positive) 18%, transparent); }
+.fx-tick.flash-dn { background: color-mix(in oklab, var(--negative) 18%, transparent); }
+.fx-pair {
+  font-size: 10px; color: var(--muted);
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+.fx-last { font-weight: 600; }
+.fx-chg { font-size: 11px; }
+.fx-chg.pos { color: var(--positive); }
+.fx-chg.neg { color: var(--negative); }
+
+/* ============================================================
+   Bank card (Hesaplar)
+   ============================================================ */
+.bank-card { background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--radius-card); overflow: hidden; }
+.bank-card-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 18px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+.bank-logo {
+  width: 32px; height: 32px;
+  border-radius: 6px;
+  display: grid; place-items: center;
+  font-family: var(--font-mono); font-weight: 700;
+  font-size: 11px;
+  letter-spacing: -0.02em;
+  color: #fff;
+  flex-shrink: 0;
+}
+.bank-name { font-weight: 600; font-size: 15px; }
+.bank-total {
+  margin-left: auto;
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 17px;
+}
+.subacc-row {
+  display: grid;
+  grid-template-columns: 36px 1.2fr 1.4fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border-soft);
+}
+.subacc-row:hover { background: var(--surface-2); }
+.subacc-icon {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  display: grid; place-items: center;
+  color: var(--muted);
+}
+.subacc-name { font-size: 13px; font-weight: 500; }
+.subacc-meta { font-size: 11px; color: var(--muted); margin-top: 2px; font-family: var(--font-mono); letter-spacing: 0.02em; }
+.subacc-tag {
+  font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--muted-2);
+}
+.subacc-try {
+  text-align: right;
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 15px;
+}
+.subacc-raw {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* household-cards */
+.house-card {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  padding: 14px 16px;
+  position: relative;
+  overflow: hidden;
+}
+.house-card .accent-bar {
+  position: absolute; top: 0; left: 0; bottom: 0;
+  width: 3px;
+}
+
+/* Winner/Loser card */
+.mover-card {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+}
+.mover-row {
+  display: grid;
+  grid-template-columns: 48px 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border-soft);
+}
+.mover-row:first-of-type { border-top: none; }
+
+/* hashtag chip */
+.tag {
+  font-size: 10px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
 }

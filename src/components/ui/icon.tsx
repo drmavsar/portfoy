@@ -37,7 +37,17 @@ export type IconName =
   | "twitter"
   | "rules"
   | "upload2"
-  | "folder";
+  | "folder"
+  | "arrowInc"
+  | "arrowExp"
+  | "portfolio"
+  | "swap"
+  | "bank"
+  | "report"
+  | "power"
+  | "diamond"
+  | "wallet"
+  | "copy";
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name" | "stroke"> {
   name: IconName;
@@ -157,6 +167,57 @@ const PATHS: Record<IconName, React.ReactNode> = {
   ),
   upload2: <path d="M12 16V4M7 9l5-5 5 5M5 20h14" />,
   folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
+  arrowInc: (
+    <>
+      <path d="M17 7H7v10" />
+      <path d="M7 7l10 10" />
+    </>
+  ),
+  arrowExp: (
+    <>
+      <path d="M7 17h10V7" />
+      <path d="M17 17L7 7" />
+    </>
+  ),
+  portfolio: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 3a9 9 0 0 1 9 9h-9z" />
+    </>
+  ),
+  swap: <path d="M7 5l4 4M3 9h12M17 19l-4-4M21 15H9" />,
+  bank: <path d="M3 21h18M5 21V10M9 21V10M15 21V10M19 21V10M3 10h18l-9-7z" />,
+  report: (
+    <>
+      <path d="M3 3v18h18" />
+      <path d="M7 14l3-3 3 3 5-6" />
+    </>
+  ),
+  power: (
+    <>
+      <path d="M12 3v9" />
+      <path d="M5.6 8a8 8 0 1 0 12.8 0" />
+    </>
+  ),
+  diamond: (
+    <>
+      <path d="M12 3l4 5-4 13-4-13z" />
+      <path d="M3 8h18" />
+      <path d="M8 3h8" />
+    </>
+  ),
+  wallet: (
+    <>
+      <rect x="3" y="6" width="18" height="14" rx="2" />
+      <path d="M3 10h18M17 14h2" />
+    </>
+  ),
+  copy: (
+    <>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+    </>
+  ),
 };
 
 export function Icon({ name, size = 16, stroke = 1.6, ...rest }: IconProps) {

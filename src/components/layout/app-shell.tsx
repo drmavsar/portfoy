@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { FxStrip } from "@/components/layout/fx-strip";
 import { Icon, type IconName } from "@/components/ui/icon";
 
 interface NavEntry {
@@ -10,25 +11,27 @@ interface NavEntry {
   label: string;
   icon: IconName;
   badge?: string;
-  section: "Genel" | "Sistem";
+  section: "Genel" | "Piyasa" | "Sistem";
 }
 
-// "Ana Kokpit" → "Özet" (kullanıcı tercihi)
-// "Nakit Akışı" listede sade tutuluyor — ekstre yükleme & hareketler tek sayfada
 const NAV: NavEntry[] = [
-  { href: "/dashboard", label: "Özet", icon: "dashboard", section: "Genel" },
-  { href: "/cashflow", label: "Nakit Akışı", icon: "cashflow", section: "Genel" },
-  { href: "/wealth", label: "Varlık Yönetimi", icon: "wealth", section: "Genel" },
-  { href: "/screener", label: "Piyasa Radarı", icon: "screener", section: "Genel", badge: "6" },
-  { href: "/settings", label: "Kurallar & Ayarlar", icon: "settings", section: "Sistem" },
+  { href: "/ozet", label: "Özet", icon: "dashboard", section: "Genel" },
+  { href: "/gelirler", label: "Gelirler", icon: "arrowInc", section: "Genel" },
+  { href: "/giderler", label: "Giderler", icon: "arrowExp", section: "Genel" },
+  { href: "/yatirimlar", label: "Yatırımlar", icon: "wealth", section: "Genel" },
+  { href: "/islemler", label: "İşlemler", icon: "swap", section: "Genel" },
+  { href: "/hesaplar", label: "Hesaplar", icon: "bank", section: "Genel" },
+  { href: "/raporlar", label: "Raporlar", icon: "report", section: "Genel" },
+  { href: "/radar", label: "Piyasa Radarı", icon: "screener", badge: "6", section: "Piyasa" },
+  { href: "/ayarlar", label: "Ayarlar", icon: "settings", section: "Sistem" },
 ];
+
+const SECTIONS: Array<NavEntry["section"]> = ["Genel", "Piyasa", "Sistem"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const active = NAV.find((n) => pathname === n.href || pathname.startsWith(`${n.href}/`));
   const sub = active?.label ?? "Özet";
-
-  const sections = ["Genel", "Sistem"] as const;
 
   return (
     <div className="shell">
@@ -41,24 +44,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        {sections.map((s) => (
-          <div key={s}>
-            <div className="nav-section-title">{s}</div>
-            {NAV.filter((n) => n.section === s).map((n) => (
-              <Link
-                key={n.href}
-                href={n.href}
-                className={`nav-item ${active?.href === n.href ? "active" : ""}`}
-              >
-                <span className="icon">
-                  <Icon name={n.icon} size={15} />
-                </span>
-                <span>{n.label}</span>
-                {n.badge && <span className="badge">{n.badge}</span>}
-              </Link>
-            ))}
-          </div>
-        ))}
+        {SECTIONS.map((s) => {
+          const items = NAV.filter((n) => n.section === s);
+          if (items.length === 0) return null;
+          return (
+            <div key={s}>
+              <div className="nav-section-title">{s}</div>
+              {items.map((n) => (
+                <Link
+                  key={n.href}
+                  href={n.href}
+                  className={`nav-item ${active?.href === n.href ? "active" : ""}`}
+                >
+                  <span className="icon">
+                    <Icon name={n.icon} size={15} />
+                  </span>
+                  <span>{n.label}</span>
+                  {n.badge && <span className="badge">{n.badge}</span>}
+                </Link>
+              ))}
+            </div>
+          );
+        })}
 
         <button className="cta-add">
           <Icon name="plus" size={14} /> İşlem Ekle
@@ -89,6 +96,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <button className="icon-btn" data-tip="Tema">
             <Icon name="moon" size={14} />
           </button>
+          <button className="icon-btn" data-tip="Çıkış">
+            <Icon name="power" size={14} />
+          </button>
         </div>
       </aside>
 
@@ -99,10 +109,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <b>{sub}</b>
         </div>
 
+        <FxStrip />
+
         <div className="topbar-filters">
           <div className="search">
             <Icon name="search" size={12} />
-            <input placeholder="Ara… (semboller, işlemler, hisseler)" />
+            <input placeholder="Ara…" />
             <span className="kbd">⌘K</span>
           </div>
           <button className="tb-filter">

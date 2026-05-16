@@ -3,7 +3,7 @@ import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
 import { SCREENER } from "@/lib/sample/data";
 
-export default function ScreenerPage() {
+export default function RadarPage() {
   const sorted = [...SCREENER].sort((a, b) => b.comp - a.comp);
   const tier1 = sorted.filter((s) => s.comp >= 85);
   const tier2 = sorted.filter((s) => s.comp >= 70 && s.comp < 85);
@@ -19,25 +19,14 @@ export default function ScreenerPage() {
           </div>
         </div>
         <div className="page-actions">
-          <button className="btn">
-            <Icon name="refresh" size={14} /> Tara
-          </button>
-          <button className="btn">
-            <Icon name="filter" size={14} /> Filtreler
-          </button>
+          <button className="btn"><Icon name="refresh" size={14} /> Tara</button>
+          <button className="btn"><Icon name="filter" size={14} /> Filtreler</button>
         </div>
       </div>
 
       <div
         className="card"
-        style={{
-          marginBottom: 18,
-          padding: 14,
-          display: "flex",
-          gap: 16,
-          alignItems: "center",
-          flexWrap: "wrap",
-        }}
+        style={{ marginBottom: 18, padding: 14, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <span className="card-title">Aşama 1 — Teknik Eleme</span>
@@ -63,9 +52,7 @@ export default function ScreenerPage() {
       <div className="card">
         <div className="card-head">
           <div className="card-title">Composite Score · sıralı</div>
-          <div className="card-sub">
-            {SCREENER.length} hisse · son tarama bugün 09:00
-          </div>
+          <div className="card-sub">{SCREENER.length} hisse · son tarama bugün 09:00</div>
         </div>
         <table className="dg">
           <thead>
