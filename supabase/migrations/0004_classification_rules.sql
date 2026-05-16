@@ -44,6 +44,7 @@ create table if not exists public.classification_rules (
 create index if not exists rules_user_priority_idx
   on public.classification_rules(user_id, priority);
 
+drop trigger if exists rules_set_updated_at on public.classification_rules;
 create trigger rules_set_updated_at
   before update on public.classification_rules
   for each row execute function public.tg_set_updated_at();
