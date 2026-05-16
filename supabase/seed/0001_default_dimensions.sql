@@ -31,14 +31,10 @@ begin
   returning id into default_portfolio_id;
 
   --------------------------------------------------------------------
-  -- beneficiaries
+  -- beneficiaries (minimal default — user adds the rest via Ayarlar)
   --------------------------------------------------------------------
-  insert into public.beneficiaries (user_id, name, slug, color) values
-    (uid, 'Ev',          'ev',          '#0ea5e9'),
-    (uid, 'Ahmet Burak', 'ahmet-burak', '#22c55e'),
-    (uid, 'Salih',       'salih',       '#a855f7'),
-    (uid, 'Anne/Baba',   'anne-baba',   '#f59e0b'),
-    (uid, 'Ortak',       'ortak',       '#64748b')
+  insert into public.beneficiaries (user_id, name, slug, color, role) values
+    (uid, 'Ben', 'ben', '#6ea8fe', 'self')
   on conflict (user_id, slug) do nothing;
 
   --------------------------------------------------------------------
@@ -105,26 +101,8 @@ begin
     (uid, 'Havale/EFT = transfer (EFT)', 13, '%eft%', true, 80.0)
   on conflict do nothing;
 
-  -- IYTE Gülbahçe lokasyonu → Ahmet Burak faydalanıcısı
-  insert into public.classification_rules
-    (user_id, name, priority, match_merchant_ilike,
-     set_beneficiary_id, confidence)
-  select uid, 'İYTE Gülbahçe → Ahmet Burak', 20, '%iyte%',
-         b.id, 90.0
-  from public.beneficiaries b
-  where b.user_id = uid and b.slug = 'ahmet-burak'
-  on conflict do nothing;
-
-  -- Eğitim ile ilgili merchantlar → Salih (default)
-  insert into public.classification_rules
-    (user_id, name, priority, match_merchant_ilike,
-     set_beneficiary_id, set_category_id, confidence)
-  select uid, 'Okul/eğitim merchantı → Salih', 25, '%okul%',
-         (select id from public.beneficiaries where user_id = uid and slug = 'salih'),
-         c.id, 75.0
-  from public.categories c
-  where c.user_id = uid and c.slug = 'egitim'
-  on conflict do nothing;
+  -- Kişi/kategori bazlı kurallar: kullanıcı kendi kişileri eklerken
+  -- Ayarlar → Kurallar üzerinden tanımlar (default'ta sadece transfer kuralları).
 end;
 $$;
 
