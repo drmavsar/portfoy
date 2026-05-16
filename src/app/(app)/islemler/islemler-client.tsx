@@ -98,7 +98,7 @@ export function IslemlerClient({
     });
   };
 
-  const canCreate = configured && portfolios.length > 0 && assets.length > 0;
+  const canCreate = configured;
 
   return (
     <div>
@@ -137,14 +137,32 @@ export function IslemlerClient({
           style={{
             padding: 12,
             marginBottom: 12,
-            background: "var(--surface-2)",
+            background: "var(--warning-soft)",
+            color: "var(--warning)",
             borderRadius: 6,
             fontSize: 12,
-            color: "var(--muted)",
           }}
         >
-          Default portföy bulunamadı. Bu normalde bootstrap'tan gelir. SQL Editor'da
-          <code> select public.bootstrap_user_defaults();</code> çalıştır.
+          <b>Default portföy yok.</b> SQL Editor'da bir kez{" "}
+          <code style={{ background: "var(--surface)", padding: "1px 4px", borderRadius: 3 }}>
+            select public.bootstrap_user_defaults();
+          </code>{" "}
+          çalıştır → &quot;Ana Portföy&quot; otomatik oluşur.
+        </div>
+      )}
+      {assets.length === 0 && configured && (
+        <div
+          style={{
+            padding: 12,
+            marginBottom: 12,
+            background: "var(--warning-soft)",
+            color: "var(--warning)",
+            borderRadius: 6,
+            fontSize: 12,
+          }}
+        >
+          <b>Asset master tablosu boş.</b> setup-all.sql'in seed/0002 bölümünü çalıştırdığından
+          emin ol (BIST hisseleri + döviz + altın + kripto).
         </div>
       )}
       {error && (
@@ -364,10 +382,35 @@ function TradeModal({
         </div>
 
         <div style={{ padding: 20, display: "grid", gap: 14 }}>
+          {(portfolios.length === 0 || assets.length === 0) && (
+            <div
+              style={{
+                padding: 10,
+                background: "var(--warning-soft)",
+                color: "var(--warning)",
+                borderRadius: 6,
+                fontSize: 12,
+              }}
+            >
+              {portfolios.length === 0 && (
+                <div>
+                  <b>Portföy yok.</b> SQL'de:{" "}
+                  <code>select public.bootstrap_user_defaults();</code>
+                </div>
+              )}
+              {assets.length === 0 && (
+                <div>
+                  <b>Sembol listesi boş.</b> setup-all.sql'in seed bölümünü çalıştır.
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid-base grid-2" style={{ gap: 14 }}>
             <div>
               <Lbl>Portföy</Lbl>
               <select style={inp} value={portfolioId} onChange={(e) => setPortfolioId(e.target.value)}>
+                {portfolios.length === 0 && <option value="">— Portföy yok —</option>}
                 {portfolios.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
@@ -388,6 +431,7 @@ function TradeModal({
             <div>
               <Lbl>Sembol</Lbl>
               <select style={inp} value={assetId} onChange={(e) => setAssetId(e.target.value)}>
+                {assets.length === 0 && <option value="">— Sembol yok —</option>}
                 {assets.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.symbol} — {a.name}
