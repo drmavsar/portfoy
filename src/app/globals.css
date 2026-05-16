@@ -665,3 +665,149 @@ input, select, textarea { font-family: inherit; }
   border-radius: 4px;
   font-family: var(--font-mono);
 }
+
+/* ============================================================
+   Responsive — mobile (≤768px) ve tablet (≤1024px)
+   ============================================================ */
+
+/* Mobile hamburger butonu desktop'ta görünmesin */
+.menu-btn {
+  display: none;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.sidebar-backdrop { display: none; }
+
+/* Tablet (≤1024px): topbar filtrelerini biraz sıkıştır */
+@media (max-width: 1024px) {
+  .topbar-filters .tb-filter .lbl { display: none; }
+  .topbar-filters .search { width: 140px; }
+}
+
+/* Mobil (≤768px): tek kolon, sidebar drawer, kompakt topbar */
+@media (max-width: 768px) {
+  .shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: 52px 1fr;
+    grid-template-areas:
+      "topbar"
+      "main";
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 260px;
+    z-index: 60;
+    transform: translateX(-100%);
+    transition: transform 180ms ease;
+    box-shadow: 0 0 32px rgba(0, 0, 0, 0.4);
+  }
+  .sidebar.open { transform: translateX(0); }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 50;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 180ms ease;
+  }
+  .sidebar-backdrop.open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .menu-btn { display: inline-flex; }
+
+  .topbar {
+    padding: 0 12px;
+    gap: 8px;
+  }
+  .crumb { font-size: 12px; }
+  .crumb > span:first-child { display: none; }
+
+  .topbar-filters {
+    gap: 6px;
+  }
+  .topbar-filters .search { display: none; }
+  .topbar-filters .tb-filter { padding: 4px 8px; font-size: 11px; }
+  .topbar-filters .tb-filter .lbl { display: none; }
+
+  /* FxStrip mobilde compact */
+  .fx-strip {
+    gap: 6px;
+  }
+  .fx-strip .fx-pair { font-size: 10px; padding: 3px 6px; }
+
+  .main {
+    padding: 14px 12px;
+  }
+
+  /* Sayfa başlığı */
+  .page-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .page-title { font-size: 20px; }
+  .page-actions { width: 100%; flex-wrap: wrap; }
+  .page-actions .btn { flex: 1; min-width: 0; justify-content: center; }
+
+  /* Grid'leri tek kolona indir */
+  .grid-2, .grid-3, .grid-4 {
+    grid-template-columns: 1fr;
+  }
+
+  /* Tablo'ları yatay scroll'a al */
+  .dg {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+  .dg thead, .dg tbody, .dg tfoot { display: table; width: 100%; }
+  .dg th, .dg td { padding: 8px 10px; }
+
+  /* Card padding */
+  .card-head {
+    padding: 12px 14px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .card-pad { padding: 12px 14px; }
+
+  /* Modal full-width */
+  .modal {
+    width: 100%;
+    max-width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+  .modal-back { padding: 0; }
+
+  /* KPI card font sıkıştırma */
+  .empty {
+    padding: 24px 16px;
+  }
+  .empty .title { font-size: 16px; }
+}
+
+/* iPhone Mini ve daha küçük */
+@media (max-width: 380px) {
+  .brand-name { font-size: 13px; }
+  .crumb b { font-size: 12px; }
+  .topbar-filters .tb-filter { display: none; }
+  .topbar-filters .icon-btn { display: none; }
+}

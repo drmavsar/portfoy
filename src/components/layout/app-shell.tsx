@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import { FxStrip } from "@/components/layout/fx-strip";
 import { Icon, type IconName } from "@/components/ui/icon";
@@ -32,10 +33,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const active = NAV.find((n) => pathname === n.href || pathname.startsWith(`${n.href}/`));
   const sub = active?.label ?? "Özet";
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // route değişince drawer'ı kapat
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [pathname]);
 
   return (
     <div className="shell">
-      <aside className="sidebar">
+      <div
+        className={`sidebar-backdrop ${drawerOpen ? "open" : ""}`}
+        onClick={() => setDrawerOpen(false)}
+      />
+      <aside className={`sidebar ${drawerOpen ? "open" : ""}`}>
         <div className="brand">
           <div className="brand-mark">M·A</div>
           <div>
@@ -93,6 +104,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <header className="topbar">
+        <button
+          className="menu-btn"
+          onClick={() => setDrawerOpen(true)}
+          aria-label="Menüyü aç"
+        >
+          <Icon name="filter" size={16} />
+        </button>
+
         <div className="crumb">
           <span>Mehmet&apos;s Assets</span>
           <Icon name="chev" size={11} />
