@@ -82,10 +82,19 @@ begin
   -- custody locations
   --------------------------------------------------------------------
   insert into public.custody_locations (user_id, name, slug, kind) values
-    (uid, 'Banka',          'banka',          'checking'),
-    (uid, 'Midas',          'midas',          'brokerage'),
-    (uid, 'Garanti Kripto', 'garanti-kripto', 'crypto'),
-    (uid, 'Fiziki Kasa',    'fiziki-kasa',    'safe')
+  --------------------------------------------------------------------
+  -- custody locations — TR banka set'i + broker/crypto/kasa
+  -- (kullanıcı kendi ihtiyacına göre Ayarlar'dan ekler/siler)
+  --------------------------------------------------------------------
+  insert into public.custody_locations (user_id, name, slug, kind, color, short) values
+    (uid, 'Garanti BBVA',    'garanti',        'checking',  '#0a8a4d', 'GAR'),
+    (uid, 'İş Bankası',      'isbank',         'checking',  '#1d3a8a', 'İŞB'),
+    (uid, 'Akbank',          'akbank',         'checking',  '#d22630', 'AKB'),
+    (uid, 'Yapı Kredi',      'yapikredi',      'checking',  '#1a47b7', 'YKB'),
+    (uid, 'Ziraat Bankası',  'ziraat',         'checking',  '#c41a1a', 'ZRT'),
+    (uid, 'Midas',           'midas',          'brokerage', '#6ea8fe', 'MDS'),
+    (uid, 'Garanti Kripto',  'garanti-kripto', 'crypto',    '#b388f2', 'GKR'),
+    (uid, 'Fiziki Kasa',     'fiziki-kasa',    'safe',      '#d4a056', 'KSA')
   on conflict (user_id, slug) do nothing;
 
   --------------------------------------------------------------------
