@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 
 import "./globals.css";
@@ -21,6 +21,12 @@ export const metadata: Metadata = {
   title: "Mehmet's Assets — Servet ve Nakit Akışı Terminali",
   description:
     "Kişisel ERP ve yatırım terminali — nakit akışı, varlık takibi, BIST radarı.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
 };
 
 export default function RootLayout({
