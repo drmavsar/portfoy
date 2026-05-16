@@ -51,6 +51,8 @@ create trigger rules_set_updated_at
 
 -- Late-bind the FK from drafts to rules now that the table exists.
 alter table public.transaction_drafts
+  drop constraint if exists transaction_drafts_matched_rule_fk;
+alter table public.transaction_drafts
   add constraint transaction_drafts_matched_rule_fk
   foreign key (matched_rule_id)
   references public.classification_rules(id)

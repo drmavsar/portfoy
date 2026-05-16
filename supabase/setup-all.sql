@@ -1,10 +1,6 @@
 -- ============================================================
 -- Mehmet's Assets — All-in-one Supabase setup (idempotent)
 -- ============================================================
--- Usage: Supabase Dashboard → SQL Editor → New Query →
--- Paste this whole file → Run.
--- Re-runnable: triggers/tables use IF EXISTS / IF NOT EXISTS.
--- ============================================================
 
 -- ============================================================
 -- FILE: supabase/migrations/0001_extensions_and_enums.sql
@@ -459,6 +455,8 @@ create trigger rules_set_updated_at
   for each row execute function public.tg_set_updated_at();
 
 -- Late-bind the FK from drafts to rules now that the table exists.
+alter table public.transaction_drafts
+  drop constraint if exists transaction_drafts_matched_rule_fk;
 alter table public.transaction_drafts
   add constraint transaction_drafts_matched_rule_fk
   foreign key (matched_rule_id)
