@@ -112,3 +112,176 @@ export async function deleteBeneficiary(id: string): Promise<{ ok: boolean; erro
   revalidatePath("/ayarlar");
   return { ok: true };
 }
+
+// ============================================================
+// Categories
+// ============================================================
+
+export interface CategoryRow {
+  id: string;
+  name: string;
+  slug: string;
+  kind: "income" | "expense" | "transfer";
+  icon: string | null;
+  color: string | null;
+  created_at: string;
+}
+
+export async function listCategories(): Promise<CategoryRow[]> {
+  if (!(await isSupabaseConfigured())) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("categories")
+    .select("id, name, slug, kind, icon, color, created_at")
+    .is("archived_at", null)
+    .order("kind")
+    .order("name");
+  if (error) {
+    console.error("listCategories error", error);
+    return [];
+  }
+  return (data ?? []) as unknown as CategoryRow[];
+}
+
+export async function createCategory(input: {
+  name: string;
+  kind: "income" | "expense" | "transfer";
+  icon?: string;
+  color?: string;
+}): Promise<{ ok: true; row: CategoryRow } | { ok: false; error: string }> {
+  if (!(await isSupabaseConfigured())) {
+    return { ok: false, error: "Supabase yapılandırılmamış." };
+  }
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Giriş yapmadın." };
+
+  const name = input.name.trim();
+  if (!name) return { ok: false, error: "İsim boş olamaz." };
+
+  const slug = slugify(name);
+  const color = input.color ?? COLORS[Math.floor(Math.random() * COLORS.length)];
+
+  const { data, error } = await supabase
+    .from("categories")
+    .insert({
+      user_id: user.id,
+      name,
+      slug,
+      kind: input.kind,
+      icon: input.icon ?? null,
+      color,
+    } as never)
+    .select("id, name, slug, kind, icon, color, created_at")
+    .single();
+
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/ayarlar");
+  return { ok: true, row: data as unknown as CategoryRow };
+}
+
+export async function deleteCategory(id: string): Promise<{ ok: boolean; error?: string }> {
+  if (!(await isSupabaseConfigured())) {
+    return { ok: false, error: "Supabase yapılandırılmamış." };
+  }
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("categories")
+    .update({ archived_at: new Date().toISOString() } as never)
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/ayarlar");
+  return { ok: true };
+}
+
+// ============================================================
+// Classification rules
+// ============================================================
+
+export interface ClassificationRuleRow {
+  id: string;
+  name: string;
+  priority: number;
+  is_enabled: boolean;
+  match_merchant_ilike: string | null;
+  match_description_ilike: string | null;
+  match_min_amount: number | null;
+  set_category_id: string | null;
+  set_beneficiary_id: string | null;
+  set_is_transfer: boolean | null;
+  hit_count: number;
+  last_hit_at: string | null;
+}
+
+export async function listClassificationRules(): Promise<ClassificationRuleRow[]> {
+  if (!(await isSupabaseConfigured())) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("classification_rules")
+    .select(
+      "id, name, priority, is_enabled, match_merchant_ilike, match_description_ilike, match_min_amount, set_category_id, set_beneficiary_id, set_is_transfer, hit_count, last_hit_at",
+    )
+    .order("priority", { ascending: true });
+  if (error) {
+    console.error("listClassificationRules error", error);
+    return [];
+  }
+  return (data ?? []) as unknown as ClassificationRuleRow[];
+}
+
+export async function createClassificationRule(input: {
+  name: string;
+  priority: number;
+  match_description_ilike: string | null;
+  match_merchant_ilike: string | null;
+  match_min_amount: number | null;
+  set_category_id: string | null;
+  set_beneficiary_id: string | null;
+  set_is_transfer: boolean | null;
+}): Promise<{ ok: true; row: ClassificationRuleRow } | { ok: false; error: string }> {
+  if (!(await isSupabaseConfigured())) {
+    return { ok: false, error: "Supabase yapılandırılmamış." };
+  }
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Giriş yapmadın." };
+
+  const name = input.name.trim();
+  if (!name) return { ok: false, error: "İsim boş olamaz." };
+
+  const { data, error } = await supabase
+    .from("classification_rules")
+    .insert({
+      user_id: user.id,
+      name,
+      priority: input.priority,
+      match_description_ilike: input.match_description_ilike,
+      match_merchant_ilike: input.match_merchant_ilike,
+      match_min_amount: input.match_min_amount,
+      set_category_id: input.set_category_id,
+      set_beneficiary_id: input.set_beneficiary_id,
+      set_is_transfer: input.set_is_transfer,
+    } as never)
+    .select(
+      "id, name, priority, is_enabled, match_merchant_ilike, match_description_ilike, match_min_amount, set_category_id, set_beneficiary_id, set_is_transfer, hit_count, last_hit_at",
+    )
+    .single();
+
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/ayarlar");
+  return { ok: true, row: data as unknown as ClassificationRuleRow };
+}
+
+export async function deleteClassificationRule(id: string): Promise<{ ok: boolean; error?: string }> {
+  if (!(await isSupabaseConfigured())) {
+    return { ok: false, error: "Supabase yapılandırılmamış." };
+  }
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("classification_rules")
+    .delete()
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/ayarlar");
+  return { ok: true };
+}
