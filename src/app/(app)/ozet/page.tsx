@@ -337,59 +337,82 @@ export default async function OzetPage() {
               </div>
             </div>
             <div style={{ padding: "20px 24px" }}>
-              <div
-                className="tabular"
-                style={{ fontSize: 36, fontWeight: 700, color: "var(--accent)" }}
-              >
-                {fmt.trydp(grandTotal)}
+              <div style={{ display: "flex", alignItems: "baseline", gap: 16, flexWrap: "wrap" }}>
+                <div
+                  className="tabular"
+                  style={{ fontSize: 36, fontWeight: 700, color: "var(--accent)" }}
+                >
+                  {fmt.trydp(grandTotal)}
+                </div>
+                <div
+                  className="tabular"
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 600,
+                    color: totalDayChange >= 0 ? "var(--positive)" : "var(--negative)",
+                  }}
+                >
+                  Bugün {totalDayChange >= 0 ? "+" : ""}
+                  {fmt.tr(totalDayChange, 0)} ₺
+                  {grandTotal > 0 && (
+                    <>
+                      {" · "}
+                      {totalDayChange >= 0 ? "+" : ""}
+                      {((totalDayChange / (grandTotal - totalDayChange || grandTotal)) * 100).toFixed(2)}%
+                    </>
+                  )}
+                </div>
               </div>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(4, 1fr)",
-                  gap: 16,
-                  marginTop: 16,
-                  paddingTop: 16,
-                  borderTop: "1px solid var(--border-soft)",
-                }}
-              >
-                <div>
-                  <div className="hint" style={{ fontSize: 11, marginBottom: 4 }}>NAKİT</div>
-                  <div className="tabular" style={{ fontSize: 18, fontWeight: 600 }}>
-                    {fmt.trydp(cashTotal)}
-                  </div>
-                  <div className="hint" style={{ fontSize: 11 }}>TRY hesaplar</div>
-                </div>
-                <div>
-                  <div className="hint" style={{ fontSize: 11, marginBottom: 4 }}>DÖVİZ</div>
-                  <div className="tabular" style={{ fontSize: 18, fontWeight: 600 }}>
-                    {fmt.trydp(fxTotal)}
-                  </div>
-                  <div className="hint" style={{ fontSize: 11 }}>USD · EUR · diğer</div>
-                </div>
-                <div>
-                  <div className="hint" style={{ fontSize: 11, marginBottom: 4 }}>ALTIN</div>
-                  <div className="tabular" style={{ fontSize: 18, fontWeight: 600 }}>
-                    {fmt.trydp(metalTotal)}
-                  </div>
-                  <div className="hint" style={{ fontSize: 11 }}>gram + çeyrek + tam + …</div>
-                </div>
-                <div>
-                  <div className="hint" style={{ fontSize: 11, marginBottom: 4 }}>YATIRIMLAR (MV)</div>
-                  <div className="tabular" style={{ fontSize: 18, fontWeight: 600 }}>
-                    {fmt.trydp(investmentMv)}
-                  </div>
+              {(() => {
+                const equityDay = dayChangeMap.get("equity")?.change ?? 0;
+                const metalDay = dayChangeMap.get("metal")?.change ?? 0;
+                const fxDay = dayChangeMap.get("fx")?.change ?? 0;
+                const cashDay = 0;
+                const dayPct = (change: number, value: number) =>
+                  value > 0 ? (change / (value - change || value)) * 100 : 0;
+                const renderCell = (
+                  label: string,
+                  value: number,
+                  change: number,
+                  sub: string,
+                ) => {
+                  const color = change >= 0 ? "var(--positive)" : "var(--negative)";
+                  const pct = dayPct(change, value);
+                  return (
+                    <div>
+                      <div className="hint" style={{ fontSize: 11, marginBottom: 4 }}>{label}</div>
+                      <div className="tabular" style={{ fontSize: 18, fontWeight: 600 }}>
+                        {fmt.trydp(value)}
+                      </div>
+                      <div className="tabular" style={{ fontSize: 11, color }}>
+                        Bugün {change >= 0 ? "+" : ""}{fmt.tr(change, 0)} ₺
+                        {value > 0 && change !== 0 && (
+                          <> · {change >= 0 ? "+" : ""}{pct.toFixed(2)}%</>
+                        )}
+                      </div>
+                      <div className="hint" style={{ fontSize: 11 }}>{sub}</div>
+                    </div>
+                  );
+                };
+                return (
                   <div
-                    className="tabular"
                     style={{
-                      fontSize: 11,
-                      color: investmentPnl >= 0 ? "var(--positive)" : "var(--negative)",
+                      display: "grid",
+                      gridTemplateColumns: "repeat(4, 1fr)",
+                      gap: 16,
+                      marginTop: 16,
+                      paddingTop: 16,
+                      borderTop: "1px solid var(--border-soft)",
                     }}
                   >
-                    K/Z: {investmentPnl >= 0 ? "+" : ""}{fmt.tr(investmentPnl, 0)} ₺
+                    {renderCell("YATIRIMLAR", investmentMv, equityDay,
+                      `K/Z toplam: ${investmentPnl >= 0 ? "+" : ""}${fmt.tr(investmentPnl, 0)} ₺`)}
+                    {renderCell("ALTIN", metalTotal, metalDay, "gram + çeyrek + tam + …")}
+                    {renderCell("DÖVİZ", fxTotal, fxDay, "USD · EUR · diğer")}
+                    {renderCell("NAKİT", cashTotal, cashDay, "TRY hesaplar")}
                   </div>
-                </div>
-              </div>
+                );
+              })()}
             </div>
           </div>
 
