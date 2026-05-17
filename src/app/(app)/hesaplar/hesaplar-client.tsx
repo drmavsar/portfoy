@@ -42,6 +42,29 @@ function shortOf(custody: CustodyRow): string {
   return custody.short ?? custody.name.slice(0, 3).toUpperCase();
 }
 
+function decimalsFor(currency: string): number {
+  if (currency === "BTC") return 8;
+  if (["ETH", "SOL", "BNB"].includes(currency)) return 6;
+  if (["XAU", "XAG", "BILEZIK22", "BILEZIK14", "BILEZIK18"].includes(currency)) return 2;
+  if (currency === "XAU_OZ") return 4;
+  return 0; // ÇEYREK/YARIM/TAM/CUMHURIYET/ATA/REŞAT → tam sayı (adet)
+}
+
+const CURRENCY_LABEL_SHORT: Record<string, string> = {
+  XAU: "gr Altın",
+  XAG: "gr Gümüş",
+  XAU_OZ: "ons",
+  CEYREK: "Çeyrek",
+  YARIM: "Yarım",
+  TAM: "Tam",
+  CUMHURIYET: "Cumhuriyet",
+  ATA: "Ata",
+  RESAT: "Reşat",
+  BILEZIK22: "gr 22ay",
+  BILEZIK14: "gr 14ay",
+  BILEZIK18: "gr 18ay",
+};
+
 interface Props {
   accounts: AccountRow[];
   custodies: CustodyRow[];
@@ -231,14 +254,11 @@ export function HesaplarClient({ accounts, custodies, beneficiaries, supabaseCon
                         </div>
                         {a.currency !== "TRY" && a.balance_native != null && (
                           <div className="subacc-raw">
-                            {fmt.tr(
-                              a.balance_native,
-                              ["BTC", "ETH"].includes(a.currency) ? 4 : a.currency === "XAU" ? 2 : 0,
-                            )}{" "}
-                            {a.currency}
+                            {fmt.tr(a.balance_native, decimalsFor(a.currency))}{" "}
+                            {CURRENCY_LABEL_SHORT[a.currency] ?? a.currency}
                             {fxRates[a.currency] != null && (
                               <span style={{ marginLeft: 6, color: "var(--muted)" }}>
-                                @ {fmt.tr(fxRates[a.currency] ?? 0, 4)}
+                                @ {fmt.tr(fxRates[a.currency] ?? 0, 2)}
                               </span>
                             )}
                           </div>

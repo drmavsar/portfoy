@@ -45,7 +45,53 @@ const ACCOUNT_TYPES = [
   { value: "other", label: "Diğer" },
 ];
 
-const CURRENCIES = ["TRY", "USD", "EUR", "XAU", "BTC", "ETH"];
+const CURRENCY_GROUPS: Array<{ label: string; codes: string[] }> = [
+  { label: "Para", codes: ["TRY", "USD", "EUR", "GBP", "CHF", "JPY"] },
+  {
+    label: "Altın & Gümüş",
+    codes: [
+      "XAU",           // gram altın
+      "CEYREK",        // çeyrek altın
+      "YARIM",         // yarım altın
+      "TAM",           // tam altın
+      "CUMHURIYET",    // cumhuriyet altını
+      "ATA",           // ata altını
+      "RESAT",         // reşat altını
+      "BILEZIK22",     // 22 ayar bilezik (gram)
+      "BILEZIK14",     // 14 ayar bilezik (gram)
+      "BILEZIK18",     // 18 ayar bilezik (gram)
+      "XAU_OZ",        // ons altın
+      "XAG",           // gram gümüş
+    ],
+  },
+  { label: "Kripto", codes: ["BTC", "ETH", "SOL", "USDT", "BNB"] },
+];
+
+const CURRENCY_LABEL: Record<string, string> = {
+  TRY: "TRY — Türk Lirası",
+  USD: "USD — ABD Doları",
+  EUR: "EUR — Euro",
+  GBP: "GBP — İngiliz Sterlini",
+  CHF: "CHF — İsviçre Frangı",
+  JPY: "JPY — Japon Yeni",
+  XAU: "XAU — Gram Altın",
+  XAU_OZ: "XAU_OZ — Ons Altın",
+  XAG: "XAG — Gram Gümüş",
+  CEYREK: "CEYREK — Çeyrek Altın",
+  YARIM: "YARIM — Yarım Altın",
+  TAM: "TAM — Tam Altın",
+  CUMHURIYET: "CUMHURIYET — Cumhuriyet Altını",
+  ATA: "ATA — Ata Altını",
+  RESAT: "RESAT — Reşat Altını",
+  BILEZIK22: "BILEZIK22 — 22 Ayar Bilezik (gr)",
+  BILEZIK14: "BILEZIK14 — 14 Ayar Bilezik (gr)",
+  BILEZIK18: "BILEZIK18 — 18 Ayar Bilezik (gr)",
+  BTC: "BTC — Bitcoin",
+  ETH: "ETH — Ethereum",
+  SOL: "SOL — Solana",
+  USDT: "USDT — Tether",
+  BNB: "BNB — Binance Coin",
+};
 
 interface Props {
   custodies: CustodyRow[];
@@ -166,7 +212,13 @@ export function NewAccountModal({ custodies, beneficiaries, onClose }: Props) {
                 value={currency}
                 onChange={(e) => setCurrency(e.target.value)}
               >
-                {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                {CURRENCY_GROUPS.map((g) => (
+                  <optgroup key={g.label} label={g.label}>
+                    {g.codes.map((c) => (
+                      <option key={c} value={c}>{CURRENCY_LABEL[c] ?? c}</option>
+                    ))}
+                  </optgroup>
+                ))}
               </select>
             </div>
             <div>
