@@ -14,6 +14,7 @@ import {
 import { getAssetRates } from "@/app/(app)/_lib/asset-rates";
 import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
 import { listTransactionsForReports } from "@/app/(app)/_lib/reports-actions";
+import { listWealthSnapshots } from "@/app/(app)/_lib/wealth-snapshots-actions";
 import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
 
@@ -53,7 +54,7 @@ function tryValueOf(a: AccountRow, fxRates: Record<string, number | undefined>):
 }
 
 export default async function OzetPage() {
-  const [accounts, custodies, beneficiaries, fxRates, holdings, assets, portfolios, trades, txns] = await Promise.all([
+  const [accounts, custodies, beneficiaries, fxRates, holdings, assets, portfolios, trades, txns, wealthSnapshots] = await Promise.all([
     listAccounts(),
     listCustodyLocations(),
     listBeneficiariesLite(),
@@ -63,6 +64,7 @@ export default async function OzetPage() {
     listPortfolios(),
     listTrades(),
     listTransactionsForReports(12),
+    listWealthSnapshots(),
   ]);
 
   const benMap: Record<string, BeneficiaryLite> = Object.fromEntries(beneficiaries.map((b) => [b.id, b]));
@@ -448,6 +450,66 @@ export default async function OzetPage() {
               </table>
             </div>
           )}
+
+          {/* Yıl-bazlı geçmiş servet karşılaştırması */}
+          {wealthSnapshots.length > 0 && (() => {
+            const maxVal = Math.max(...wealthSnapshots.map((s) => Number(s.total_try)), 1);
+            return (
+              <div className="card" style={{ marginTop: 16 }}>
+                <div className="card-head">
+                  <div className="card-title">Geçmiş Yıllar — Servet Büyümesi</div>
+                  <div className="card-sub">YoY % değişim</div>
+                </div>
+                <table className="dg">
+                  <thead>
+                    <tr>
+                      <th>Dönem</th>
+                      <th className="num">Toplam Servet</th>
+                      <th className="num">Değişim (₺)</th>
+                      <th className="num">YoY %</th>
+                      <th style={{ width: "30%" }}>Görsel</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {wealthSnapshots.map((s, i) => {
+                      const prev = i > 0 ? Number(wealthSnapshots[i - 1].total_try) : null;
+                      const cur = Number(s.total_try);
+                      const diff = prev != null ? cur - prev : null;
+                      const yoy = prev && prev > 0 ? (diff! / prev) * 100 : null;
+                      const widthPct = (cur / maxVal) * 100;
+                      const pos = (yoy ?? 0) >= 0;
+                      const color = pos ? "var(--positive)" : "var(--negative)";
+                      return (
+                        <tr key={s.id}>
+                          <td style={{ fontWeight: 600 }}>{s.period}</td>
+                          <td className="num tabular" style={{ fontWeight: 600 }}>
+                            {fmt.trydp(cur)}
+                          </td>
+                          <td className="num tabular" style={{ color: diff != null ? color : "var(--muted)" }}>
+                            {diff == null ? "—" : `${diff >= 0 ? "+" : ""}${fmt.tr(diff, 0)} ₺`}
+                          </td>
+                          <td className="num tabular" style={{ color: yoy != null ? color : "var(--muted)", fontWeight: 600 }}>
+                            {yoy == null ? "—" : `${yoy >= 0 ? "+" : ""}${yoy.toFixed(2)}%`}
+                          </td>
+                          <td>
+                            <div
+                              style={{
+                                height: 8,
+                                background: "var(--accent)",
+                                borderRadius: 4,
+                                width: `${widthPct}%`,
+                                opacity: 0.6,
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
 
           {/* 12 ay nakit akış + varlık sınıfı dağılımı yan yana */}
           <div className="grid-base grid-2" style={{ gap: 16, marginTop: 16, alignItems: "start" }}>
