@@ -55,7 +55,7 @@ export function AppShell({
       />
       <aside className={`sidebar ${drawerOpen ? "open" : ""}`}>
         <div className="brand">
-          <div className="brand-mark">M·A</div>
+          <div className="brand-mark">M</div>
           <div>
             <div className="brand-name">Mehmet&apos;s Assets</div>
             <div className="brand-sub">Varlık</div>
@@ -126,31 +126,6 @@ export function AppShell({
         </div>
 
         <FxStrip tickers={fxTickers} />
-
-        <div className="topbar-filters">
-          <div className="search">
-            <Icon name="search" size={12} />
-            <input placeholder="Ara…" />
-            <span className="kbd">⌘K</span>
-          </div>
-          <button className="tb-filter">
-            <span className="lbl">Hane</span>
-            <span className="val">Tümü</span>
-            <Icon name="chev" size={10} stroke={2} />
-          </button>
-          <button className="tb-filter">
-            <Icon name="calendar" size={12} />
-            <span className="val">Son 30 Gün</span>
-            <Icon name="chev" size={10} stroke={2} />
-          </button>
-          <button className="tb-filter">
-            <span className="lbl">Görünüm</span>
-            <span className="val">₺ Nominal</span>
-          </button>
-          <button className="icon-btn" data-tip="Bildirimler">
-            <Icon name="bell" size={14} />
-          </button>
-        </div>
       </header>
 
       <main className="main">{children}</main>

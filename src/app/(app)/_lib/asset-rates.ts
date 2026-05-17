@@ -189,13 +189,44 @@ export async function getFxTickers(): Promise<FxTicker[]> {
     const out: FxTicker[] = [];
     const usd = extract("USD", "USD/TRY"); if (usd) out.push(usd);
     const eur = extract("EUR", "EUR/TRY"); if (eur) out.push(eur);
-    const gbp = extract("GBP", "GBP/TRY"); if (gbp) out.push(gbp);
     const xau = extract("gram-altin", "GRAM ALTIN"); if (xau) out.push(xau);
+
+    // BIST100 — Yahoo Finance XU100.IS
+    const bist = await fetchBist100();
+    if (bist) out.push(bist);
 
     return out;
   } catch (err) {
     console.error("getFxTickers error", err);
     return [];
+  }
+}
+
+async function fetchBist100(): Promise<FxTicker | null> {
+  try {
+    const res = await fetch(
+      "https://query1.finance.yahoo.com/v8/finance/chart/XU100.IS?interval=1d&range=2d",
+      {
+        next: { revalidate: 300 },
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)" },
+      },
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      chart?: {
+        result?: Array<{
+          meta?: { regularMarketPrice?: number; chartPreviousClose?: number; previousClose?: number };
+        }>;
+      };
+    };
+    const meta = json.chart?.result?.[0]?.meta;
+    if (!meta?.regularMarketPrice) return null;
+    const price = meta.regularMarketPrice;
+    const prev = meta.chartPreviousClose ?? meta.previousClose ?? null;
+    const chg = prev ? ((price - prev) / prev) * 100 : null;
+    return { symbol: "BIST100", label: "BIST 100", price, chgPct: chg };
+  } catch {
+    return null;
   }
 }
 
