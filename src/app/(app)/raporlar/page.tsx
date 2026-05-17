@@ -19,12 +19,13 @@ interface MonthBucket {
   outflow: number;
 }
 
-function bucketByMonth(txns: RawTxn[], months: number): MonthBucket[] {
+function bucketByMonthYTD(txns: RawTxn[]): MonthBucket[] {
   const today = new Date();
+  const year = today.getFullYear();
+  const months = today.getMonth() + 1; // Ocak=1, içinde bulunulan ay dahil
   const buckets: MonthBucket[] = [];
-  for (let i = months - 1; i >= 0; i--) {
-    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-    const period = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  for (let i = 0; i < months; i++) {
+    const period = `${year}-${String(i + 1).padStart(2, "0")}`;
     buckets.push({ period, inflow: 0, outflow: 0 });
   }
   const map = new Map(buckets.map((b) => [b.period, b]));
@@ -62,19 +63,23 @@ export default async function RaporlarPage() {
   const catMap = Object.fromEntries(categories.map((c) => [c.id, c]));
   const benMap = Object.fromEntries(beneficiaries.map((b) => [b.id, b]));
 
-  const monthly = bucketByMonth(txns, 12);
-  const totalInflow12m = monthly.reduce((s, b) => s + b.inflow, 0);
-  const totalOutflow12m = monthly.reduce((s, b) => s + b.outflow, 0);
-  const totalNet12m = totalInflow12m - totalOutflow12m;
-  const avgMonthlyNet = totalNet12m / 12;
+  const currentYear = new Date().getFullYear();
+  const ytdTxns = txns.filter((t) => t.occurred_on.startsWith(String(currentYear)));
+
+  const monthly = bucketByMonthYTD(ytdTxns);
+  const totalInflowYtd = monthly.reduce((s, b) => s + b.inflow, 0);
+  const totalOutflowYtd = monthly.reduce((s, b) => s + b.outflow, 0);
+  const totalNetYtd = totalInflowYtd - totalOutflowYtd;
+  const elapsedMonths = monthly.length || 1;
+  const avgMonthlyNet = totalNetYtd / elapsedMonths;
 
   // Bu ay ve geçen ay karşılaştırma
   const thisMonth = monthly[monthly.length - 1] ?? { inflow: 0, outflow: 0, period: "" };
   const lastMonth = monthly[monthly.length - 2] ?? { inflow: 0, outflow: 0, period: "" };
 
-  // Kategori bazlı (son 12 ay)
-  const byCatOut = aggregateByKey(txns, "outflow", (t) => t.category_id);
-  const byCatIn = aggregateByKey(txns, "inflow", (t) => t.category_id);
+  // Kategori bazlı (yıl başından)
+  const byCatOut = aggregateByKey(ytdTxns, "outflow", (t) => t.category_id);
+  const byCatIn = aggregateByKey(ytdTxns, "inflow", (t) => t.category_id);
   const expCatRows = Array.from(byCatOut.entries())
     .map(([id, value]) => ({
       id,
@@ -94,8 +99,8 @@ export default async function RaporlarPage() {
     .filter((r) => r.value > 0)
     .sort((a, b) => b.value - a.value);
 
-  // Kişi bazlı gider
-  const byBenOut = aggregateByKey(txns, "outflow", (t) => t.beneficiary_id);
+  // Kişi bazlı gider (yıl başından)
+  const byBenOut = aggregateByKey(ytdTxns, "outflow", (t) => t.beneficiary_id);
   const benRows = Array.from(byBenOut.entries())
     .map(([id, value]) => ({
       id,
@@ -118,7 +123,7 @@ export default async function RaporlarPage() {
         <div className="page-head">
           <div>
             <div className="page-title">Raporlar</div>
-            <div className="page-sub">12 aylık nakit akış · kategori dağılımı · kişi analizi.</div>
+            <div className="page-sub">{currentYear} yılı · nakit akış · kategori dağılımı · kişi analizi.</div>
           </div>
         </div>
         <div className="empty">
@@ -138,32 +143,32 @@ export default async function RaporlarPage() {
       <div className="page-head">
         <div>
           <div className="page-title">Raporlar</div>
-          <div className="page-sub">Son 12 ay · {txns.length} işlem</div>
+          <div className="page-sub">YTD · {txns.length} işlem</div>
         </div>
       </div>
 
       {/* KPI'lar */}
       <div className="grid-base grid-4" style={{ gap: 16, marginBottom: 18 }}>
         <div className="card" style={{ padding: 16 }}>
-          <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>12 AY GELİR</div>
+          <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>YTD GELİR</div>
           <div className="tabular" style={{ fontSize: 22, fontWeight: 700, color: "var(--positive)" }}>
-            +{fmt.try(totalInflow12m)}
+            +{fmt.try(totalInflowYtd)}
           </div>
         </div>
         <div className="card" style={{ padding: 16 }}>
-          <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>12 AY GİDER</div>
+          <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>YTD GİDER</div>
           <div className="tabular" style={{ fontSize: 22, fontWeight: 700, color: "var(--negative)" }}>
-            -{fmt.try(totalOutflow12m)}
+            -{fmt.try(totalOutflowYtd)}
           </div>
         </div>
         <div className="card" style={{ padding: 16 }}>
-          <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>12 AY NET</div>
+          <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>YTD NET</div>
           <div
             className="tabular"
-            style={{ fontSize: 22, fontWeight: 700, color: totalNet12m >= 0 ? "var(--positive)" : "var(--negative)" }}
+            style={{ fontSize: 22, fontWeight: 700, color: totalNetYtd >= 0 ? "var(--positive)" : "var(--negative)" }}
           >
-            {totalNet12m >= 0 ? "+" : ""}
-            {fmt.try(totalNet12m)}
+            {totalNetYtd >= 0 ? "+" : ""}
+            {fmt.try(totalNetYtd)}
           </div>
           <div className="hint" style={{ fontSize: 11 }}>
             ortalama {avgMonthlyNet >= 0 ? "+" : ""}{fmt.try(avgMonthlyNet)} / ay
@@ -187,7 +192,7 @@ export default async function RaporlarPage() {
       <div className="card" style={{ marginBottom: 18 }}>
         <div className="card-head">
           <div className="card-title">Aylık Nakit Akış</div>
-          <div className="card-sub">Son 12 ay · yeşil gelir, kırmızı gider, sağda net</div>
+          <div className="card-sub">YTD</div>
         </div>
         <div style={{ padding: "20px 24px" }}>
           <div
@@ -286,13 +291,13 @@ export default async function RaporlarPage() {
           title="Gider Kategorileri"
           rows={expCatRows}
           color="var(--negative)"
-          total={totalOutflow12m}
+          total={totalOutflowYtd}
         />
         <CategoryCard
           title="Gelir Kategorileri"
           rows={incCatRows}
           color="var(--positive)"
-          total={totalInflow12m}
+          total={totalInflowYtd}
         />
       </div>
 
@@ -301,7 +306,7 @@ export default async function RaporlarPage() {
         <div className="card">
           <div className="card-head">
             <div className="card-title">Kişi Bazlı Gider</div>
-            <div className="card-sub">Son 12 ay</div>
+            <div className="card-sub">YTD</div>
           </div>
           <table className="dg">
             <thead>
@@ -314,7 +319,7 @@ export default async function RaporlarPage() {
             </thead>
             <tbody>
               {benRows.map((r) => {
-                const pct = totalOutflow12m > 0 ? (r.value / totalOutflow12m) * 100 : 0;
+                const pct = totalOutflowYtd > 0 ? (r.value / totalOutflowYtd) * 100 : 0;
                 return (
                   <tr key={r.id}>
                     <td>
@@ -364,7 +369,7 @@ function CategoryCard({
     <div className="card">
       <div className="card-head">
         <div className="card-title">{title}</div>
-        <div className="card-sub">{rows.length} kategori · 12 ay</div>
+        <div className="card-sub">{rows.length} kategori · YTD</div>
       </div>
       {rows.length === 0 ? (
         <div className="empty"><div>Bu dönemde kayıt yok.</div></div>
