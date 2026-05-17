@@ -670,9 +670,9 @@ input, select, textarea { font-family: inherit; }
    Responsive — mobile (≤768px) ve tablet (≤1024px)
    ============================================================ */
 
-/* Mobile hamburger butonu desktop'ta görünmesin */
+/* Hamburger butonu her boyutta görünür */
 .menu-btn {
-  display: none;
+  display: inline-flex;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--fg);
@@ -684,6 +684,15 @@ input, select, textarea { font-family: inherit; }
   cursor: pointer;
 }
 .sidebar-backdrop { display: none; }
+
+/* Desktop'ta sidebar collapse */
+.shell.desktop-collapsed {
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "topbar"
+    "main";
+}
+.shell.desktop-collapsed .sidebar { display: none; }
 
 /* Tablet (≤1024px): topbar filtrelerini biraz sıkıştır */
 @media (max-width: 1024px) {
@@ -728,8 +737,6 @@ input, select, textarea { font-family: inherit; }
     opacity: 1;
     pointer-events: auto;
   }
-
-  .menu-btn { display: inline-flex; }
 
   .topbar {
     padding: 0 12px;

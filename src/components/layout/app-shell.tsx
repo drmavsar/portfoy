@@ -41,14 +41,23 @@ export function AppShell({
   const active = NAV.find((n) => pathname === n.href || pathname.startsWith(`${n.href}/`));
   const sub = active?.label ?? "Özet";
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [desktopCollapsed, setDesktopCollapsed] = useState(false);
 
-  // route değişince drawer'ı kapat
+  // route değişince mobil drawer'ı kapat
   useEffect(() => {
     setDrawerOpen(false);
   }, [pathname]);
 
+  const toggleSidebar = () => {
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches) {
+      setDrawerOpen((v) => !v);
+    } else {
+      setDesktopCollapsed((v) => !v);
+    }
+  };
+
   return (
-    <div className="shell">
+    <div className={`shell${desktopCollapsed ? " desktop-collapsed" : ""}`}>
       <div
         className={`sidebar-backdrop ${drawerOpen ? "open" : ""}`}
         onClick={() => setDrawerOpen(false)}
@@ -97,13 +106,10 @@ export function AppShell({
                 whiteSpace: "nowrap",
               }}
             >
-              Mehmet
+              Mehmet Avşar
             </div>
-            <div className="hint">mehmet@eku.com.tr</div>
+            <div className="hint">mavsar@gmail.com</div>
           </div>
-          <button className="icon-btn" data-tip="Tema">
-            <Icon name="moon" size={14} />
-          </button>
           <button className="icon-btn" data-tip="Çıkış">
             <Icon name="power" size={14} />
           </button>
@@ -113,8 +119,8 @@ export function AppShell({
       <header className="topbar">
         <button
           className="menu-btn"
-          onClick={() => setDrawerOpen(true)}
-          aria-label="Menüyü aç"
+          onClick={toggleSidebar}
+          aria-label={desktopCollapsed || !drawerOpen ? "Menüyü aç" : "Menüyü kapat"}
         >
           <Icon name="filter" size={16} />
         </button>

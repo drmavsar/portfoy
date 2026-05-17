@@ -11,7 +11,7 @@ import {
   listPortfolios,
   listTrades,
 } from "@/app/(app)/_lib/wealth-actions";
-import { getAssetChanges, getAssetRates } from "@/app/(app)/_lib/asset-rates";
+import { getAssetChanges, getAssetRates, getTruncgilUpdateDate } from "@/app/(app)/_lib/asset-rates";
 import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
 import { listTransactionsForReports } from "@/app/(app)/_lib/reports-actions";
 import { listBenchmarkPoints, listWealthSnapshots } from "@/app/(app)/_lib/wealth-snapshots-actions";
@@ -54,12 +54,13 @@ function tryValueOf(a: AccountRow, fxRates: Record<string, number | undefined>):
 }
 
 export default async function OzetPage() {
-  const [accounts, custodies, beneficiaries, fxRates, fxChanges, holdings, assets, portfolios, trades, txns, wealthSnapshots, benchmarkPoints] = await Promise.all([
+  const [accounts, custodies, beneficiaries, fxRates, fxChanges, truncgilUpdate, holdings, assets, portfolios, trades, txns, wealthSnapshots, benchmarkPoints] = await Promise.all([
     listAccounts(),
     listCustodyLocations(),
     listBeneficiariesLite(),
     getAssetRates(),
     getAssetChanges(),
+    getTruncgilUpdateDate(),
     listHoldings(),
     listAssets(),
     listPortfolios(),
@@ -198,14 +199,29 @@ export default async function OzetPage() {
   // Bugünkü Servet Değişimi — varlık sınıfı bazlı TL katkı
   // Hesap (FX/altın/kripto): native × current_rate × change_pct/100
   // Hisse: qty × (current - previous_close)
-  // Sınıf bazlı topla
-  const dayChangeMap = new Map<string, { label: string; color: string; change: number; value: number }>();
-  const bumpDay = (key: string, label: string, color: string, change: number, value: number) => {
-    const cur = dayChangeMap.get(key) ?? { label, color, change: 0, value: 0 };
+  // Sınıf bazlı topla; source ve son güncelleme zamanını da tut
+  const dayChangeMap = new Map<
+    string,
+    { label: string; color: string; change: number; value: number; source: string; lastUpdate: string | null }
+  >();
+  const bumpDay = (
+    key: string,
+    label: string,
+    color: string,
+    change: number,
+    value: number,
+    source: string,
+    lastUpdate: string | null,
+  ) => {
+    const cur = dayChangeMap.get(key) ?? { label, color, change: 0, value: 0, source, lastUpdate };
     cur.change += change;
     cur.value += value;
+    // en geç güncel zamanı sakla
+    if (lastUpdate && (!cur.lastUpdate || lastUpdate > cur.lastUpdate)) cur.lastUpdate = lastUpdate;
     dayChangeMap.set(key, cur);
   };
+
+  const truncgilSource = "Truncgil · Selling";
 
   for (const a of accounts) {
     if (a.currency === "TRY") continue; // TRY'de günlük değişim yok
@@ -216,23 +232,35 @@ export default async function OzetPage() {
     const valueTry = Number(native) * rate;
     const dayDelta = valueTry * (chgPct / 100);
     const cls = classifyAccountClass(a.currency);
-    bumpDay(cls.key, cls.label, cls.color, dayDelta, valueTry);
+    bumpDay(cls.key, cls.label, cls.color, dayDelta, valueTry, truncgilSource, truncgilUpdate);
   }
 
+  // Hisse meta için Yahoo'nun en geç regularMarketTime'ını al
+  let yahooLatestUnix: number | null = null;
   for (const h of enriched) {
     const asset = assetMap[h.asset_id];
     const quote = h.quote;
     if (!asset || !quote || !quote.previous_close) continue;
     const qty = Number(h.quantity);
     const dayDelta = qty * (quote.price - quote.previous_close);
+    if (quote.market_time && (!yahooLatestUnix || quote.market_time > yahooLatestUnix)) {
+      yahooLatestUnix = quote.market_time;
+    }
     if (asset.asset_class === "equity_tr" || asset.asset_class === "equity_us") {
-      bumpDay("equity", "Hisse", "#e26a8f", dayDelta, h.mv);
+      bumpDay("equity", "Hisse", "#e26a8f", dayDelta, h.mv, "Yahoo Finance · 15dk", null);
     } else if (asset.asset_class === "crypto") {
-      bumpDay("crypto", "Kripto", "#b388f2", dayDelta, h.mv);
+      bumpDay("crypto", "Kripto", "#b388f2", dayDelta, h.mv, "Yahoo Finance · 15dk", null);
     } else if (asset.asset_class === "metal") {
-      bumpDay("metal", "Altın & Gümüş", "#d4a056", dayDelta, h.mv);
+      bumpDay("metal", "Altın & Gümüş", "#d4a056", dayDelta, h.mv, "Yahoo Finance · 15dk", null);
     }
   }
+  const yahooLastUpdate = yahooLatestUnix
+    ? new Date(yahooLatestUnix * 1000).toLocaleString("tr-TR", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })
+    : null;
+
+  // Hisse satırına yahoo zamanını yaz (yukarıda null geçtim; burada doldur)
+  const hisseEntry = dayChangeMap.get("equity");
+  if (hisseEntry && yahooLastUpdate) hisseEntry.lastUpdate = yahooLastUpdate;
 
   const dayChangeRows = Array.from(dayChangeMap.values())
     .filter((r) => r.value > 0)
@@ -361,7 +389,8 @@ export default async function OzetPage() {
                     <th className="num">Değer</th>
                     <th className="num">Bugün (₺)</th>
                     <th className="num">Bugün %</th>
-                    <th style={{ width: "30%" }}>Katkı</th>
+                    <th>Kaynak</th>
+                    <th style={{ width: "25%" }}>Katkı</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -387,6 +416,10 @@ export default async function OzetPage() {
                         <td className="num tabular" style={{ color }}>
                           {r.pct >= 0 ? "+" : ""}{r.pct.toFixed(2)}%
                         </td>
+                        <td style={{ fontSize: 11, color: "var(--muted)" }}>
+                          <div>{r.source}</div>
+                          {r.lastUpdate && <div className="mono" style={{ fontSize: 10 }}>{r.lastUpdate}</div>}
+                        </td>
                         <td>
                           <div
                             style={{
@@ -405,11 +438,26 @@ export default async function OzetPage() {
                 </tbody>
               </table>
               <div
-                className="hint"
-                style={{ padding: "10px 16px", borderTop: "1px solid var(--border-soft)", fontSize: 11 }}
+                style={{
+                  padding: "12px 16px",
+                  borderTop: "1px solid var(--border-soft)",
+                  fontSize: 11,
+                  color: "var(--muted)",
+                  display: "grid",
+                  gap: 6,
+                }}
               >
-                Hisse: anlık fiyat − önceki kapanış. Döviz/Altın/Kripto: Truncgil günlük %
-                değişimi. Bazı semboller için günlük veri yoksa sınıf toplamına dahil edilmez.
+                <div>
+                  <b style={{ color: "var(--fg-soft)" }}>Hesap formülü:</b>{" "}
+                  <span className="mono">Hisse = Σ qty × (current_price − previous_close)</span>{" "}
+                  · <span className="mono">FX/Altın/Kripto = Σ native × current_rate × (truncgil_change_pct ÷ 100)</span>
+                </div>
+                <div>
+                  <b style={{ color: "var(--fg-soft)" }}>Kaynaklar:</b> Yahoo Finance (BIST hisseleri,
+                  15dk gecikmeli) · Truncgil v4 today.json (FX/altın, ~10dk önbellek). Selling kuruyla
+                  hesaplanır (alış değil).
+                </div>
+                <div>Değişim oranı (%) bugünkü değere bölünür; küçük yuvarlama farkı olabilir.</div>
               </div>
             </div>
           )}
