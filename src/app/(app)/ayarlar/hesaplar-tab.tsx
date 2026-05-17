@@ -35,6 +35,7 @@ interface Props {
 
 export function HesaplarSettingsTab({ accounts, custodies, beneficiaries, configured }: Props) {
   const [newOpen, setNewOpen] = useState(false);
+  const [editing, setEditing] = useState<AccountRow | null>(null);
   const [busy, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -125,14 +126,24 @@ export function HesaplarSettingsTab({ accounts, custodies, beneficiaries, config
                   })}
                 </td>
                 <td>
-                  <button
-                    className="icon-btn"
-                    onClick={() => remove(a.id)}
-                    disabled={!configured || busy}
-                    title="Sil"
-                  >
-                    <Icon name="trash" size={12} />
-                  </button>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button
+                      className="icon-btn"
+                      onClick={() => setEditing(a)}
+                      disabled={!configured || busy}
+                      title="Düzenle"
+                    >
+                      <Icon name="edit" size={12} />
+                    </button>
+                    <button
+                      className="icon-btn"
+                      onClick={() => remove(a.id)}
+                      disabled={!configured || busy}
+                      title="Sil"
+                    >
+                      <Icon name="trash" size={12} />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -145,6 +156,14 @@ export function HesaplarSettingsTab({ accounts, custodies, beneficiaries, config
           custodies={custodies}
           beneficiaries={beneficiaries}
           onClose={() => setNewOpen(false)}
+        />
+      )}
+      {editing && (
+        <NewAccountModal
+          custodies={custodies}
+          beneficiaries={beneficiaries}
+          initial={editing}
+          onClose={() => setEditing(null)}
         />
       )}
     </div>

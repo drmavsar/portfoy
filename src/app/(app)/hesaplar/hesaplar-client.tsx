@@ -88,6 +88,7 @@ function tryValueOf(a: AccountRow, fxRates: Record<string, number | undefined>):
 
 export function HesaplarClient({ accounts, custodies, beneficiaries, supabaseConfigured, fxRates }: Props) {
   const [newOpen, setNewOpen] = useState(false);
+  const [editing, setEditing] = useState<AccountRow | null>(null);
   const [busy, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -264,14 +265,24 @@ export function HesaplarClient({ accounts, custodies, beneficiaries, supabaseCon
                           </div>
                         )}
                       </div>
-                      <button
-                        className="icon-btn"
-                        onClick={() => remove(a.id)}
-                        disabled={busy}
-                        title="Hesabı sil"
-                      >
-                        <Icon name="trash" size={12} />
-                      </button>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <button
+                          className="icon-btn"
+                          onClick={() => setEditing(a)}
+                          disabled={busy}
+                          title="Hesabı düzenle"
+                        >
+                          <Icon name="edit" size={12} />
+                        </button>
+                        <button
+                          className="icon-btn"
+                          onClick={() => remove(a.id)}
+                          disabled={busy}
+                          title="Hesabı sil"
+                        >
+                          <Icon name="trash" size={12} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -286,6 +297,14 @@ export function HesaplarClient({ accounts, custodies, beneficiaries, supabaseCon
           custodies={custodies}
           beneficiaries={beneficiaries}
           onClose={() => setNewOpen(false)}
+        />
+      )}
+      {editing && (
+        <NewAccountModal
+          custodies={custodies}
+          beneficiaries={beneficiaries}
+          initial={editing}
+          onClose={() => setEditing(null)}
         />
       )}
     </div>

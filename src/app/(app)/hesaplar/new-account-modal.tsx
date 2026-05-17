@@ -5,8 +5,8 @@ import { useState, useTransition } from "react";
 
 import { Icon } from "@/components/ui/icon";
 
-import type { BeneficiaryLite, CustodyRow } from "./actions";
-import { createAccount } from "./actions";
+import type { AccountRow, BeneficiaryLite, CustodyRow } from "./actions";
+import { createAccount, updateAccount } from "./actions";
 
 const inp: React.CSSProperties = {
   background: "var(--surface)",
@@ -96,22 +96,28 @@ const CURRENCY_LABEL: Record<string, string> = {
 interface Props {
   custodies: CustodyRow[];
   beneficiaries: BeneficiaryLite[];
+  initial?: AccountRow;
   onClose: () => void;
 }
 
-export function NewAccountModal({ custodies, beneficiaries, onClose }: Props) {
+export function NewAccountModal({ custodies, beneficiaries, initial, onClose }: Props) {
   const router = useRouter();
   const [busy, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const isEdit = !!initial;
 
-  const [custodyId, setCustodyId] = useState(custodies[0]?.id ?? "");
-  const [beneficiaryId, setBeneficiaryId] = useState(beneficiaries[0]?.id ?? "");
-  const [accountType, setAccountType] = useState("checking");
-  const [name, setName] = useState("Vadesiz");
-  const [currency, setCurrency] = useState("TRY");
-  const [balanceTry, setBalanceTry] = useState("0");
-  const [balanceNative, setBalanceNative] = useState("");
-  const [iban, setIban] = useState("");
+  const [custodyId, setCustodyId] = useState(initial?.custody_id ?? custodies[0]?.id ?? "");
+  const [beneficiaryId, setBeneficiaryId] = useState(initial?.beneficiary_id ?? beneficiaries[0]?.id ?? "");
+  const [accountType, setAccountType] = useState(initial?.account_type ?? "checking");
+  const [name, setName] = useState(initial?.name ?? "Vadesiz");
+  const [currency, setCurrency] = useState(initial?.currency ?? "TRY");
+  const [balanceTry, setBalanceTry] = useState(
+    initial ? String(initial.balance_try ?? initial.opening_balance ?? 0) : "0",
+  );
+  const [balanceNative, setBalanceNative] = useState(
+    initial?.balance_native != null ? String(initial.balance_native) : "",
+  );
+  const [iban, setIban] = useState(initial?.iban ?? "");
 
   const submit = () => {
     setError(null);
@@ -120,7 +126,7 @@ export function NewAccountModal({ custodies, beneficiaries, onClose }: Props) {
       return;
     }
     startTransition(async () => {
-      const r = await createAccount({
+      const payload = {
         custody_id: custodyId,
         beneficiary_id: beneficiaryId || null,
         name,
@@ -129,7 +135,10 @@ export function NewAccountModal({ custodies, beneficiaries, onClose }: Props) {
         iban,
         balance_try: Number(balanceTry) || 0,
         balance_native: balanceNative.trim() ? Number(balanceNative) : null,
-      });
+      };
+      const r = isEdit
+        ? await updateAccount({ id: initial.id, ...payload })
+        : await createAccount(payload);
       if (r.ok) {
         router.refresh();
         onClose();
@@ -152,7 +161,7 @@ export function NewAccountModal({ custodies, beneficiaries, onClose }: Props) {
           }}
         >
           <Icon name="bank" size={16} />
-          <span style={{ fontWeight: 600, fontSize: 15 }}>Yeni Hesap</span>
+          <span style={{ fontWeight: 600, fontSize: 15 }}>{isEdit ? "Hesabı Düzenle" : "Yeni Hesap"}</span>
           <span className="spacer" />
           <button className="icon-btn" onClick={onClose}><Icon name="x" size={16} /></button>
         </div>
@@ -287,7 +296,7 @@ export function NewAccountModal({ custodies, beneficiaries, onClose }: Props) {
             onClick={submit}
             disabled={busy || !name.trim() || !custodyId}
           >
-            {busy ? "Ekleniyor…" : "Hesabı Ekle"}
+            {busy ? "Kaydediliyor…" : isEdit ? "Güncelle" : "Hesabı Ekle"}
           </button>
         </div>
       </div>

@@ -124,6 +124,48 @@ export async function createAccount(input: {
   return { ok: true, row: data as unknown as AccountRow };
 }
 
+export async function updateAccount(input: {
+  id: string;
+  custody_id: string;
+  beneficiary_id: string | null;
+  name: string;
+  account_type: string;
+  currency: string;
+  iban: string;
+  balance_try: number;
+  balance_native: number | null;
+}): Promise<{ ok: true; row: AccountRow } | { ok: false; error: string }> {
+  if (!(await isSupabaseConfigured())) {
+    return { ok: false, error: "Supabase yapılandırılmamış." };
+  }
+  const supabase = await createClient();
+  const name = input.name.trim();
+  if (!name) return { ok: false, error: "Hesap adı boş olamaz." };
+
+  const { data, error } = await supabase
+    .from("accounts")
+    .update({
+      custody_id: input.custody_id,
+      beneficiary_id: input.beneficiary_id,
+      name,
+      account_type: input.account_type,
+      currency: input.currency,
+      iban: input.iban || null,
+      balance_try: input.balance_try,
+      balance_native: input.balance_native,
+    } as never)
+    .eq("id", input.id)
+    .select(
+      "id, custody_id, beneficiary_id, name, account_type, currency, iban, balance_try, balance_native, opening_balance",
+    )
+    .single();
+
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/hesaplar");
+  revalidatePath("/ozet");
+  return { ok: true, row: data as unknown as AccountRow };
+}
+
 export async function deleteAccount(id: string): Promise<{ ok: boolean; error?: string }> {
   if (!(await isSupabaseConfigured())) {
     return { ok: false, error: "Supabase yapılandırılmamış." };
