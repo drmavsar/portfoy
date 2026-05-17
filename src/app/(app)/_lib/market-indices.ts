@@ -9,6 +9,7 @@ export interface IndexQuote {
   price: number;
   previous_close: number | null;
   change_pct: number | null;
+  closes_1mo: number[]; // son ~22 trading day close array'i (sparkline için)
 }
 
 const BIST_INDICES: Array<{ symbol: string; label: string; group: "main" | "sector" }> = [
@@ -28,10 +29,11 @@ const BIST_INDICES: Array<{ symbol: string; label: string; group: "main" | "sect
 
 async function fetchYahoo(symbol: string): Promise<IndexQuote | null> {
   try {
+    // range=1mo → previousClose hâlâ T-1; ayrıca son ~22 günün close array'i ile sparkline
     const res = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.IS?interval=1d&range=2d`,
+      `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.IS?interval=1d&range=1mo`,
       {
-        next: { revalidate: 300 },
+        next: { revalidate: 600 },
         headers: { "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)" },
       },
     );
@@ -44,15 +46,18 @@ async function fetchYahoo(symbol: string): Promise<IndexQuote | null> {
             chartPreviousClose?: number;
             previousClose?: number;
           };
+          indicators?: { quote?: Array<{ close?: Array<number | null> }> };
         }>;
       };
     };
-    const meta = json.chart?.result?.[0]?.meta;
+    const r = json.chart?.result?.[0];
+    const meta = r?.meta;
     if (!meta?.regularMarketPrice) return null;
     const price = meta.regularMarketPrice;
-    // T-1 günü kapanışı için previousClose öncelik
     const prev = meta.previousClose ?? meta.chartPreviousClose ?? null;
     const chg = prev ? ((price - prev) / prev) * 100 : null;
+    const closes = (r?.indicators?.quote?.[0]?.close ?? [])
+      .filter((x): x is number => typeof x === "number" && Number.isFinite(x));
     const item = BIST_INDICES.find((x) => x.symbol === symbol);
     return {
       symbol,
@@ -60,6 +65,7 @@ async function fetchYahoo(symbol: string): Promise<IndexQuote | null> {
       price,
       previous_close: prev,
       change_pct: chg,
+      closes_1mo: closes,
     };
   } catch (err) {
     console.error("fetchYahoo index", symbol, err);

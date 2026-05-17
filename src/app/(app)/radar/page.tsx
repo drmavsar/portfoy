@@ -6,6 +6,41 @@ import { fmt } from "@/lib/finance/fmt";
 
 type Mover = { asset: AssetRow; quote: StockQuoteExt };
 
+function Sparkline({
+  values,
+  color,
+  width = 130,
+  height = 30,
+}: {
+  values: number[];
+  color: string;
+  width?: number;
+  height?: number;
+}) {
+  if (!values || values.length < 2) {
+    return <span className="hint">—</span>;
+  }
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const stepX = width / (values.length - 1);
+  const points = values.map((v, i) => {
+    const x = i * stepX;
+    const y = height - ((v - min) / range) * height;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const path = `M ${points.join(" L ")}`;
+  const last = values[values.length - 1];
+  const lastX = (values.length - 1) * stepX;
+  const lastY = height - ((last - min) / range) * height;
+  return (
+    <svg width={width} height={height} style={{ display: "block" }}>
+      <path d={path} stroke={color} strokeWidth={1.5} fill="none" />
+      <circle cx={lastX} cy={lastY} r={2} fill={color} />
+    </svg>
+  );
+}
+
 function MoversCard({
   title,
   rows,
@@ -144,7 +179,7 @@ export default async function RadarPage() {
       <div className="card" style={{ marginBottom: 18 }}>
         <div className="card-head">
           <div className="card-title">Sektör Rotasyonu</div>
-          <div className="card-sub">günlük değişim · azalan sıralı</div>
+          <div className="card-sub">son ay trend + günlük değişim · günlük azalan sıralı</div>
         </div>
         {indices.sectors.length === 0 ? (
           <div className="empty"><div>Sektör endeksleri çekilemedi.</div></div>
@@ -156,7 +191,8 @@ export default async function RadarPage() {
                 <th>Sektör</th>
                 <th className="num">Son</th>
                 <th className="num">Günlük</th>
-                <th style={{ width: "30%" }}>Görsel</th>
+                <th className="num">Ay %</th>
+                <th style={{ width: 140 }}>Son 1 Ay</th>
               </tr>
             </thead>
             <tbody>
@@ -164,11 +200,16 @@ export default async function RadarPage() {
                 const chg = s.change_pct ?? 0;
                 const pos = chg >= 0;
                 const color = pos ? "var(--positive)" : "var(--negative)";
-                const maxAbs = Math.max(
-                  ...indices.sectors.map((x) => Math.abs(x.change_pct ?? 0)),
-                  1,
-                );
-                const pct = (Math.abs(chg) / maxAbs) * 100;
+                const closes = s.closes_1mo;
+                const monthPct = closes.length > 1
+                  ? ((closes[closes.length - 1] - closes[0]) / closes[0]) * 100
+                  : null;
+                const monthColor =
+                  monthPct == null
+                    ? "var(--muted)"
+                    : monthPct >= 0
+                      ? "var(--positive)"
+                      : "var(--negative)";
                 return (
                   <tr key={s.symbol}>
                     <td className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>
@@ -180,17 +221,11 @@ export default async function RadarPage() {
                       {pos ? "+" : ""}
                       {chg.toFixed(2)}%
                     </td>
+                    <td className="num tabular" style={{ color: monthColor }}>
+                      {monthPct == null ? "—" : `${monthPct >= 0 ? "+" : ""}${monthPct.toFixed(1)}%`}
+                    </td>
                     <td>
-                      <div
-                        style={{
-                          height: 6,
-                          background: color,
-                          borderRadius: 3,
-                          width: `${Math.max(4, pct)}%`,
-                          marginLeft: pos ? 0 : "auto",
-                          opacity: 0.7,
-                        }}
-                      />
+                      <Sparkline values={closes} color={monthColor} />
                     </td>
                   </tr>
                 );
