@@ -186,6 +186,27 @@ export function RaporlarClient({ txns, categories, beneficiaries }: Props) {
     .filter((r) => r.value > 0)
     .sort((a, b) => b.value - a.value);
 
+  // En büyük 10 gider (seçili dönem)
+  const topExpenses = filtered
+    .filter((t) => t.direction === "outflow")
+    .slice()
+    .sort((a, b) => Number(b.amount) - Number(a.amount))
+    .slice(0, 10)
+    .map((t) => {
+      const cat = t.category_id ? catMap[t.category_id] : null;
+      const ben = t.beneficiary_id ? benMap[t.beneficiary_id] : null;
+      const merchant = t.merchant_raw || t.description || "—";
+      return {
+        date: t.occurred_on,
+        merchant,
+        categoryName: cat?.name ?? "(kategorisiz)",
+        categoryIcon: cat?.icon ?? "",
+        benName: ben?.name ?? "(atanmamış)",
+        benColor: ben?.color ?? "#7d8699",
+        amount: Number(t.amount),
+      };
+    });
+
   return (
     <div>
       <div className="page-head">
@@ -387,6 +408,54 @@ export function RaporlarClient({ txns, categories, beneficiaries }: Props) {
           label={label}
         />
       </div>
+
+      {topExpenses.length > 0 && (
+        <div className="card" style={{ marginBottom: 18 }}>
+          <div className="card-head">
+            <div className="card-title">En Büyük 10 Gider</div>
+            <div className="card-sub">{label}</div>
+          </div>
+          <table className="dg">
+            <thead>
+              <tr>
+                <th style={{ width: 92 }}>Tarih</th>
+                <th>İşlem</th>
+                <th style={{ width: 160 }}>Kategori</th>
+                <th style={{ width: 140 }}>Kişi</th>
+                <th className="num" style={{ width: 130 }}>Tutar</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topExpenses.map((e, i) => (
+                <tr key={`${e.date}-${i}`}>
+                  <td className="tabular hint">{e.date}</td>
+                  <td style={{ fontSize: 13 }}>{e.merchant}</td>
+                  <td style={{ fontSize: 13 }}>
+                    {e.categoryIcon && (
+                      <span style={{ marginRight: 6 }}>{e.categoryIcon}</span>
+                    )}
+                    {e.categoryName}
+                  </td>
+                  <td style={{ fontSize: 13 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <span style={{
+                        width: 8, height: 8, borderRadius: 50, background: e.benColor,
+                      }} />
+                      {e.benName}
+                    </span>
+                  </td>
+                  <td
+                    className="num tabular"
+                    style={{ fontWeight: 600, color: "var(--negative)" }}
+                  >
+                    -{fmt.tr(e.amount, 0)} ₺
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {benRows.length > 0 && (
         <div className="card">

@@ -10,6 +10,8 @@ export interface RawTxn {
   currency: string;
   category_id: string | null;
   beneficiary_id: string | null;
+  description: string | null;
+  merchant_raw: string | null;
 }
 
 /** Raporlar için ham transactions (son N ay, committed, transfer hariç). */
@@ -23,7 +25,7 @@ export async function listTransactionsForReports(sinceMonths: number = 24): Prom
 
   const { data, error } = await supabase
     .from("transactions")
-    .select("occurred_on, direction, amount, currency, category_id, beneficiary_id")
+    .select("occurred_on, direction, amount, currency, category_id, beneficiary_id, description, merchant_raw")
     .eq("status", "committed")
     .eq("is_transfer", false)
     .gte("occurred_on", sinceIso)
