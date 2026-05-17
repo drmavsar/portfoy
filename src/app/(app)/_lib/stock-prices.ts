@@ -36,7 +36,8 @@ function asYahooSymbol(symbol: string): string {
 }
 
 async function fetchOne(symbol: string): Promise<StockQuote | null> {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${asYahooSymbol(symbol)}?interval=1d&range=5d`;
+  // range=2d → sadece dün + bugün. previousClose alanı T-1 kapanışı verir.
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${asYahooSymbol(symbol)}?interval=1d&range=2d`;
   try {
     const res = await fetch(url, {
       next: { revalidate: 300 },
@@ -47,7 +48,9 @@ async function fetchOne(symbol: string): Promise<StockQuote | null> {
     const meta = json.chart?.result?.[0]?.meta;
     if (!meta?.regularMarketPrice) return null;
     const price = meta.regularMarketPrice;
-    const prevClose = meta.chartPreviousClose ?? meta.previousClose ?? null;
+    // previousClose = T-1 günün kapanışı (doğru günlük baz)
+    // chartPreviousClose = range başlangıcındaki kapanış (range=2d için yine T-1 ama tek başına previousClose öncelikli)
+    const prevClose = meta.previousClose ?? meta.chartPreviousClose ?? null;
     const changePct = prevClose ? ((price - prevClose) / prevClose) * 100 : null;
     return {
       symbol,
@@ -107,7 +110,8 @@ async function fetchOneExt(symbol: string): Promise<StockQuoteExt | null> {
     const meta = r?.meta;
     if (!meta?.regularMarketPrice) return null;
     const price = meta.regularMarketPrice;
-    const prevClose = meta.chartPreviousClose ?? meta.previousClose ?? null;
+    // T-1 günü kapanışı için previousClose öncelik (range=3mo'da chartPreviousClose 3 ay öncesi olur)
+    const prevClose = meta.previousClose ?? meta.chartPreviousClose ?? null;
     const changePct = prevClose ? ((price - prevClose) / prevClose) * 100 : null;
 
     const closes = (r?.indicators?.quote?.[0]?.close ?? [])
