@@ -116,7 +116,7 @@ async function fetchTruncgil(): Promise<Record<string, number>> {
     }
 
     if (unmatched.length > 0) {
-      console.log("[truncgil] eşleşmeyen key'ler:", unmatched.slice(0, 50).join(", "));
+      console.log("[truncgil] eşleşmeyen key'ler (tüm):", unmatched.join(", "));
     }
 
     if (Object.keys(out).length === 0) throw new Error("Truncgil boş yanıt");
