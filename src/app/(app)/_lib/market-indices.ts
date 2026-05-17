@@ -73,24 +73,80 @@ async function fetchYahoo(symbol: string): Promise<IndexQuote | null> {
   }
 }
 
+async function fetchBistSectorsFromPython(baseUrl?: string): Promise<IndexQuote[] | null> {
+  try {
+    // İlk önce relative URL (Vercel/Next.js içinde aynı host), Node fetch
+    // mutlak URL ister; window olmadığı için absolute gerek.
+    const host = baseUrl ?? process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : "http://localhost:3000";
+    const res = await fetch(`${host}/api/bist-sectors`, {
+      next: { revalidate: 600 },
+    });
+    if (!res.ok) {
+      console.error(`[bist-sectors] HTTP ${res.status}`);
+      return null;
+    }
+    const json = (await res.json()) as {
+      status: string;
+      sectors?: Array<{
+        symbol: string;
+        label?: string;
+        price?: number | null;
+        previous_close?: number | null;
+        change_pct?: number | null;
+        closes_1mo?: number[];
+        error?: string;
+      }>;
+      message?: string;
+    };
+    if (json.status !== "ok" || !json.sectors) {
+      console.error("[bist-sectors] error:", json.message);
+      return null;
+    }
+    const out: IndexQuote[] = [];
+    for (const s of json.sectors) {
+      if (s.error || s.price == null) continue;
+      out.push({
+        symbol: s.symbol,
+        label: s.label ?? s.symbol,
+        price: s.price,
+        previous_close: s.previous_close ?? null,
+        change_pct: s.change_pct ?? null,
+        closes_1mo: s.closes_1mo ?? [],
+      });
+    }
+    return out;
+  } catch (err) {
+    console.error("[bist-sectors] fetch error", err);
+    return null;
+  }
+}
+
 export async function getBistIndices(): Promise<{
   main: IndexQuote[];
   sectors: IndexQuote[];
 }> {
-  const all = await Promise.all(BIST_INDICES.map((x) => fetchYahoo(x.symbol)));
-  const valid = all.filter((q): q is IndexQuote => !!q);
-  const main = valid.filter((q) => {
-    const item = BIST_INDICES.find((x) => x.symbol === q.symbol);
-    return item?.group === "main";
-  });
-  const sectors = valid
-    .filter((q) => {
-      const item = BIST_INDICES.find((x) => x.symbol === q.symbol);
-      return item?.group === "sector";
-    })
-    // Yahoo bazı sektör endekslerinin tarihsel close array'ini döndürmüyor.
-    // Sadece veri tutarlı olanları göster (en az 5 günlük close).
-    .filter((q) => q.closes_1mo.length >= 5)
-    .sort((a, b) => (b.change_pct ?? 0) - (a.change_pct ?? 0));
+  // Ana endeksleri Yahoo'dan al
+  const mainSymbols = BIST_INDICES.filter((x) => x.group === "main");
+  const yahooMain = await Promise.all(mainSymbols.map((x) => fetchYahoo(x.symbol)));
+  const main = yahooMain.filter((q): q is IndexQuote => !!q);
+
+  // Sektör endekslerini Python (borsapy) endpoint'ten al
+  const pythonSectors = await fetchBistSectorsFromPython();
+
+  let sectors: IndexQuote[];
+  if (pythonSectors && pythonSectors.length > 0) {
+    sectors = pythonSectors.sort((a, b) => (b.change_pct ?? 0) - (a.change_pct ?? 0));
+  } else {
+    // Fallback: Yahoo (eksik veri olabilir, filter ile sıkı)
+    const sectorSymbols = BIST_INDICES.filter((x) => x.group === "sector");
+    const yahooSectors = await Promise.all(sectorSymbols.map((x) => fetchYahoo(x.symbol)));
+    sectors = yahooSectors
+      .filter((q): q is IndexQuote => !!q)
+      .filter((q) => q.closes_1mo.length >= 5)
+      .sort((a, b) => (b.change_pct ?? 0) - (a.change_pct ?? 0));
+  }
+
   return { main, sectors };
 }
