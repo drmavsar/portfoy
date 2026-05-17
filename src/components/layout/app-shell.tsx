@@ -20,6 +20,7 @@ const NAV: NavEntry[] = [
   { href: "/ozet", label: "Özet", icon: "dashboard", section: "Genel" },
   { href: "/gelirler", label: "Gelirler", icon: "arrowInc", section: "Genel" },
   { href: "/giderler", label: "Giderler", icon: "arrowExp", section: "Genel" },
+  { href: "/ekstre", label: "Ekstre Yükle", icon: "upload", section: "Genel" },
   { href: "/yatirimlar", label: "Yatırımlar", icon: "wealth", section: "Genel" },
   { href: "/islemler", label: "İşlemler", icon: "swap", section: "Genel" },
   { href: "/hesaplar", label: "Hesaplar", icon: "bank", section: "Genel" },
