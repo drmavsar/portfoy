@@ -209,13 +209,18 @@ export function RaporlarClient({ txns, categories, beneficiaries }: Props) {
   const installmentMap = new Map<string, ExpenseAgg>();
   const singles: ExpenseAgg[] = [];
 
+  // Aynı merchant+kategori farklı tarih/tutarda birden fazla taksitli alıma sahip
+  // olabilir (örn. 2 ayrı vergi tahakkuku, ikisi de 3-taksit). Grup anahtarına
+  // expectedTotal + (yaklaşık) amount eklenerek farklı alımlar ayrılır.
+  const amountBucket = (n: number): number => Math.round(n / 100) * 100;
+
   for (const t of filtered) {
     if (t.direction !== "outflow") continue;
     const rawMerch = t.merchant_raw || t.description || "—";
     const { base, isInstallment, total } = extractInstallment(rawMerch);
     const amount = Number(t.amount);
     if (isInstallment) {
-      const key = `${base.toUpperCase()}|${t.category_id ?? ""}`;
+      const key = `${base.toUpperCase()}|${t.category_id ?? ""}|tot:${total ?? "?"}|amt:${amountBucket(amount)}`;
       const existing = installmentMap.get(key);
       if (existing) {
         existing.amount += amount;
@@ -262,10 +267,17 @@ export function RaporlarClient({ txns, categories, beneficiaries }: Props) {
         benName = `Çeşitli (${benList.length})`;
         benColor = "#7d8699";
       }
-      const installmentLabel =
-        agg.count > 1
-          ? ` · ${agg.count}${agg.expectedTotal ? `/${agg.expectedTotal}` : ""} taksit`
-          : "";
+      // Etiket: tüm taksitler toplanmışsa "N/N taksit", eksikse "N taksit"
+      let installmentLabel = "";
+      if (agg.count > 1) {
+        if (agg.expectedTotal && agg.count === agg.expectedTotal) {
+          installmentLabel = ` · ${agg.count}/${agg.expectedTotal} taksit`;
+        } else if (agg.expectedTotal) {
+          installmentLabel = ` · ${agg.count}/${agg.expectedTotal} taksit (eksik)`;
+        } else {
+          installmentLabel = ` · ${agg.count} taksit`;
+        }
+      }
       return {
         date: agg.earliestDate,
         merchant: agg.merchant + installmentLabel,
@@ -276,6 +288,9 @@ export function RaporlarClient({ txns, categories, beneficiaries }: Props) {
         amount: agg.amount,
       };
     });
+
+  const top10Total = topExpenses.reduce((s, e) => s + e.amount, 0);
+  const top10Pct = totalOutflow > 0 ? (top10Total / totalOutflow) * 100 : 0;
 
   return (
     <div>
@@ -483,7 +498,9 @@ export function RaporlarClient({ txns, categories, beneficiaries }: Props) {
         <div className="card" style={{ marginBottom: 18 }}>
           <div className="card-head">
             <div className="card-title">En Büyük 10 Gider</div>
-            <div className="card-sub">{label}</div>
+            <div className="card-sub">
+              {label} · top 10 toplamı {fmt.tr(top10Total, 0)} ₺ ({top10Pct.toFixed(1)}% / toplam gider)
+            </div>
           </div>
           <table className="dg">
             <thead>
@@ -523,6 +540,22 @@ export function RaporlarClient({ txns, categories, beneficiaries }: Props) {
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr style={{ borderTop: "2px solid var(--border)" }}>
+                <td colSpan={3} style={{ fontWeight: 600, padding: "10px 12px" }}>
+                  İlk 10 toplamı
+                </td>
+                <td className="num tabular hint" style={{ fontSize: 12 }}>
+                  toplam giderin %{top10Pct.toFixed(1)}
+                </td>
+                <td
+                  className="num tabular"
+                  style={{ fontWeight: 700, color: "var(--negative)" }}
+                >
+                  -{fmt.tr(top10Total, 0)} ₺
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}
