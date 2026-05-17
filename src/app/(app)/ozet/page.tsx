@@ -17,16 +17,10 @@ import { listTransactionsForReports } from "@/app/(app)/_lib/reports-actions";
 import { listBenchmarkPoints, listWealthSnapshots } from "@/app/(app)/_lib/wealth-snapshots-actions";
 import { captureDailySnapshot, listDailySnapshots } from "@/app/(app)/_lib/daily-snapshots-actions";
 import { AssetCompositionChart } from "@/app/(app)/_components/asset-composition-chart";
+import { CashflowCard } from "@/app/(app)/_components/cashflow-card";
 import { PersonEquityChart } from "@/app/(app)/_components/person-equity-chart";
 import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
-
-const MONTH_TR = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
-
-function monthLabel(period: string): string {
-  const [y, m] = period.split("-");
-  return `${MONTH_TR[Number(m) - 1]} ${y.slice(2)}`;
-}
 
 interface AssetClassSlice {
   label: string;
@@ -329,10 +323,6 @@ export default async function OzetPage() {
     if (t.direction === "inflow") m.inflow += Number(t.amount);
     else if (t.direction === "outflow") m.outflow += Number(t.amount);
   }
-  const maxMonthVal = Math.max(
-    ...months.map((m) => Math.max(m.inflow, m.outflow)),
-    1,
-  );
 
   return (
     <div>
@@ -714,135 +704,69 @@ export default async function OzetPage() {
             </div>
           )}
 
-          {/* 12 ay nakit akış + varlık sınıfı dağılımı yan yana */}
-          <div className="grid-base grid-2" style={{ gap: 16, marginTop: 16, alignItems: "start" }}>
-            <div className="card">
-              <div className="card-head">
-                <div className="card-title">Aylık Nakit Akış (YTD)</div>
-                <div className="card-sub">{currentYear} yılı</div>
-              </div>
-              <div style={{ padding: "20px 24px 24px" }}>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: `repeat(${months.length}, 1fr)`,
-                    gap: 6,
-                    alignItems: "end",
-                    height: 160,
-                  }}
-                >
-                  {months.map((b) => {
-                    const inH = (b.inflow / maxMonthVal) * 100;
-                    const outH = (b.outflow / maxMonthVal) * 100;
-                    return (
-                      <div
-                        key={b.period}
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "center",
-                          height: "100%",
-                          justifyContent: "flex-end",
-                          position: "relative",
-                        }}
-                      >
-                        <div style={{ display: "flex", gap: 2, height: "100%", alignItems: "flex-end" }}>
-                          <div
-                            title={`Gelir ${fmt.tr(b.inflow, 0)} ₺`}
-                            style={{
-                              width: 8,
-                              height: `${inH}%`,
-                              background: "var(--positive)",
-                              borderRadius: "2px 2px 0 0",
-                              minHeight: b.inflow > 0 ? 2 : 0,
-                            }}
-                          />
-                          <div
-                            title={`Gider ${fmt.tr(b.outflow, 0)} ₺`}
-                            style={{
-                              width: 8,
-                              height: `${outH}%`,
-                              background: "var(--negative)",
-                              borderRadius: "2px 2px 0 0",
-                              minHeight: b.outflow > 0 ? 2 : 0,
-                            }}
-                          />
-                        </div>
-                        <div
-                          style={{
-                            marginTop: 6,
-                            fontSize: 9,
-                            color: "var(--muted)",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {monthLabel(b.period).slice(0, 3)}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
+          {/* Aylık nakit akış — Recharts + 4 KPI */}
+          <div style={{ marginTop: 16 }}>
+            <CashflowCard months={months} badgeText={`${currentYear} YTD`} />
+          </div>
 
-            <div className="card">
-              <div className="card-head">
-                <div className="card-title">Varlık Sınıfı Dağılımı</div>
-              </div>
-              <div style={{ padding: "12px 0" }}>
-                {assetClassSlices.length === 0 ? (
-                  <div className="empty"><div>Veri yok</div></div>
-                ) : (
-                  <>
-                    <div
-                      style={{
-                        display: "flex",
-                        height: 14,
-                        margin: "0 20px 14px",
-                        borderRadius: 7,
-                        overflow: "hidden",
-                      }}
-                    >
-                      {assetClassSlices.map((s) => {
-                        const pct = (s.value / grandTotal) * 100;
-                        return (
-                          <div
-                            key={s.label}
-                            title={`${s.label}: ${fmt.tr(s.value, 0)} ₺ · %${pct.toFixed(1)}`}
-                            style={{ background: s.color, width: `${pct}%` }}
-                          />
-                        );
-                      })}
-                    </div>
+          {/* Varlık sınıfı dağılımı — tek başına altta */}
+          <div className="card" style={{ marginTop: 16 }}>
+            <div className="card-head">
+              <div className="card-title">Varlık Sınıfı Dağılımı</div>
+            </div>
+            <div style={{ padding: "12px 0" }}>
+              {assetClassSlices.length === 0 ? (
+                <div className="empty"><div>Veri yok</div></div>
+              ) : (
+                <>
+                  <div
+                    style={{
+                      display: "flex",
+                      height: 14,
+                      margin: "0 20px 14px",
+                      borderRadius: 7,
+                      overflow: "hidden",
+                    }}
+                  >
                     {assetClassSlices.map((s) => {
                       const pct = (s.value / grandTotal) * 100;
                       return (
                         <div
                           key={s.label}
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "1fr auto 60px",
-                            gap: 12,
-                            padding: "6px 20px",
-                            alignItems: "center",
-                          }}
-                        >
-                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <span style={{ width: 10, height: 10, borderRadius: 50, background: s.color }} />
-                            <span style={{ fontSize: 13 }}>{s.label}</span>
-                          </div>
-                          <div className="tabular" style={{ fontWeight: 500, fontSize: 13 }}>
-                            {fmt.trydp(s.value)}
-                          </div>
-                          <div className="hint tabular" style={{ textAlign: "right" }}>
-                            %{pct.toFixed(1)}
-                          </div>
-                        </div>
+                          title={`${s.label}: ${fmt.tr(s.value, 0)} ₺ · %${pct.toFixed(1)}`}
+                          style={{ background: s.color, width: `${pct}%` }}
+                        />
                       );
                     })}
-                  </>
-                )}
-              </div>
+                  </div>
+                  {assetClassSlices.map((s) => {
+                    const pct = (s.value / grandTotal) * 100;
+                    return (
+                      <div
+                        key={s.label}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "1fr auto 60px",
+                          gap: 12,
+                          padding: "6px 20px",
+                          alignItems: "center",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span style={{ width: 10, height: 10, borderRadius: 50, background: s.color }} />
+                          <span style={{ fontSize: 13 }}>{s.label}</span>
+                        </div>
+                        <div className="tabular" style={{ fontWeight: 500, fontSize: 13 }}>
+                          {fmt.trydp(s.value)}
+                        </div>
+                        <div className="hint tabular" style={{ textAlign: "right" }}>
+                          %{pct.toFixed(1)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
             </div>
           </div>
 
