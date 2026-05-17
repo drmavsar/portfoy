@@ -160,6 +160,54 @@ export async function createTrade(input: {
   return { ok: true, row: data as unknown as TradeRow };
 }
 
+export async function updateTrade(input: {
+  id: string;
+  portfolio_id: string;
+  custody_id: string | null;
+  asset_id: string;
+  beneficiary_id: string | null;
+  side: "buy" | "sell";
+  executed_at: string;
+  quantity: number;
+  price: number;
+  fees: number;
+  notes: string | null;
+}): Promise<{ ok: true; row: TradeRow } | { ok: false; error: string }> {
+  if (!(await isSupabaseConfigured())) {
+    return { ok: false, error: "Supabase yapılandırılmamış." };
+  }
+  const supabase = await createClient();
+  if (!input.portfolio_id) return { ok: false, error: "Portföy seç." };
+  if (!input.asset_id) return { ok: false, error: "Sembol seç." };
+  if (!(input.quantity > 0)) return { ok: false, error: "Adet pozitif olmalı." };
+
+  const { data, error } = await supabase
+    .from("trades")
+    .update({
+      portfolio_id: input.portfolio_id,
+      custody_id: input.custody_id,
+      asset_id: input.asset_id,
+      beneficiary_id: input.beneficiary_id,
+      side: input.side,
+      executed_at: input.executed_at,
+      quantity: input.quantity,
+      price: input.price,
+      fees: input.fees,
+      notes: input.notes?.trim() || null,
+    } as never)
+    .eq("id", input.id)
+    .select(
+      "id, portfolio_id, custody_id, account_id, asset_id, beneficiary_id, side, executed_at, quantity, price, currency, fees, notes",
+    )
+    .single();
+
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/islemler");
+  revalidatePath("/yatirimlar");
+  revalidatePath("/ozet");
+  return { ok: true, row: data as unknown as TradeRow };
+}
+
 export async function deleteTrade(id: string): Promise<{ ok: boolean; error?: string }> {
   if (!(await isSupabaseConfigured())) {
     return { ok: false, error: "Supabase yapılandırılmamış." };
