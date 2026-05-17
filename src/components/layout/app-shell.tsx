@@ -24,7 +24,8 @@ const NAV: NavEntry[] = [
   { href: "/islemler", label: "İşlemler", icon: "swap", section: "Genel" },
   { href: "/hesaplar", label: "Hesaplar", icon: "bank", section: "Genel" },
   { href: "/raporlar", label: "Raporlar", icon: "report", section: "Genel" },
-  { href: "/radar", label: "Piyasa Radarı", icon: "screener", badge: "6", section: "Piyasa" },
+  { href: "/radar", label: "Piyasa Radarı", icon: "screener", section: "Piyasa" },
+  { href: "/tarama", label: "Tarama", icon: "search", section: "Piyasa" },
   { href: "/ayarlar", label: "Ayarlar", icon: "settings", section: "Sistem" },
 ];
 
