@@ -29,7 +29,7 @@ const BIST_INDICES: Array<{ symbol: string; label: string; group: "main" | "sect
 async function fetchYahoo(symbol: string): Promise<IndexQuote | null> {
   try {
     const res = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.IS?interval=1d&range=5d`,
+      `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.IS?interval=1d&range=2d`,
       {
         next: { revalidate: 300 },
         headers: { "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)" },
@@ -50,7 +50,8 @@ async function fetchYahoo(symbol: string): Promise<IndexQuote | null> {
     const meta = json.chart?.result?.[0]?.meta;
     if (!meta?.regularMarketPrice) return null;
     const price = meta.regularMarketPrice;
-    const prev = meta.chartPreviousClose ?? meta.previousClose ?? null;
+    // T-1 günü kapanışı için previousClose öncelik
+    const prev = meta.previousClose ?? meta.chartPreviousClose ?? null;
     const chg = prev ? ((price - prev) / prev) * 100 : null;
     const item = BIST_INDICES.find((x) => x.symbol === symbol);
     return {
