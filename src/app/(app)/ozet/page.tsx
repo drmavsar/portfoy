@@ -109,7 +109,7 @@ export default async function OzetPage() {
     const qty = Number(h.quantity);
     const cost = Number(h.cost_basis_try);
     const mv = quote ? qty * quote.price : cost;
-    return { ...h, mv, cost };
+    return { ...h, mv, cost, quote };
   });
 
   const investmentMv = enriched.reduce((s, h) => s + h.mv, 0);
