@@ -102,7 +102,23 @@ export async function getBistIndexMembers(): Promise<IndexMember[]> {
 
 export async function getXK100Symbols(): Promise<string[]> {
   const all = await getBistIndexMembers();
-  return all
-    .filter((m) => m.index_code === "XK100" || m.index_code === "XU100")
-    .map((m) => m.symbol);
+  const filtered = all
+    .filter((m) => {
+      const code = (m.index_code ?? "").toUpperCase();
+      const name = (m.index_name ?? "").toUpperCase();
+      return (
+        code.includes("XK100") ||
+        code.includes("XU100") ||
+        name.includes("BIST 100") ||
+        name.includes("BIST100") ||
+        name.includes("BİST 100")
+      );
+    })
+    .map((m) => m.symbol)
+    .filter(Boolean);
+  const uniq = Array.from(new Set(filtered));
+  if (uniq.length > 0) return uniq;
+  // CSV var ama filter sıfır → statik liste son çare
+  console.log("[bist-csv] filter sıfır eşleşti, statik liste kullanılıyor");
+  return BIST_100_FALLBACK;
 }
