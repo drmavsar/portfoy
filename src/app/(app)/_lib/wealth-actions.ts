@@ -13,6 +13,7 @@ export interface AssetRow {
   currency: string;
   exchange: string | null;
   sector: string | null;
+  external_url: string | null;
 }
 
 export interface PortfolioRow {
@@ -51,7 +52,7 @@ export async function listAssets(): Promise<AssetRow[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("assets")
-    .select("id, symbol, name, asset_class, currency, exchange, sector")
+    .select("id, symbol, name, asset_class, currency, exchange, sector, external_url")
     .eq("is_active", true)
     .order("asset_class")
     .order("symbol");
