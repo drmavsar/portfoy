@@ -64,9 +64,10 @@ export function AssetCompositionChart({ rows }: Props) {
               fontSize: 11,
             }}
             labelStyle={{ color: "var(--fg)" }}
-            formatter={(value: number) =>
-              value.toLocaleString("tr-TR", { maximumFractionDigits: 0 }) + " ₺"
-            }
+            formatter={(value: unknown) => {
+              const n = typeof value === "number" ? value : Number(value) || 0;
+              return n.toLocaleString("tr-TR", { maximumFractionDigits: 0 }) + " ₺";
+            }}
           />
           <Legend wrapperStyle={{ fontSize: 11 }} />
           <Area type="monotone" dataKey="Nakit (₺)" stackId="1" stroke="#4cc9b0" fill="#4cc9b0" fillOpacity={0.6} />
