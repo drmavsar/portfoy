@@ -81,17 +81,32 @@ def fetch_one(bp, symbol: str):
             chg_pct = ((price - prev) / prev) * 100.0
 
         closes = []
-        try:
-            hist = idx.history(period="1ay")
-            if hist is not None:
+        # period formatı bazı semboller için farklı çalışıyor — sırayla dene
+        for period in ("1ay", "1mo", "30d", "1 ay", "1m", "1month"):
+            try:
+                hist = idx.history(period=period)
+                if hist is None:
+                    continue
+                vals = None
                 if hasattr(hist, "close"):
-                    closes = [float(x) for x in hist.close.tolist() if x is not None]
+                    vals = hist.close.tolist()
                 elif hasattr(hist, "Close"):
-                    closes = [float(x) for x in hist.Close.tolist() if x is not None]
+                    vals = hist.Close.tolist()
                 elif isinstance(hist, dict) and "close" in hist:
-                    closes = [float(x) for x in hist["close"] if x is not None]
-        except Exception as e:
-            print(f"[bist-sectors] {symbol} history error: {e}")
+                    vals = hist["close"]
+                elif hasattr(hist, "iloc") and len(hist.columns) > 0:
+                    # son kolon close olabilir
+                    for col in ("Close", "close", "CLOSE"):
+                        if col in hist.columns:
+                            vals = hist[col].tolist()
+                            break
+                if vals:
+                    closes = [float(x) for x in vals if x is not None and not (isinstance(x, float) and x != x)]
+                    if closes:
+                        break  # başarılı
+            except Exception as e:
+                print(f"[bist-sectors] {symbol} history period={period} error: {e}")
+                continue
 
         return {
             "symbol": symbol,
