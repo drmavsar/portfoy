@@ -16,32 +16,72 @@ import { HesaplarSettingsTab } from "./hesaplar-tab";
 import { KisilerTab } from "./kisiler-tab";
 import { KurallarTab } from "./kurallar-tab";
 
+interface IntegrationItem {
+  name: string;
+  sub: string;
+  status: "ok" | "warn" | "dev";
+  scope: string;
+  cache: string;
+  endpoint?: string;
+  notes?: string;
+}
+
 function IntegrationsTab() {
-  const items = [
+  const items: IntegrationItem[] = [
     {
-      name: "borsapy",
-      sub: "OHLCV + RS + MA · BIST tüm",
-      status: "dev" as const,
-      note: "MCP üzerinden erişiliyor; UI'a bağlanmadı.",
-      ext: "github.com/saidsurucu/borsapy",
+      name: "Truncgil v4",
+      sub: "Döviz + Türk altın türleri + gümüş",
+      status: "ok",
+      scope:
+        "USD, EUR, GBP, CHF, JPY, AUD, CAD, vs. (Selling) · Gram altın (GRA) · Çeyrek/Yarım/Tam/Cumhuriyet/Ata/Reşat · 14/18/22 ayar bilezik · Ons · Gümüş",
+      cache: "10 dk",
+      endpoint: "https://finans.truncgil.com/v4/today.json",
+      notes: "Günlük % değişim (Change) de yakalanır — Bugünkü Servet Değişimi hesabında kullanılır.",
+    },
+    {
+      name: "Yahoo Finance",
+      sub: "BIST hisseleri + endeksler",
+      status: "ok",
+      scope:
+        "BIST tüm hisseler (.IS suffix) · XU100, XU030, XBANK, XGIDA, XUSIN, XHOLD, XKMYA, XULAS, XMANA, XELKT, XILTM, XTEKS",
+      cache: "5 dk (anlık), 10 dk (haftalık/aylık)",
+      endpoint: "https://query1.finance.yahoo.com/v8/finance/chart/",
+      notes: "15 dk gecikmeli. previousClose = T-1 kapanış (günlük baz). 3 ay close array'inden 5/22 trading day back-look ile haftalık/aylık % hesabı.",
+    },
+    {
+      name: "CoinGecko",
+      sub: "Kripto TRY karşılığı",
+      status: "ok",
+      scope: "BTC · ETH · SOL · USDT · BNB",
+      cache: "5 dk",
+      endpoint: "https://api.coingecko.com/api/v3/simple/price?vs_currencies=try",
+      notes: "Public free tier. Rate limit ~30-50/dk.",
+    },
+    {
+      name: "TCMB",
+      sub: "Döviz kurları (fallback)",
+      status: "ok",
+      scope: "USD, EUR, GBP, CHF, JPY, AUD, CAD (ForexSelling)",
+      cache: "1 saat",
+      endpoint: "https://www.tcmb.gov.tr/kurlar/today.xml",
+      notes: "Truncgil çökerse FX için son çare. XML regex parse + son başarılı veri memory fallback.",
+    },
+    {
+      name: "borsa-api",
+      sub: "BIST hisse + endeks (Node.js)",
+      status: "dev",
+      scope: "Yahoo Finance wrapper · Node.js paket",
+      cache: "—",
+      endpoint: "github.com/ibidi/borsa-api",
+      notes: "Şu an doğrudan Yahoo çağırıyoruz; bu paket alternatif/yedek olarak rafta.",
     },
     {
       name: "KAP API",
       sub: "Bilanço + duyuru + insider",
-      status: "dev" as const,
-      note: "MCP üzerinden erişiliyor; UI'a bağlanmadı.",
-    },
-    {
-      name: "TCMB",
-      sub: "Döviz kurları + TÜFE",
-      status: "dev" as const,
-      note: "Henüz bağlı değil.",
-    },
-    {
-      name: "Anthropic",
-      sub: "KAP özet + polarite",
-      status: "dev" as const,
-      note: "Sunucu tarafı çağrı yok.",
+      status: "dev",
+      scope: "—",
+      cache: "—",
+      notes: "MCP üzerinden geliştirme tarafında erişiliyor; UI henüz bağlı değil.",
     },
   ];
   const statusChip = (s: "ok" | "warn" | "dev") => {
@@ -61,8 +101,9 @@ function IntegrationsTab() {
           color: "var(--muted)",
         }}
       >
-        Entegrasyonlar henüz UI'a bağlanmadı. Veri çekme akışı (borsapy / KAP / TCMB / Anthropic) ilerleyen sprint'lerde
-        sunucu tarafına alınacak.
+        Canlı veri kaynakları. Sayfa yüklenirken bu servislerden anlık fiyat/kur çekilir, Next.js
+        fetch cache ile dakikalık önbelleğe alınır. Bir kaynak çökerse zincirdeki fallback devreye
+        girer (Truncgil → TCMB FX için, Yahoo → BIST için).
       </div>
       <div className="grid-base grid-2" style={{ gap: 16 }}>
         {items.map((it) => (
@@ -82,14 +123,29 @@ function IntegrationsTab() {
               <span className="spacer" />
               {statusChip(it.status)}
             </div>
-            <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--muted)" }}>
-              {it.note}
-            </div>
-            {it.ext && (
-              <div style={{ padding: "0 16px 12px", fontSize: 11, color: "var(--muted)" }}>
-                <Icon name="ext" size={10} /> {it.ext}
+            <div style={{ padding: "10px 16px", fontSize: 12 }}>
+              <div style={{ display: "flex", padding: "4px 0", borderBottom: "1px solid var(--border-soft)" }}>
+                <span className="hint">Kapsam</span>
+                <span className="spacer" />
+                <span style={{ textAlign: "right", maxWidth: "70%", color: "var(--fg-soft)" }}>{it.scope}</span>
               </div>
-            )}
+              <div style={{ display: "flex", padding: "4px 0", borderBottom: "1px solid var(--border-soft)" }}>
+                <span className="hint">Cache</span>
+                <span className="spacer" />
+                <span className="mono">{it.cache}</span>
+              </div>
+              {it.endpoint && (
+                <div style={{ padding: "4px 0", fontSize: 11, color: "var(--muted)" }}>
+                  <Icon name="ext" size={10} />{" "}
+                  <code style={{ fontFamily: "var(--font-mono)" }}>{it.endpoint}</code>
+                </div>
+              )}
+              {it.notes && (
+                <div style={{ padding: "6px 0 2px", fontSize: 11, color: "var(--muted)" }}>
+                  {it.notes}
+                </div>
+              )}
+            </div>
           </div>
         ))}
       </div>
