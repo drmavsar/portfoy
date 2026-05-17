@@ -75,6 +75,18 @@ export default async function OzetPage() {
   // Hesap totalleri + custody × beneficiary kırılımı
   const accountTotal = accounts.reduce((s, a) => s + tryValueOf(a, fxRates), 0);
 
+  // Hesap totalleri varlık sınıfına göre — Toplam Servet kartında ayrı sütunlarda
+  let cashTotal = 0;
+  let fxTotal = 0;
+  let metalTotal = 0;
+  for (const a of accounts) {
+    const v = tryValueOf(a, fxRates);
+    const c = classifyAccountClass(a.currency);
+    if (c.key === "cash_try") cashTotal += v;
+    else if (c.key === "fx") fxTotal += v;
+    else if (c.key === "metal") metalTotal += v;
+  }
+
   const byCustody = new Map<
     string,
     { name: string; color: string; total: number; byBen: Map<string, number> }
@@ -334,7 +346,7 @@ export default async function OzetPage() {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
+                  gridTemplateColumns: "repeat(4, 1fr)",
                   gap: 16,
                   marginTop: 16,
                   paddingTop: 16,
@@ -342,13 +354,25 @@ export default async function OzetPage() {
                 }}
               >
                 <div>
-                  <div className="hint" style={{ fontSize: 11, marginBottom: 4 }}>HESAPLAR</div>
+                  <div className="hint" style={{ fontSize: 11, marginBottom: 4 }}>NAKİT</div>
                   <div className="tabular" style={{ fontSize: 18, fontWeight: 600 }}>
-                    {fmt.trydp(accountTotal)}
+                    {fmt.trydp(cashTotal)}
                   </div>
-                  <div className="hint" style={{ fontSize: 11 }}>
-                    Nakit · döviz · altın · kripto
+                  <div className="hint" style={{ fontSize: 11 }}>TRY hesaplar</div>
+                </div>
+                <div>
+                  <div className="hint" style={{ fontSize: 11, marginBottom: 4 }}>DÖVİZ</div>
+                  <div className="tabular" style={{ fontSize: 18, fontWeight: 600 }}>
+                    {fmt.trydp(fxTotal)}
                   </div>
+                  <div className="hint" style={{ fontSize: 11 }}>USD · EUR · diğer</div>
+                </div>
+                <div>
+                  <div className="hint" style={{ fontSize: 11, marginBottom: 4 }}>ALTIN</div>
+                  <div className="tabular" style={{ fontSize: 18, fontWeight: 600 }}>
+                    {fmt.trydp(metalTotal)}
+                  </div>
+                  <div className="hint" style={{ fontSize: 11 }}>gram + çeyrek + tam + …</div>
                 </div>
                 <div>
                   <div className="hint" style={{ fontSize: 11, marginBottom: 4 }}>YATIRIMLAR (MV)</div>
