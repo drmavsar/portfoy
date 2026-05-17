@@ -339,6 +339,7 @@ export default async function OzetPage() {
       <div className="page-head">
         <div>
           <div className="page-title">Özet</div>
+          <div className="page-sub">Tüm varlıklarınızın genel görünümü</div>
         </div>
       </div>
 
@@ -361,30 +362,69 @@ export default async function OzetPage() {
               </div>
             </div>
             <div style={{ padding: "20px 24px" }}>
-              <div
-                className="tabular"
-                style={{ fontSize: 36, fontWeight: 700, color: "var(--accent)" }}
-              >
-                {fmt.trydp(grandTotal)}
-              </div>
-              <div
-                className="tabular"
-                style={{
-                  fontSize: 14,
-                  fontWeight: 600,
-                  marginTop: 6,
-                  color: totalDayChange >= 0 ? "var(--positive)" : "var(--negative)",
-                }}
-              >
-                {totalDayChange >= 0 ? "+" : ""}
-                {fmt.tr(totalDayChange, 0)} ₺
-                {grandTotal > 0 && (
-                  <>
-                    {" · "}
+              <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+                <div style={{ flex: "0 0 auto" }}>
+                  <div
+                    className="tabular"
+                    style={{ fontSize: 36, fontWeight: 700, color: "var(--accent)" }}
+                  >
+                    {fmt.trydp(grandTotal)}
+                  </div>
+                  <div
+                    className="tabular"
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 600,
+                      marginTop: 6,
+                      color: totalDayChange >= 0 ? "var(--positive)" : "var(--negative)",
+                    }}
+                  >
                     {totalDayChange >= 0 ? "+" : ""}
-                    {((totalDayChange / (grandTotal - totalDayChange || grandTotal)) * 100).toFixed(2)}%
-                  </>
-                )}
+                    {fmt.tr(totalDayChange, 0)} ₺
+                    {grandTotal > 0 && (
+                      <>
+                        {" · "}
+                        {totalDayChange >= 0 ? "+" : ""}
+                        {((totalDayChange / (grandTotal - totalDayChange || grandTotal)) * 100).toFixed(2)}%
+                      </>
+                    )}
+                  </div>
+                  <div className="hint" style={{ fontSize: 11, marginTop: 4 }}>
+                    Bugünkü değişim
+                  </div>
+                </div>
+                {dailySnapshots.length >= 2 && (() => {
+                  const values = dailySnapshots.map((s) => Number(s.total_wealth));
+                  const min = Math.min(...values);
+                  const max = Math.max(...values);
+                  const range = max - min || 1;
+                  const width = 280;
+                  const height = 90;
+                  const stepX = width / (values.length - 1);
+                  const points = values.map((v, i) => {
+                    const x = i * stepX;
+                    const y = height - ((v - min) / range) * height;
+                    return `${x.toFixed(1)},${y.toFixed(1)}`;
+                  });
+                  const path = `M ${points.join(" L ")}`;
+                  const areaPath = `${path} L ${width},${height} L 0,${height} Z`;
+                  const trendUp = values[values.length - 1] >= values[0];
+                  const color = trendUp ? "var(--positive)" : "var(--negative)";
+                  return (
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height, maxWidth: width }}>
+                        <defs>
+                          <linearGradient id="trendGrad" x1="0" x2="0" y1="0" y2="1">
+                            <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+                            <stop offset="100%" stopColor={color} stopOpacity="0" />
+                          </linearGradient>
+                        </defs>
+                        <path d={areaPath} fill="url(#trendGrad)" />
+                        <path d={path} stroke={color} strokeWidth={1.5} fill="none" />
+                      </svg>
+                    </div>
+                  );
+                })()}
               </div>
               {(() => {
                 const equityDay = dayChangeMap.get("equity")?.change ?? 0;
@@ -393,24 +433,44 @@ export default async function OzetPage() {
                 const cashDay = 0;
                 const dayPct = (change: number, value: number) =>
                   value > 0 ? (change / (value - change || value)) * 100 : 0;
+                type IconKey = "wealth" | "diamond" | "swap" | "wallet";
                 const renderCell = (
                   label: string,
                   value: number,
                   change: number,
+                  iconName: IconKey,
+                  iconColor: string,
                 ) => {
                   const color = change >= 0 ? "var(--positive)" : "var(--negative)";
                   const pct = dayPct(change, value);
                   return (
-                    <div>
-                      <div className="hint" style={{ fontSize: 11, marginBottom: 4 }}>{label}</div>
-                      <div className="tabular" style={{ fontSize: 18, fontWeight: 600 }}>
-                        {fmt.trydp(value)}
+                    <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                      <div
+                        style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: 10,
+                          background: `color-mix(in oklab, ${iconColor} 14%, transparent)`,
+                          color: iconColor,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          flex: "0 0 auto",
+                        }}
+                      >
+                        <Icon name={iconName} size={16} />
                       </div>
-                      <div className="tabular" style={{ fontSize: 11, color }}>
-                        {change >= 0 ? "+" : ""}{fmt.tr(change, 0)} ₺
-                        {value > 0 && change !== 0 && (
-                          <> · {change >= 0 ? "+" : ""}{pct.toFixed(2)}%</>
-                        )}
+                      <div style={{ minWidth: 0 }}>
+                        <div className="hint" style={{ fontSize: 11, marginBottom: 4 }}>{label}</div>
+                        <div className="tabular" style={{ fontSize: 18, fontWeight: 600 }}>
+                          {fmt.trydp(value)}
+                        </div>
+                        <div className="tabular" style={{ fontSize: 11, color }}>
+                          {change >= 0 ? "+" : ""}{fmt.tr(change, 0)} ₺
+                          {value > 0 && change !== 0 && (
+                            <> · {change >= 0 ? "+" : ""}{pct.toFixed(2)}%</>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -421,15 +481,15 @@ export default async function OzetPage() {
                       display: "grid",
                       gridTemplateColumns: "repeat(4, 1fr)",
                       gap: 16,
-                      marginTop: 16,
-                      paddingTop: 16,
+                      marginTop: 20,
+                      paddingTop: 18,
                       borderTop: "1px solid var(--border-soft)",
                     }}
                   >
-                    {renderCell("YATIRIMLAR", investmentMv, equityDay)}
-                    {renderCell("ALTIN", metalTotal, metalDay)}
-                    {renderCell("DÖVİZ", fxTotal, fxDay)}
-                    {renderCell("NAKİT", cashTotal, cashDay)}
+                    {renderCell("YATIRIMLAR", investmentMv, equityDay, "wealth", "#e26a8f")}
+                    {renderCell("ALTIN", metalTotal, metalDay, "diamond", "#d4a056")}
+                    {renderCell("DÖVİZ", fxTotal, fxDay, "swap", "#6ea8fe")}
+                    {renderCell("NAKİT", cashTotal, cashDay, "wallet", "#4cc9b0")}
                   </div>
                 );
               })()}
