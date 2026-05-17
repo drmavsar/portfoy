@@ -90,6 +90,51 @@ export async function createTransaction(input: {
   return { ok: true, row: data as unknown as TransactionRow };
 }
 
+export async function updateTransaction(input: {
+  id: string;
+  direction: TxnDirection;
+  account_id: string;
+  occurred_on: string;
+  amount: number;
+  description: string;
+  category_id: string | null;
+  beneficiary_id: string | null;
+  notes: string | null;
+}): Promise<{ ok: true; row: TransactionRow } | { ok: false; error: string }> {
+  if (!(await isSupabaseConfigured())) {
+    return { ok: false, error: "Supabase yapılandırılmamış." };
+  }
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Giriş yapmadın." };
+
+  if (!input.account_id) return { ok: false, error: "Hesap seç." };
+  if (!(input.amount > 0)) return { ok: false, error: "Tutar pozitif olmalı." };
+
+  const { data, error } = await supabase
+    .from("transactions")
+    .update({
+      account_id: input.account_id,
+      occurred_on: input.occurred_on,
+      amount: input.amount,
+      description: input.description.trim() || null,
+      category_id: input.category_id,
+      beneficiary_id: input.beneficiary_id,
+      notes: input.notes?.trim() || null,
+    } as never)
+    .eq("id", input.id)
+    .select(
+      "id, account_id, occurred_on, direction, amount, currency, description, category_id, beneficiary_id, is_transfer, notes",
+    )
+    .single();
+
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath(input.direction === "inflow" ? "/gelirler" : "/giderler");
+  revalidatePath("/ozet");
+  return { ok: true, row: data as unknown as TransactionRow };
+}
+
 export async function deleteTransaction(
   id: string,
   direction: TxnDirection,

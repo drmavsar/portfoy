@@ -9,6 +9,7 @@ import {
   type TxnDirection,
   createTransaction,
   deleteTransaction,
+  updateTransaction,
 } from "@/app/(app)/_lib/cashflow-actions";
 import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
@@ -45,6 +46,38 @@ function fmtDate(iso: string): string {
   return `${d}.${m}.${y.slice(2)}`;
 }
 
+type RangeKey = "month" | "ytd" | "last30" | "last90" | "all" | "custom";
+type SortCol = "date" | "desc" | "cat" | "ben" | "acc" | "amount";
+type SortDir = "asc" | "desc";
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addDays(iso: string, days: number): string {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function rangeBounds(key: RangeKey, customFrom: string, customTo: string): { from: string; to: string } | null {
+  const today = todayIso();
+  if (key === "all") return null;
+  if (key === "month") {
+    const now = new Date();
+    const from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+    return { from, to: today };
+  }
+  if (key === "ytd") return { from: `${new Date().getFullYear()}-01-01`, to: today };
+  if (key === "last30") return { from: addDays(today, -29), to: today };
+  if (key === "last90") return { from: addDays(today, -89), to: today };
+  if (key === "custom") {
+    if (!customFrom || !customTo) return null;
+    return { from: customFrom, to: customTo };
+  }
+  return null;
+}
+
 interface Props {
   direction: TxnDirection;
   title: string;
@@ -70,27 +103,22 @@ export function CashflowClient({
 }: Props) {
   const [rows, setRows] = useState<TransactionRow[]>(initialRows);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<TransactionRow | null>(null);
   const [busy, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  // Filtre
+  const [range, setRange] = useState<RangeKey>("month");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+
+  // Sıralama
+  const [sortCol, setSortCol] = useState<SortCol>("date");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   const isInflow = direction === "inflow";
   const sign = isInflow ? "+" : "-";
   const color = isInflow ? "var(--positive)" : "var(--negative)";
-
-  const monthSum = useMemo(() => {
-    const now = new Date();
-    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-    return rows
-      .filter((r) => r.occurred_on.startsWith(ym))
-      .reduce((s, r) => s + Number(r.amount), 0);
-  }, [rows]);
-
-  const ytdSum = useMemo(() => {
-    const y = new Date().getFullYear().toString();
-    return rows
-      .filter((r) => r.occurred_on.startsWith(y))
-      .reduce((s, r) => s + Number(r.amount), 0);
-  }, [rows]);
 
   const catMap = useMemo(
     () => Object.fromEntries(categories.map((c) => [c.id, c])),
@@ -110,6 +138,82 @@ export function CashflowClient({
     return custodies.find((c) => c.id === a.custody_id) ?? null;
   };
 
+  // KPI'lar — toplam veri seti üzerinden (filtreden bağımsız)
+  const monthSum = useMemo(() => {
+    const now = new Date();
+    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    return rows
+      .filter((r) => r.occurred_on.startsWith(ym))
+      .reduce((s, r) => s + Number(r.amount), 0);
+  }, [rows]);
+
+  const ytdSum = useMemo(() => {
+    const y = new Date().getFullYear().toString();
+    return rows
+      .filter((r) => r.occurred_on.startsWith(y))
+      .reduce((s, r) => s + Number(r.amount), 0);
+  }, [rows]);
+
+  // Filtre + sıralama
+  const filteredRows = useMemo(() => {
+    const bounds = rangeBounds(range, customFrom, customTo);
+    let out = rows;
+    if (bounds) {
+      out = out.filter((r) => r.occurred_on >= bounds.from && r.occurred_on <= bounds.to);
+    }
+
+    const cmpString = (a: string, b: string) => a.localeCompare(b, "tr");
+
+    const sorted = [...out].sort((a, b) => {
+      let cmp = 0;
+      switch (sortCol) {
+        case "date":
+          cmp = cmpString(a.occurred_on, b.occurred_on);
+          break;
+        case "desc":
+          cmp = cmpString(a.description ?? "", b.description ?? "");
+          break;
+        case "cat": {
+          const an = a.category_id ? catMap[a.category_id]?.name ?? "" : "";
+          const bn = b.category_id ? catMap[b.category_id]?.name ?? "" : "";
+          cmp = cmpString(an, bn);
+          break;
+        }
+        case "ben": {
+          const an = a.beneficiary_id ? benMap[a.beneficiary_id]?.name ?? "" : "";
+          const bn = b.beneficiary_id ? benMap[b.beneficiary_id]?.name ?? "" : "";
+          cmp = cmpString(an, bn);
+          break;
+        }
+        case "acc": {
+          const aa = accMap[a.account_id]?.name ?? "";
+          const ba = accMap[b.account_id]?.name ?? "";
+          cmp = cmpString(aa, ba);
+          break;
+        }
+        case "amount":
+          cmp = Number(a.amount) - Number(b.amount);
+          break;
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+
+    return sorted;
+  }, [rows, range, customFrom, customTo, sortCol, sortDir, accMap, benMap, catMap]);
+
+  const filteredSum = useMemo(
+    () => filteredRows.reduce((s, r) => s + Number(r.amount), 0),
+    [filteredRows],
+  );
+
+  const toggleSort = (col: SortCol) => {
+    if (sortCol === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortCol(col);
+      setSortDir(col === "date" || col === "amount" ? "desc" : "asc");
+    }
+  };
+
   const remove = (id: string) => {
     setError(null);
     setRows((prev) => prev.filter((r) => r.id !== id));
@@ -123,6 +227,19 @@ export function CashflowClient({
     setRows((prev) => [row, ...prev]);
     setModalOpen(false);
   };
+  const onUpdated = (row: TransactionRow) => {
+    setRows((prev) => prev.map((r) => (r.id === row.id ? row : r)));
+    setEditing(null);
+  };
+
+  const rangePresets: Array<[RangeKey, string]> = [
+    ["month", "Bu Ay"],
+    ["ytd", "YTD"],
+    ["last30", "Son 30"],
+    ["last90", "Son 90"],
+    ["all", "Tümü"],
+    ["custom", "Özel"],
+  ];
 
   return (
     <div>
@@ -143,158 +260,140 @@ export function CashflowClient({
       </div>
 
       {!configured && (
-        <div
-          style={{
-            padding: 10,
-            marginBottom: 12,
-            background: "var(--warning-soft)",
-            color: "var(--warning)",
-            borderRadius: 6,
-            fontSize: 12,
-          }}
-        >
+        <div style={{ padding: 10, marginBottom: 12, background: "var(--warning-soft)", color: "var(--warning)", borderRadius: 6, fontSize: 12 }}>
           Supabase yapılandırılmamış.
         </div>
       )}
-
       {accounts.length === 0 && (
-        <div
-          style={{
-            padding: 12,
-            marginBottom: 12,
-            background: "var(--surface-2)",
-            borderRadius: 6,
-            fontSize: 12,
-            color: "var(--muted)",
-          }}
-        >
+        <div style={{ padding: 12, marginBottom: 12, background: "var(--surface-2)", borderRadius: 6, fontSize: 12, color: "var(--muted)" }}>
           Önce <b>Hesaplar</b> sekmesinden bir hesap ekle.
         </div>
       )}
-
       {error && (
-        <div style={{ padding: 10, marginBottom: 12, color: "var(--negative)", fontSize: 12 }}>
-          {error}
-        </div>
+        <div style={{ padding: 10, marginBottom: 12, color: "var(--negative)", fontSize: 12 }}>{error}</div>
       )}
 
       <div className="grid-base grid-3" style={{ marginBottom: 18, gap: 16 }}>
         <div className="card" style={{ padding: 16 }}>
-          <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>
-            BU AY {isInflow ? "GELİR" : "GİDER"}
-          </div>
-          <div className="tabular" style={{ fontSize: 24, fontWeight: 700, color }}>
-            {sign}
-            {fmt.try(monthSum)}
-          </div>
+          <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>BU AY {isInflow ? "GELİR" : "GİDER"}</div>
+          <div className="tabular" style={{ fontSize: 24, fontWeight: 700, color }}>{sign}{fmt.try(monthSum)}</div>
         </div>
         <div className="card" style={{ padding: 16 }}>
-          <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>
-            BU YIL (YTD)
-          </div>
-          <div className="tabular" style={{ fontSize: 24, fontWeight: 700, color }}>
-            {sign}
-            {fmt.try(ytdSum)}
-          </div>
+          <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>BU YIL (YTD)</div>
+          <div className="tabular" style={{ fontSize: 24, fontWeight: 700, color }}>{sign}{fmt.try(ytdSum)}</div>
         </div>
         <div className="card" style={{ padding: 16 }}>
-          <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>
-            KAYIT SAYISI
-          </div>
-          <div className="tabular" style={{ fontSize: 24, fontWeight: 700 }}>{rows.length}</div>
+          <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>FİLTRELİ TOPLAM</div>
+          <div className="tabular" style={{ fontSize: 24, fontWeight: 700, color }}>{sign}{fmt.try(filteredSum)}</div>
+          <div className="hint" style={{ fontSize: 11 }}>{filteredRows.length} kayıt</div>
         </div>
       </div>
 
       <div className="card">
-        <div className="card-head">
+        <div className="card-head" style={{ flexWrap: "wrap", gap: 10 }}>
           <div className="card-title">{isInflow ? "Gelir Kayıtları" : "Gider Kayıtları"}</div>
-          <div className="card-sub">{rows.length} kayıt</div>
+          <div className="card-sub">{filteredRows.length} / {rows.length}</div>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            {rangePresets.map(([k, label]) => (
+              <button
+                key={k}
+                className={`btn btn-sm ${range === k ? "btn-prim" : ""}`}
+                onClick={() => setRange(k)}
+              >
+                {label}
+              </button>
+            ))}
+            {range === "custom" && (
+              <>
+                <input
+                  type="date"
+                  style={{ ...inp, width: 140, padding: "4px 8px" }}
+                  value={customFrom}
+                  onChange={(e) => setCustomFrom(e.target.value)}
+                />
+                <span style={{ fontSize: 12, color: "var(--muted)" }}>→</span>
+                <input
+                  type="date"
+                  style={{ ...inp, width: 140, padding: "4px 8px" }}
+                  value={customTo}
+                  onChange={(e) => setCustomTo(e.target.value)}
+                />
+              </>
+            )}
+          </div>
         </div>
 
-        {rows.length === 0 ? (
+        {filteredRows.length === 0 ? (
           <div className="empty">
-            <div className="title">Henüz kayıt yok</div>
+            <div className="title">Bu filtrede kayıt yok</div>
             <div>
-              Sağ üstteki &quot;{isInflow ? "Yeni Gelir" : "Yeni Gider"}&quot; ile ilk kaydını
-              ekle.
+              {rows.length === 0
+                ? <>Sağ üstteki &quot;{isInflow ? "Yeni Gelir" : "Yeni Gider"}&quot; ile ilk kaydını ekle.</>
+                : <>Filtre aralığını genişlet veya &quot;Tümü&quot;yü dene.</>}
             </div>
           </div>
         ) : (
           <table className="dg">
             <thead>
               <tr>
-                <th style={{ width: 90 }}>Tarih</th>
-                <th>Açıklama</th>
-                <th>Kategori</th>
-                <th>Kişi</th>
-                <th>Hesap</th>
-                <th className="num">Tutar</th>
-                <th style={{ width: 40 }} />
+                <SortHeader col="date" label="Tarih" sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} style={{ width: 100 }} />
+                <SortHeader col="desc" label="Açıklama" sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} />
+                <SortHeader col="cat" label="Kategori" sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} />
+                <SortHeader col="ben" label="Kişi" sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} />
+                <SortHeader col="acc" label="Hesap" sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} />
+                <SortHeader col="amount" label="Tutar" sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} num />
+                <th style={{ width: 76 }} />
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
+              {filteredRows.map((r) => {
                 const acc = accMap[r.account_id];
                 const cust = custodyOf(r.account_id);
                 const cat = r.category_id ? catMap[r.category_id] : null;
                 const ben = r.beneficiary_id ? benMap[r.beneficiary_id] : null;
                 return (
                   <tr key={r.id}>
-                    <td className="mono" style={{ color: "var(--muted)", fontSize: 11 }}>
-                      {fmtDate(r.occurred_on)}
-                    </td>
+                    <td className="mono" style={{ color: "var(--muted)", fontSize: 11 }}>{fmtDate(r.occurred_on)}</td>
                     <td>
                       <div style={{ fontSize: 13, fontWeight: 500 }}>{r.description ?? "—"}</div>
                       {r.notes && <div className="hint" style={{ marginTop: 2 }}>{r.notes}</div>}
                     </td>
                     <td style={{ fontSize: 12 }}>
-                      {cat ? (
-                        <span>
-                          {cat.icon ?? ""} {cat.name}
-                        </span>
-                      ) : (
-                        <span className="hint">—</span>
-                      )}
+                      {cat ? <span>{cat.icon ?? ""} {cat.name}</span> : <span className="hint">—</span>}
                     </td>
                     <td style={{ fontSize: 12 }}>
                       {ben ? (
                         <span>
-                          <span
-                            style={{
-                              display: "inline-block",
-                              width: 8,
-                              height: 8,
-                              borderRadius: 50,
-                              background: ben.color ?? "#7d8699",
-                              marginRight: 6,
-                              verticalAlign: "middle",
-                            }}
-                          />
+                          <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 50, background: ben.color ?? "#7d8699", marginRight: 6, verticalAlign: "middle" }} />
                           {ben.name}
                         </span>
-                      ) : (
-                        <span className="hint">—</span>
-                      )}
+                      ) : <span className="hint">—</span>}
                     </td>
                     <td style={{ fontSize: 12, color: "var(--muted)" }}>
                       {cust && acc ? `${cust.name} / ${acc.name}` : acc?.name ?? "—"}
                     </td>
-                    <td
-                      className="num tabular"
-                      style={{ color, fontWeight: 600 }}
-                    >
-                      {sign}
-                      {fmt.tr(Number(r.amount), 2)} ₺
+                    <td className="num tabular" style={{ color, fontWeight: 600 }}>
+                      {sign}{fmt.tr(Number(r.amount), 2)} ₺
                     </td>
                     <td>
-                      <button
-                        className="icon-btn"
-                        onClick={() => remove(r.id)}
-                        disabled={!configured || busy}
-                        title="Sil"
-                      >
-                        <Icon name="trash" size={12} />
-                      </button>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <button
+                          className="icon-btn"
+                          onClick={() => setEditing(r)}
+                          disabled={!configured || busy}
+                          title="Düzenle"
+                        >
+                          <Icon name="edit" size={12} />
+                        </button>
+                        <button
+                          className="icon-btn"
+                          onClick={() => remove(r.id)}
+                          disabled={!configured || busy}
+                          title="Sil"
+                        >
+                          <Icon name="trash" size={12} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -312,10 +411,56 @@ export function CashflowClient({
           beneficiaries={beneficiaries}
           categories={categories.filter((c) => c.kind === (isInflow ? "income" : "expense"))}
           onClose={() => setModalOpen(false)}
-          onCreated={onCreated}
+          onSaved={onCreated}
+        />
+      )}
+      {editing && (
+        <TransactionModal
+          direction={direction}
+          accounts={accounts}
+          custodies={custodies}
+          beneficiaries={beneficiaries}
+          categories={categories.filter((c) => c.kind === (isInflow ? "income" : "expense"))}
+          initial={editing}
+          onClose={() => setEditing(null)}
+          onSaved={onUpdated}
         />
       )}
     </div>
+  );
+}
+
+function SortHeader({
+  col,
+  label,
+  sortCol,
+  sortDir,
+  onToggle,
+  num,
+  style,
+}: {
+  col: SortCol;
+  label: string;
+  sortCol: SortCol;
+  sortDir: SortDir;
+  onToggle: (c: SortCol) => void;
+  num?: boolean;
+  style?: React.CSSProperties;
+}) {
+  const active = sortCol === col;
+  return (
+    <th
+      className={num ? "num" : ""}
+      style={{ ...style, cursor: "pointer", userSelect: "none" }}
+      onClick={() => onToggle(col)}
+    >
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+        {label}
+        <span style={{ opacity: active ? 1 : 0.3, fontSize: 9 }}>
+          {active ? (sortDir === "asc" ? "▲" : "▼") : "▲▼"}
+        </span>
+      </span>
+    </th>
   );
 }
 
@@ -325,25 +470,28 @@ function TransactionModal({
   custodies,
   beneficiaries,
   categories,
+  initial,
   onClose,
-  onCreated,
+  onSaved,
 }: {
   direction: TxnDirection;
   accounts: AccountRow[];
   custodies: CustodyRow[];
   beneficiaries: BeneficiaryLite[];
   categories: CategoryRow[];
+  initial?: TransactionRow;
   onClose: () => void;
-  onCreated: (row: TransactionRow) => void;
+  onSaved: (row: TransactionRow) => void;
 }) {
   const isInflow = direction === "inflow";
-  const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
-  const [categoryId, setCategoryId] = useState("");
-  const [beneficiaryId, setBeneficiaryId] = useState("");
-  const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [notes, setNotes] = useState("");
+  const isEdit = !!initial;
+  const [accountId, setAccountId] = useState(initial?.account_id ?? accounts[0]?.id ?? "");
+  const [categoryId, setCategoryId] = useState(initial?.category_id ?? "");
+  const [beneficiaryId, setBeneficiaryId] = useState(initial?.beneficiary_id ?? "");
+  const [description, setDescription] = useState(initial?.description ?? "");
+  const [amount, setAmount] = useState(initial ? String(initial.amount) : "");
+  const [date, setDate] = useState(initial?.occurred_on ?? new Date().toISOString().slice(0, 10));
+  const [notes, setNotes] = useState(initial?.notes ?? "");
   const [busy, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -364,17 +512,29 @@ function TransactionModal({
       return;
     }
     startTransition(async () => {
-      const r = await createTransaction({
-        account_id: accountId,
-        occurred_on: date,
-        direction,
-        amount: amt,
-        description,
-        category_id: categoryId || null,
-        beneficiary_id: beneficiaryId || null,
-        notes: notes || null,
-      });
-      if (r.ok) onCreated(r.row);
+      const r = isEdit
+        ? await updateTransaction({
+            id: initial.id,
+            direction,
+            account_id: accountId,
+            occurred_on: date,
+            amount: amt,
+            description,
+            category_id: categoryId || null,
+            beneficiary_id: beneficiaryId || null,
+            notes: notes || null,
+          })
+        : await createTransaction({
+            account_id: accountId,
+            occurred_on: date,
+            direction,
+            amount: amt,
+            description,
+            category_id: categoryId || null,
+            beneficiary_id: beneficiaryId || null,
+            notes: notes || null,
+          });
+      if (r.ok) onSaved(r.row);
       else setError(r.error);
     });
   };
@@ -382,18 +542,10 @@ function TransactionModal({
   return (
     <div className="modal-back" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div
-          style={{
-            padding: "16px 20px",
-            borderBottom: "1px solid var(--border-soft)",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-          }}
-        >
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border-soft)", display: "flex", alignItems: "center", gap: 10 }}>
           <Icon name="cashflow" size={16} />
           <span style={{ fontWeight: 600, fontSize: 15 }}>
-            {isInflow ? "Yeni Gelir" : "Yeni Gider"}
+            {isEdit ? (isInflow ? "Geliri Düzenle" : "Gideri Düzenle") : (isInflow ? "Yeni Gelir" : "Yeni Gider")}
           </span>
           <span className="spacer" />
           <button className="icon-btn" onClick={onClose}>
@@ -405,23 +557,11 @@ function TransactionModal({
           <div className="grid-base grid-2" style={{ gap: 14 }}>
             <div>
               <Lbl>Tarih</Lbl>
-              <input
-                type="date"
-                style={inp}
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-              />
+              <input type="date" style={inp} value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
             <div>
               <Lbl>Tutar (₺)</Lbl>
-              <input
-                type="number"
-                step="0.01"
-                style={inp}
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0,00"
-              />
+              <input type="number" step="0.01" style={inp} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0,00" />
             </div>
           </div>
 
@@ -437,11 +577,7 @@ function TransactionModal({
 
           <div>
             <Lbl>Hesap</Lbl>
-            <select
-              style={inp}
-              value={accountId}
-              onChange={(e) => setAccountId(e.target.value)}
-            >
+            <select style={inp} value={accountId} onChange={(e) => setAccountId(e.target.value)}>
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>{accountLabel(a)}</option>
               ))}
@@ -451,26 +587,16 @@ function TransactionModal({
           <div className="grid-base grid-2" style={{ gap: 14 }}>
             <div>
               <Lbl>Kategori</Lbl>
-              <select
-                style={inp}
-                value={categoryId}
-                onChange={(e) => setCategoryId(e.target.value)}
-              >
+              <select style={inp} value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
                 <option value="">— Seçme —</option>
                 {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.icon ?? ""} {c.name}
-                  </option>
+                  <option key={c.id} value={c.id}>{c.icon ?? ""} {c.name}</option>
                 ))}
               </select>
             </div>
             <div>
               <Lbl>Kişi</Lbl>
-              <select
-                style={inp}
-                value={beneficiaryId}
-                onChange={(e) => setBeneficiaryId(e.target.value)}
-              >
+              <select style={inp} value={beneficiaryId} onChange={(e) => setBeneficiaryId(e.target.value)}>
                 <option value="">— Seçme —</option>
                 {beneficiaries.map((b) => (
                   <option key={b.id} value={b.id}>{b.name}</option>
@@ -481,28 +607,16 @@ function TransactionModal({
 
           <div>
             <Lbl>Not (opsiyonel)</Lbl>
-            <input
-              style={inp}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-            />
+            <input style={inp} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </div>
 
           {error && <div style={{ color: "var(--negative)", fontSize: 12 }}>{error}</div>}
         </div>
 
-        <div
-          style={{
-            padding: "12px 20px",
-            borderTop: "1px solid var(--border-soft)",
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: 8,
-          }}
-        >
+        <div style={{ padding: "12px 20px", borderTop: "1px solid var(--border-soft)", display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button className="btn" onClick={onClose} disabled={busy}>İptal</button>
           <button className="btn btn-prim" onClick={submit} disabled={busy || !amount.trim()}>
-            {busy ? "Kaydediliyor…" : "Kaydet"}
+            {busy ? "Kaydediliyor…" : (isEdit ? "Güncelle" : "Kaydet")}
           </button>
         </div>
       </div>
