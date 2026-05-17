@@ -4,5 +4,11 @@
   "regions": ["fra1"],
   "buildCommand": "next build",
   "installCommand": "npm install",
-  "devCommand": "next dev"
+  "devCommand": "next dev",
+  "functions": {
+    "api/bist-sectors.py": {
+      "memory": 512,
+      "maxDuration": 30
+    }
+  }
 }
