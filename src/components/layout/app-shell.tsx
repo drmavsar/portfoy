@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { FxStrip } from "@/components/layout/fx-strip";
 import { Icon, type IconName } from "@/components/ui/icon";
+import type { FxTicker } from "@/app/(app)/_lib/asset-rates";
 
 interface NavEntry {
   href: string;
@@ -29,7 +30,13 @@ const NAV: NavEntry[] = [
 
 const SECTIONS: Array<NavEntry["section"]> = ["Genel", "Piyasa", "Sistem"];
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  fxTickers = [],
+}: {
+  children: React.ReactNode;
+  fxTickers?: FxTicker[];
+}) {
   const pathname = usePathname();
   const active = NAV.find((n) => pathname === n.href || pathname.startsWith(`${n.href}/`));
   const sub = active?.label ?? "Özet";
@@ -118,7 +125,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <b>{sub}</b>
         </div>
 
-        <FxStrip />
+        <FxStrip tickers={fxTickers} />
 
         <div className="topbar-filters">
           <div className="search">
