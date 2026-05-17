@@ -14,7 +14,7 @@ import {
 import { getAssetRates } from "@/app/(app)/_lib/asset-rates";
 import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
 import { listTransactionsForReports } from "@/app/(app)/_lib/reports-actions";
-import { listWealthSnapshots } from "@/app/(app)/_lib/wealth-snapshots-actions";
+import { listBenchmarkPoints, listWealthSnapshots } from "@/app/(app)/_lib/wealth-snapshots-actions";
 import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
 
@@ -54,7 +54,7 @@ function tryValueOf(a: AccountRow, fxRates: Record<string, number | undefined>):
 }
 
 export default async function OzetPage() {
-  const [accounts, custodies, beneficiaries, fxRates, holdings, assets, portfolios, trades, txns, wealthSnapshots] = await Promise.all([
+  const [accounts, custodies, beneficiaries, fxRates, holdings, assets, portfolios, trades, txns, wealthSnapshots, benchmarkPoints] = await Promise.all([
     listAccounts(),
     listCustodyLocations(),
     listBeneficiariesLite(),
@@ -65,6 +65,7 @@ export default async function OzetPage() {
     listTrades(),
     listTransactionsForReports(12),
     listWealthSnapshots(),
+    listBenchmarkPoints(),
   ]);
 
   const benMap: Record<string, BeneficiaryLite> = Object.fromEntries(beneficiaries.map((b) => [b.id, b]));
@@ -507,6 +508,108 @@ export default async function OzetPage() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            );
+          })()}
+
+          {/* Reel Getiri: Portföy YoY vs benchmark YoY karşılaştırması */}
+          {wealthSnapshots.length >= 2 && benchmarkPoints.length > 0 && (() => {
+            // Her benchmark code için yıl sonu (Aralık veya en sonki) değerini al
+            const byCodeByYear = new Map<string, Map<string, number>>();
+            const codeName = new Map<string, string>();
+            for (const p of benchmarkPoints) {
+              const yr = p.as_of.slice(0, 4);
+              if (!byCodeByYear.has(p.code)) byCodeByYear.set(p.code, new Map());
+              const m = byCodeByYear.get(p.code)!;
+              // Her yıl için en geç tarihli değeri kullan
+              const existing = m.get(yr);
+              if (existing == null || p.as_of >= (Array.from(m.keys()).find((k) => k === yr) ?? "")) {
+                m.set(yr, Number(p.value));
+              }
+              codeName.set(p.code, p.name);
+            }
+            const codes = Array.from(codeName.keys()).filter((c) => c !== "CPI_TR");
+
+            // Yıl çiftleri için YoY hesabı
+            const yoyRows: Array<{
+              year: string;
+              portfolio: number | null;
+              bench: Record<string, number | null>;
+            }> = [];
+            for (let i = 1; i < wealthSnapshots.length; i++) {
+              const cur = wealthSnapshots[i];
+              const prev = wealthSnapshots[i - 1];
+              const yr = cur.period.slice(0, 4);
+              const prevYr = prev.period.slice(0, 4);
+              const portYoY = Number(prev.total_try) > 0
+                ? ((Number(cur.total_try) - Number(prev.total_try)) / Number(prev.total_try)) * 100
+                : null;
+              const benchYoY: Record<string, number | null> = {};
+              for (const c of codes) {
+                const cv = byCodeByYear.get(c)?.get(yr);
+                const pv = byCodeByYear.get(c)?.get(prevYr);
+                benchYoY[c] = cv != null && pv != null && pv > 0 ? ((cv - pv) / pv) * 100 : null;
+              }
+              yoyRows.push({ year: yr, portfolio: portYoY, bench: benchYoY });
+            }
+
+            return (
+              <div className="card" style={{ marginTop: 16 }}>
+                <div className="card-head">
+                  <div className="card-title">Reel Getiri — Portföy vs Benchmark</div>
+                  <div className="card-sub">
+                    YoY % · pozitif fark = benchmark&apos;ı geçtin, negatif = altında kaldın
+                  </div>
+                </div>
+                <table className="dg">
+                  <thead>
+                    <tr>
+                      <th>Yıl</th>
+                      <th className="num">Portföy</th>
+                      {codes.map((c) => (
+                        <th key={c} className="num">{codeName.get(c) ?? c}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {yoyRows.map((r) => {
+                      const port = r.portfolio;
+                      const portColor =
+                        port == null ? "var(--muted)" : port >= 0 ? "var(--positive)" : "var(--negative)";
+                      return (
+                        <tr key={r.year}>
+                          <td style={{ fontWeight: 600 }}>{r.year}</td>
+                          <td className="num tabular" style={{ color: portColor, fontWeight: 600 }}>
+                            {port == null ? "—" : `${port >= 0 ? "+" : ""}${port.toFixed(2)}%`}
+                          </td>
+                          {codes.map((c) => {
+                            const b = r.bench[c];
+                            if (b == null || port == null) {
+                              return <td key={c} className="num tabular hint">—</td>;
+                            }
+                            const excess = port - b;
+                            const color = excess >= 0 ? "var(--positive)" : "var(--negative)";
+                            return (
+                              <td key={c} className="num tabular" style={{ color }}>
+                                <div style={{ fontSize: 12 }}>{b >= 0 ? "+" : ""}{b.toFixed(1)}%</div>
+                                <div className="hint" style={{ fontSize: 10, color }}>
+                                  fark {excess >= 0 ? "+" : ""}{excess.toFixed(1)}%
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div
+                  className="hint"
+                  style={{ padding: "10px 16px", borderTop: "1px solid var(--border-soft)", fontSize: 11 }}
+                >
+                  Her hücrede üst satır benchmark&apos;ın yıllık % değişimi, alt satır portföyünün
+                  benchmark&apos;a göre farkı (excess return). Pozitif yeşil = senin yılın daha iyi.
+                </div>
               </div>
             );
           })()}
