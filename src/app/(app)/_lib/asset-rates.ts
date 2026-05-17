@@ -159,6 +159,55 @@ async function fetchCoingeckoPrices(): Promise<Record<string, number>> {
   }
 }
 
+export interface FxTicker {
+  symbol: string;
+  label: string;
+  price: number;
+  chgPct: number | null;
+}
+
+/** Topbar canlı şerit için: USD/EUR/GBP + gram altın. Truncgil'den günlük değişim de gelir. */
+export async function getFxTickers(): Promise<FxTicker[]> {
+  try {
+    const res = await fetch(TRUNCGIL_URL, {
+      next: { revalidate: 600 },
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)",
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) throw new Error(`Truncgil HTTP ${res.status}`);
+    const json = (await res.json()) as Record<string, unknown>;
+
+    const pickPct = (raw: unknown): number | null => {
+      if (typeof raw !== "string") return null;
+      const m = raw.replace("%", "").replace(",", ".").trim();
+      const n = parseFloat(m);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const extract = (key: string, label: string): FxTicker | null => {
+      const entry = json[key];
+      if (typeof entry !== "object" || entry === null) return null;
+      const e = entry as TruncgilEntry & { Change?: string };
+      const price = parseNum(e.Selling) ?? parseNum(e.Buying);
+      if (price == null) return null;
+      return { symbol: label, label, price, chgPct: pickPct(e.Change) };
+    };
+
+    const out: FxTicker[] = [];
+    const usd = extract("USD", "USD/TRY"); if (usd) out.push(usd);
+    const eur = extract("EUR", "EUR/TRY"); if (eur) out.push(eur);
+    const gbp = extract("GBP", "GBP/TRY"); if (gbp) out.push(gbp);
+    const xau = extract("gram-altin", "GRAM ALTIN"); if (xau) out.push(xau);
+
+    return out;
+  } catch (err) {
+    console.error("getFxTickers error", err);
+    return [];
+  }
+}
+
 /** Tüm desteklenen para birimi → TRY birim fiyat map'i. */
 export async function getAssetRates(): Promise<Record<string, number>> {
   const [truncgil, fxFallback, crypto] = await Promise.all([
