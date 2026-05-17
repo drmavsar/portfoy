@@ -42,6 +42,37 @@ function parseNum(v: unknown): number | null {
   return null;
 }
 
+// Truncgil anahtar alias'ları (v3 dash, v4 UPPER, varyantlar) → bizim currency code
+// `normalizeKey` aşağıda anahtarı küçük-harf + non-alnum sil yaparak eşler.
+const TRUNCGIL_ALIASES: Record<string, string[]> = {
+  USD: ["usd"],
+  EUR: ["eur"],
+  GBP: ["gbp"],
+  CHF: ["chf"],
+  JPY: ["jpy"],
+  AUD: ["aud"],
+  CAD: ["cad"],
+  SEK: ["sek"],
+  NOK: ["nok"],
+  DKK: ["dkk"],
+  XAU: ["gramaltin", "gramalt"],
+  XAU_OZ: ["ons", "onsaltin"],
+  XAG: ["gumus", "gramgumus", "xag"],
+  CEYREK: ["ceyrekaltin", "ceyrekyenialtin", "ceyrekyeni", "ceyrekeskialtin"],
+  YARIM: ["yarimaltin", "yarimyenialtin"],
+  TAM: ["tamaltin", "tamyenialtin"],
+  CUMHURIYET: ["cumhuriyetaltini", "cumhuriyetaltn", "cumhuraltin"],
+  ATA: ["ataaltini", "ataaltin"],
+  RESAT: ["resataltini", "resataltin"],
+  BILEZIK22: ["yia", "22ayarbilezik", "ayarbilezik22"],
+  BILEZIK14: ["14ayarbilezik", "ayarbilezik14"],
+  BILEZIK18: ["18ayarbilezik", "ayarbilezik18"],
+};
+
+function normalizeKey(k: string): string {
+  return k.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 async function fetchTruncgil(): Promise<Record<string, number>> {
   try {
     const res = await fetch(TRUNCGIL_URL, {
@@ -54,11 +85,13 @@ async function fetchTruncgil(): Promise<Record<string, number>> {
     if (!res.ok) throw new Error(`Truncgil HTTP ${res.status}`);
     const json = (await res.json()) as Record<string, unknown>;
 
+    // Reverse lookup: normalized truncgil key → currency code
+    const lookup = new Map<string, string>();
+    for (const [code, aliases] of Object.entries(TRUNCGIL_ALIASES)) {
+      for (const a of aliases) lookup.set(a, code);
+    }
+
     const out: Record<string, number> = {};
-    const setIfNum = (key: string, val: unknown) => {
-      const n = parseNum(val);
-      if (n != null) out[key] = n;
-    };
 
     for (const [key, val] of Object.entries(json)) {
       if (typeof val !== "object" || val === null) continue;
@@ -66,50 +99,8 @@ async function fetchTruncgil(): Promise<Record<string, number>> {
       const selling = parseNum(e.Selling) ?? parseNum(e.Buying);
       if (selling == null) continue;
 
-      // Mapping: Truncgil anahtarı → bizim currency code
-      switch (key) {
-        case "USD":
-        case "EUR":
-        case "GBP":
-        case "CHF":
-        case "JPY":
-        case "AUD":
-        case "CAD":
-        case "SEK":
-        case "NOK":
-        case "DKK":
-          out[key] = selling;
-          break;
-        case "gram-altin":
-          out.XAU = selling;
-          break;
-        case "ons":
-          out.XAU_OZ = selling;
-          break;
-        case "gumus":
-        case "gram-gumus":
-          out.XAG = selling;
-          break;
-        case "ceyrek-altin":
-          out.GOLD_QUARTER = selling;
-          break;
-        case "yarim-altin":
-          out.GOLD_HALF = selling;
-          break;
-        case "tam-altin":
-          out.GOLD_FULL = selling;
-          break;
-        case "cumhuriyet-altini":
-          out.GOLD_CUMHURIYET = selling;
-          break;
-        case "ata-altini":
-          out.GOLD_ATA = selling;
-          break;
-        case "resat-altini":
-          out.GOLD_RESAT = selling;
-          break;
-      }
-      void setIfNum; // reserved for future custom keys
+      const code = lookup.get(normalizeKey(key));
+      if (code) out[code] = selling;
     }
 
     if (Object.keys(out).length === 0) throw new Error("Truncgil boş yanıt");
