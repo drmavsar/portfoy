@@ -186,24 +186,94 @@ export function RaporlarClient({ txns, categories, beneficiaries }: Props) {
     .filter((r) => r.value > 0)
     .sort((a, b) => b.value - a.value);
 
-  // En büyük 10 gider (seçili dönem)
-  const topExpenses = filtered
-    .filter((t) => t.direction === "outflow")
-    .slice()
-    .sort((a, b) => Number(b.amount) - Number(a.amount))
+  // En büyük 10 gider (seçili dönem) — taksitli ("(N/M)") işlemleri gruplar
+  interface ExpenseAgg {
+    earliestDate: string;
+    amount: number;
+    count: number;            // kaç işlem (taksit sayısı)
+    expectedTotal?: number;   // beklenen toplam taksit (örn. 3 in (1/3))
+    merchant: string;         // sade base merchant
+    categoryId: string | null;
+    benIds: Set<string | null>;
+  }
+
+  /** "MAPFRE(1/3) İSTANBUL" → { base: "MAPFRE İSTANBUL", isInstallment: true, total: 3 } */
+  const extractInstallment = (merchant: string): { base: string; isInstallment: boolean; total?: number } => {
+    const m = merchant.match(/\((\d+)\/(\d+)\)/);
+    if (!m) return { base: merchant, isInstallment: false };
+    const total = parseInt(m[2], 10);
+    const base = merchant.replace(/\s*\(\d+\/\d+\)\s*/g, " ").replace(/\s+/g, " ").trim();
+    return { base, isInstallment: true, total };
+  };
+
+  const installmentMap = new Map<string, ExpenseAgg>();
+  const singles: ExpenseAgg[] = [];
+
+  for (const t of filtered) {
+    if (t.direction !== "outflow") continue;
+    const rawMerch = t.merchant_raw || t.description || "—";
+    const { base, isInstallment, total } = extractInstallment(rawMerch);
+    const amount = Number(t.amount);
+    if (isInstallment) {
+      const key = `${base.toUpperCase()}|${t.category_id ?? ""}`;
+      const existing = installmentMap.get(key);
+      if (existing) {
+        existing.amount += amount;
+        existing.count += 1;
+        existing.benIds.add(t.beneficiary_id);
+        if (t.occurred_on < existing.earliestDate) existing.earliestDate = t.occurred_on;
+      } else {
+        installmentMap.set(key, {
+          earliestDate: t.occurred_on,
+          amount,
+          count: 1,
+          expectedTotal: total,
+          merchant: base,
+          categoryId: t.category_id,
+          benIds: new Set([t.beneficiary_id]),
+        });
+      }
+    } else {
+      singles.push({
+        earliestDate: t.occurred_on,
+        amount,
+        count: 1,
+        merchant: rawMerch,
+        categoryId: t.category_id,
+        benIds: new Set([t.beneficiary_id]),
+      });
+    }
+  }
+
+  const topExpenses = [...installmentMap.values(), ...singles]
+    .sort((a, b) => b.amount - a.amount)
     .slice(0, 10)
-    .map((t) => {
-      const cat = t.category_id ? catMap[t.category_id] : null;
-      const ben = t.beneficiary_id ? benMap[t.beneficiary_id] : null;
-      const merchant = t.merchant_raw || t.description || "—";
+    .map((agg) => {
+      const cat = agg.categoryId ? catMap[agg.categoryId] : null;
+      const benList = Array.from(agg.benIds);
+      let benName: string;
+      let benColor: string;
+      if (benList.length === 1) {
+        const id = benList[0];
+        const b = id ? benMap[id] : null;
+        benName = b?.name ?? "(atanmamış)";
+        benColor = b?.color ?? "#7d8699";
+      } else {
+        benName = `Çeşitli (${benList.length})`;
+        benColor = "#7d8699";
+      }
+      const installmentLabel =
+        agg.count > 1
+          ? ` · ${agg.count}${agg.expectedTotal ? `/${agg.expectedTotal}` : ""} taksit`
+          : "";
       return {
-        date: t.occurred_on,
-        merchant,
+        date: agg.earliestDate,
+        merchant: agg.merchant + installmentLabel,
         categoryName: cat?.name ?? "(kategorisiz)",
         categoryIcon: cat?.icon ?? "",
-        benName: ben?.name ?? "(atanmamış)",
-        benColor: ben?.color ?? "#7d8699",
-        amount: Number(t.amount),
+        benName,
+        benColor,
+        amount: agg.amount,
       };
     });
 
