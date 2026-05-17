@@ -237,6 +237,44 @@ async function fetchBist100(): Promise<FxTicker | null> {
   }
 }
 
+/** Currency → günlük % değişim (sadece Truncgil + CoinGecko 24h). */
+export async function getAssetChanges(): Promise<Record<string, number>> {
+  try {
+    const res = await fetch(TRUNCGIL_URL, {
+      next: { revalidate: 600 },
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)",
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) return {};
+    const json = (await res.json()) as Record<string, unknown>;
+
+    const lookup = new Map<string, string>();
+    for (const [code, aliases] of Object.entries(TRUNCGIL_ALIASES)) {
+      for (const a of aliases) lookup.set(a, code);
+    }
+
+    const out: Record<string, number> = {};
+    for (const [key, val] of Object.entries(json)) {
+      if (typeof val !== "object" || val === null) continue;
+      const e = val as TruncgilEntry & { Change?: number | string };
+      let chg: number | null = null;
+      if (typeof e.Change === "number" && Number.isFinite(e.Change)) chg = e.Change;
+      else if (typeof e.Change === "string") {
+        const n = parseFloat(e.Change.replace("%", "").replace(",", "."));
+        if (Number.isFinite(n)) chg = n;
+      }
+      if (chg == null) continue;
+      const code = lookup.get(normalizeKey(key));
+      if (code) out[code] = chg;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 /** Tüm desteklenen para birimi → TRY birim fiyat map'i. */
 export async function getAssetRates(): Promise<Record<string, number>> {
   const [truncgil, fxFallback, crypto] = await Promise.all([

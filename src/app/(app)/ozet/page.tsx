@@ -11,7 +11,7 @@ import {
   listPortfolios,
   listTrades,
 } from "@/app/(app)/_lib/wealth-actions";
-import { getAssetRates } from "@/app/(app)/_lib/asset-rates";
+import { getAssetChanges, getAssetRates } from "@/app/(app)/_lib/asset-rates";
 import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
 import { listTransactionsForReports } from "@/app/(app)/_lib/reports-actions";
 import { listBenchmarkPoints, listWealthSnapshots } from "@/app/(app)/_lib/wealth-snapshots-actions";
@@ -54,11 +54,12 @@ function tryValueOf(a: AccountRow, fxRates: Record<string, number | undefined>):
 }
 
 export default async function OzetPage() {
-  const [accounts, custodies, beneficiaries, fxRates, holdings, assets, portfolios, trades, txns, wealthSnapshots, benchmarkPoints] = await Promise.all([
+  const [accounts, custodies, beneficiaries, fxRates, fxChanges, holdings, assets, portfolios, trades, txns, wealthSnapshots, benchmarkPoints] = await Promise.all([
     listAccounts(),
     listCustodyLocations(),
     listBeneficiariesLite(),
     getAssetRates(),
+    getAssetChanges(),
     listHoldings(),
     listAssets(),
     listPortfolios(),
@@ -108,7 +109,7 @@ export default async function OzetPage() {
     const qty = Number(h.quantity);
     const cost = Number(h.cost_basis_try);
     const mv = quote ? qty * quote.price : cost;
-    return { ...h, mv, cost };
+    return { ...h, mv, cost, quote };
   });
 
   const investmentMv = enriched.reduce((s, h) => s + h.mv, 0);
@@ -193,6 +194,52 @@ export default async function OzetPage() {
     }
   }
   const assetClassSlices = Array.from(assetClassMap.values()).sort((a, b) => b.value - a.value);
+
+  // Bugünkü Servet Değişimi — varlık sınıfı bazlı TL katkı
+  // Hesap (FX/altın/kripto): native × current_rate × change_pct/100
+  // Hisse: qty × (current - previous_close)
+  // Sınıf bazlı topla
+  const dayChangeMap = new Map<string, { label: string; color: string; change: number; value: number }>();
+  const bumpDay = (key: string, label: string, color: string, change: number, value: number) => {
+    const cur = dayChangeMap.get(key) ?? { label, color, change: 0, value: 0 };
+    cur.change += change;
+    cur.value += value;
+    dayChangeMap.set(key, cur);
+  };
+
+  for (const a of accounts) {
+    if (a.currency === "TRY") continue; // TRY'de günlük değişim yok
+    const native = a.balance_native;
+    const rate = fxRates[a.currency];
+    const chgPct = fxChanges[a.currency];
+    if (native == null || rate == null || chgPct == null) continue;
+    const valueTry = Number(native) * rate;
+    const dayDelta = valueTry * (chgPct / 100);
+    const cls = classifyAccountClass(a.currency);
+    bumpDay(cls.key, cls.label, cls.color, dayDelta, valueTry);
+  }
+
+  for (const h of enriched) {
+    const asset = assetMap[h.asset_id];
+    const quote = h.quote;
+    if (!asset || !quote || !quote.previous_close) continue;
+    const qty = Number(h.quantity);
+    const dayDelta = qty * (quote.price - quote.previous_close);
+    if (asset.asset_class === "equity_tr" || asset.asset_class === "equity_us") {
+      bumpDay("equity", "Hisse", "#e26a8f", dayDelta, h.mv);
+    } else if (asset.asset_class === "crypto") {
+      bumpDay("crypto", "Kripto", "#b388f2", dayDelta, h.mv);
+    } else if (asset.asset_class === "metal") {
+      bumpDay("metal", "Altın & Gümüş", "#d4a056", dayDelta, h.mv);
+    }
+  }
+
+  const dayChangeRows = Array.from(dayChangeMap.values())
+    .filter((r) => r.value > 0)
+    .map((r) => ({ ...r, pct: r.value > 0 ? (r.change / r.value) * 100 : 0 }))
+    .sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
+
+  const totalDayChange = dayChangeRows.reduce((s, r) => s + r.change, 0);
 
   // YTD nakit akış — Ocak'tan içinde bulunulan aya
   const today = new Date();
@@ -449,6 +496,85 @@ export default async function OzetPage() {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* Bugünkü Servet Değişimi — varlık sınıfı katkı kırılımı */}
+          {dayChangeRows.length > 0 && (
+            <div className="card" style={{ marginBottom: 18 }}>
+              <div className="card-head">
+                <div className="card-title">Bugünkü Servet Değişimi</div>
+                <div className="card-sub">varlık sınıfı bazlı katkı · anlık piyasa</div>
+                <div
+                  className="tabular"
+                  style={{
+                    marginLeft: "auto",
+                    fontSize: 22,
+                    fontWeight: 700,
+                    color: totalDayChange >= 0 ? "var(--positive)" : "var(--negative)",
+                  }}
+                >
+                  {totalDayChange >= 0 ? "+" : ""}
+                  {fmt.tr(totalDayChange, 0)} ₺
+                </div>
+              </div>
+              <table className="dg">
+                <thead>
+                  <tr>
+                    <th>Varlık Sınıfı</th>
+                    <th className="num">Değer</th>
+                    <th className="num">Bugün (₺)</th>
+                    <th className="num">Bugün %</th>
+                    <th style={{ width: "30%" }}>Katkı</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dayChangeRows.map((r) => {
+                    const color = r.change >= 0 ? "var(--positive)" : "var(--negative)";
+                    const maxAbs = Math.max(
+                      ...dayChangeRows.map((x) => Math.abs(x.change)),
+                      1,
+                    );
+                    const widthPct = (Math.abs(r.change) / maxAbs) * 100;
+                    return (
+                      <tr key={r.label}>
+                        <td>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ width: 10, height: 10, borderRadius: 50, background: r.color }} />
+                            {r.label}
+                          </span>
+                        </td>
+                        <td className="num tabular hint">{fmt.trydp(r.value)}</td>
+                        <td className="num tabular" style={{ color, fontWeight: 600 }}>
+                          {r.change >= 0 ? "+" : ""}{fmt.tr(r.change, 0)} ₺
+                        </td>
+                        <td className="num tabular" style={{ color }}>
+                          {r.pct >= 0 ? "+" : ""}{r.pct.toFixed(2)}%
+                        </td>
+                        <td>
+                          <div
+                            style={{
+                              height: 8,
+                              background: color,
+                              borderRadius: 4,
+                              width: `${Math.max(4, widthPct)}%`,
+                              marginLeft: r.change >= 0 ? 0 : "auto",
+                              opacity: 0.7,
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div
+                className="hint"
+                style={{ padding: "10px 16px", borderTop: "1px solid var(--border-soft)", fontSize: 11 }}
+              >
+                Hisse: anlık fiyat − önceki kapanış. Döviz/Altın/Kripto: Truncgil günlük %
+                değişimi. Bazı semboller için günlük veri yoksa sınıf toplamına dahil edilmez.
+              </div>
             </div>
           )}
 
