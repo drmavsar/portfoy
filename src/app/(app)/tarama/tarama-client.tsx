@@ -28,7 +28,7 @@ type SortDir = "asc" | "desc";
 
 interface Props {
   rows: EnrichedRow[];
-  csvLoaded: boolean;
+  symbolCount: number;
 }
 
 function scoreLabel(s: number | null): { label: string; color: string; bg: string } {
@@ -48,7 +48,7 @@ function pctColor(v: number | null): string {
   return v >= 0 ? "var(--positive)" : "var(--negative)";
 }
 
-export function TaramaClient({ rows, csvLoaded }: Props) {
+export function TaramaClient({ rows, symbolCount }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("score");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [minScore, setMinScore] = useState<number>(0);
@@ -114,18 +114,20 @@ export function TaramaClient({ rows, csvLoaded }: Props) {
         </div>
       </div>
 
-      {!csvLoaded && (
+      {symbolCount > 0 && rows.length < symbolCount && (
         <div
           style={{
             padding: 12,
             marginBottom: 12,
-            background: "var(--warning-soft)",
-            color: "var(--warning)",
+            background: "var(--surface-2)",
+            color: "var(--muted)",
             borderRadius: 6,
             fontSize: 12,
           }}
         >
-          BIST 100 CSV çekilemedi — fallback: asset master&apos;daki tüm BIST hisseleri.
+          {symbolCount} sembol taranmaya gönderildi, {rows.length} tanesi için Yahoo Finance
+          yanıt verdi. Eksik kalanlar için ya sembol Yahoo&apos;da yok ya da yeterli geçmiş veri
+          yok (≥30 trading day).
         </div>
       )}
 
