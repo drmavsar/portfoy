@@ -88,6 +88,9 @@ export async function getBistIndices(): Promise<{
       const item = BIST_INDICES.find((x) => x.symbol === q.symbol);
       return item?.group === "sector";
     })
+    // Yahoo bazı sektör endekslerinin tarihsel close array'ini döndürmüyor.
+    // Sadece veri tutarlı olanları göster (en az 5 günlük close).
+    .filter((q) => q.closes_1mo.length >= 5)
     .sort((a, b) => (b.change_pct ?? 0) - (a.change_pct ?? 0));
   return { main, sectors };
 }
