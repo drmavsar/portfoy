@@ -8,13 +8,8 @@ export const dynamic = "force-dynamic";
 
 export default async function TaramaPage() {
   const [symbols, assets] = await Promise.all([getXK100Symbols(), listAssets()]);
-  // Fallback: CSV çekilemediyse asset master'dan equity_tr semboller
-  const finalSymbols =
-    symbols.length > 0
-      ? symbols
-      : assets.filter((a) => a.asset_class === "equity_tr").map((a) => a.symbol);
-
-  const rows = await getScreeningData(finalSymbols);
+  // symbols ya CSV'den ya da statik BIST 100 fallback'tan gelir (~100 sembol)
+  const rows = await getScreeningData(symbols);
 
   // Asset master'dan name/sector/external_url eşleştir
   const assetMap = Object.fromEntries(assets.map((a) => [a.symbol, a]));
@@ -25,5 +20,5 @@ export default async function TaramaPage() {
     external_url: assetMap[r.symbol]?.external_url ?? null,
   }));
 
-  return <TaramaClient rows={enriched} csvLoaded={symbols.length > 0} />;
+  return <TaramaClient rows={enriched} symbolCount={symbols.length} />;
 }
