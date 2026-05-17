@@ -339,7 +339,6 @@ export default async function OzetPage() {
       <div className="page-head">
         <div>
           <div className="page-title">Özet</div>
-          <div className="page-sub">Servet ve nakit akış genel görünümü.</div>
         </div>
       </div>
 
@@ -362,31 +361,30 @@ export default async function OzetPage() {
               </div>
             </div>
             <div style={{ padding: "20px 24px" }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 16, flexWrap: "wrap" }}>
-                <div
-                  className="tabular"
-                  style={{ fontSize: 36, fontWeight: 700, color: "var(--accent)" }}
-                >
-                  {fmt.trydp(grandTotal)}
-                </div>
-                <div
-                  className="tabular"
-                  style={{
-                    fontSize: 16,
-                    fontWeight: 600,
-                    color: totalDayChange >= 0 ? "var(--positive)" : "var(--negative)",
-                  }}
-                >
-                  Bugün {totalDayChange >= 0 ? "+" : ""}
-                  {fmt.tr(totalDayChange, 0)} ₺
-                  {grandTotal > 0 && (
-                    <>
-                      {" · "}
-                      {totalDayChange >= 0 ? "+" : ""}
-                      {((totalDayChange / (grandTotal - totalDayChange || grandTotal)) * 100).toFixed(2)}%
-                    </>
-                  )}
-                </div>
+              <div
+                className="tabular"
+                style={{ fontSize: 36, fontWeight: 700, color: "var(--accent)" }}
+              >
+                {fmt.trydp(grandTotal)}
+              </div>
+              <div
+                className="tabular"
+                style={{
+                  fontSize: 14,
+                  fontWeight: 600,
+                  marginTop: 6,
+                  color: totalDayChange >= 0 ? "var(--positive)" : "var(--negative)",
+                }}
+              >
+                {totalDayChange >= 0 ? "+" : ""}
+                {fmt.tr(totalDayChange, 0)} ₺
+                {grandTotal > 0 && (
+                  <>
+                    {" · "}
+                    {totalDayChange >= 0 ? "+" : ""}
+                    {((totalDayChange / (grandTotal - totalDayChange || grandTotal)) * 100).toFixed(2)}%
+                  </>
+                )}
               </div>
               {(() => {
                 const equityDay = dayChangeMap.get("equity")?.change ?? 0;
@@ -399,7 +397,6 @@ export default async function OzetPage() {
                   label: string,
                   value: number,
                   change: number,
-                  sub: string,
                 ) => {
                   const color = change >= 0 ? "var(--positive)" : "var(--negative)";
                   const pct = dayPct(change, value);
@@ -410,12 +407,11 @@ export default async function OzetPage() {
                         {fmt.trydp(value)}
                       </div>
                       <div className="tabular" style={{ fontSize: 11, color }}>
-                        Bugün {change >= 0 ? "+" : ""}{fmt.tr(change, 0)} ₺
+                        {change >= 0 ? "+" : ""}{fmt.tr(change, 0)} ₺
                         {value > 0 && change !== 0 && (
                           <> · {change >= 0 ? "+" : ""}{pct.toFixed(2)}%</>
                         )}
                       </div>
-                      <div className="hint" style={{ fontSize: 11 }}>{sub}</div>
                     </div>
                   );
                 };
@@ -430,11 +426,10 @@ export default async function OzetPage() {
                       borderTop: "1px solid var(--border-soft)",
                     }}
                   >
-                    {renderCell("YATIRIMLAR", investmentMv, equityDay,
-                      `K/Z toplam: ${investmentPnl >= 0 ? "+" : ""}${fmt.tr(investmentPnl, 0)} ₺`)}
-                    {renderCell("ALTIN", metalTotal, metalDay, "gram + çeyrek + tam + …")}
-                    {renderCell("DÖVİZ", fxTotal, fxDay, "USD · EUR · diğer")}
-                    {renderCell("NAKİT", cashTotal, cashDay, "TRY hesaplar")}
+                    {renderCell("YATIRIMLAR", investmentMv, equityDay)}
+                    {renderCell("ALTIN", metalTotal, metalDay)}
+                    {renderCell("DÖVİZ", fxTotal, fxDay)}
+                    {renderCell("NAKİT", cashTotal, cashDay)}
                   </div>
                 );
               })()}
@@ -446,7 +441,6 @@ export default async function OzetPage() {
             <div className="card" style={{ marginBottom: 18 }}>
               <div className="card-head">
                 <div className="card-title">Bugünkü Servet Değişimi</div>
-                <div className="card-sub">varlık sınıfı bazlı katkı · anlık piyasa</div>
                 <div
                   className="tabular"
                   style={{
@@ -465,20 +459,14 @@ export default async function OzetPage() {
                   <tr>
                     <th>Varlık Sınıfı</th>
                     <th className="num">Değer</th>
-                    <th className="num">Bugün (₺)</th>
-                    <th className="num">Bugün %</th>
+                    <th className="num">₺</th>
+                    <th className="num">%</th>
                     <th>Kaynak</th>
-                    <th style={{ width: "25%" }}>Katkı</th>
                   </tr>
                 </thead>
                 <tbody>
                   {dayChangeRows.map((r) => {
                     const color = r.change >= 0 ? "var(--positive)" : "var(--negative)";
-                    const maxAbs = Math.max(
-                      ...dayChangeRows.map((x) => Math.abs(x.change)),
-                      1,
-                    );
-                    const widthPct = (Math.abs(r.change) / maxAbs) * 100;
                     return (
                       <tr key={r.label}>
                         <td>
@@ -498,45 +486,11 @@ export default async function OzetPage() {
                           <div>{r.source}</div>
                           {r.lastUpdate && <div className="mono" style={{ fontSize: 10 }}>{r.lastUpdate}</div>}
                         </td>
-                        <td>
-                          <div
-                            style={{
-                              height: 8,
-                              background: color,
-                              borderRadius: 4,
-                              width: `${Math.max(4, widthPct)}%`,
-                              marginLeft: r.change >= 0 ? 0 : "auto",
-                              opacity: 0.7,
-                            }}
-                          />
-                        </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
-              <div
-                style={{
-                  padding: "12px 16px",
-                  borderTop: "1px solid var(--border-soft)",
-                  fontSize: 11,
-                  color: "var(--muted)",
-                  display: "grid",
-                  gap: 6,
-                }}
-              >
-                <div>
-                  <b style={{ color: "var(--fg-soft)" }}>Hesap formülü:</b>{" "}
-                  <span className="mono">Hisse = Σ qty × (current_price − previous_close)</span>{" "}
-                  · <span className="mono">FX/Altın/Kripto = Σ native × current_rate × (truncgil_change_pct ÷ 100)</span>
-                </div>
-                <div>
-                  <b style={{ color: "var(--fg-soft)" }}>Kaynaklar:</b> Yahoo Finance (BIST hisseleri,
-                  15dk gecikmeli) · Truncgil v4 today.json (FX/altın, ~10dk önbellek). Selling kuruyla
-                  hesaplanır (alış değil).
-                </div>
-                <div>Değişim oranı (%) bugünkü değere bölünür; küçük yuvarlama farkı olabilir.</div>
-              </div>
             </div>
           )}
 
@@ -545,7 +499,6 @@ export default async function OzetPage() {
               <div className="card">
                 <div className="card-head">
                   <div className="card-title">Kurum Bazlı Hesap Dağılımı</div>
-                  <div className="card-sub">altında kişi kırılımı</div>
                 </div>
                 <div style={{ padding: "12px 0" }}>
                   {groupedAccounts.map((g) => {
@@ -645,9 +598,7 @@ export default async function OzetPage() {
                       >
                         <div style={{ fontSize: 13 }}>
                           {g.name}
-                          <span className="hint" style={{ marginLeft: 8 }}>
-                            · {g.count} pozisyon
-                          </span>
+                          <span className="hint" style={{ marginLeft: 8 }}>· ({g.count})</span>
                         </div>
                         <div className="tabular" style={{ fontWeight: 500, fontSize: 13 }}>
                           {fmt.trydp(g.mv)}
@@ -667,7 +618,6 @@ export default async function OzetPage() {
             <div className="card" style={{ marginTop: 16 }}>
               <div className="card-head">
                 <div className="card-title">Kişi Bazlı Toplam Servet</div>
-                <div className="card-sub">hesap + yatırım MV</div>
               </div>
               <table className="dg">
                 <thead>
@@ -704,174 +654,12 @@ export default async function OzetPage() {
             </div>
           )}
 
-          {/* Yıl-bazlı geçmiş servet karşılaştırması */}
-          {wealthSnapshots.length > 0 && (() => {
-            const maxVal = Math.max(...wealthSnapshots.map((s) => Number(s.total_try)), 1);
-            return (
-              <div className="card" style={{ marginTop: 16 }}>
-                <div className="card-head">
-                  <div className="card-title">Geçmiş Yıllar — Servet Büyümesi</div>
-                  <div className="card-sub">YoY % değişim</div>
-                </div>
-                <table className="dg">
-                  <thead>
-                    <tr>
-                      <th>Dönem</th>
-                      <th className="num">Toplam Servet</th>
-                      <th className="num">Değişim (₺)</th>
-                      <th className="num">YoY %</th>
-                      <th style={{ width: "30%" }}>Görsel</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {wealthSnapshots.map((s, i) => {
-                      const prev = i > 0 ? Number(wealthSnapshots[i - 1].total_try) : null;
-                      const cur = Number(s.total_try);
-                      const diff = prev != null ? cur - prev : null;
-                      const yoy = prev && prev > 0 ? (diff! / prev) * 100 : null;
-                      const widthPct = (cur / maxVal) * 100;
-                      const pos = (yoy ?? 0) >= 0;
-                      const color = pos ? "var(--positive)" : "var(--negative)";
-                      return (
-                        <tr key={s.id}>
-                          <td style={{ fontWeight: 600 }}>{s.period}</td>
-                          <td className="num tabular" style={{ fontWeight: 600 }}>
-                            {fmt.trydp(cur)}
-                          </td>
-                          <td className="num tabular" style={{ color: diff != null ? color : "var(--muted)" }}>
-                            {diff == null ? "—" : `${diff >= 0 ? "+" : ""}${fmt.tr(diff, 0)} ₺`}
-                          </td>
-                          <td className="num tabular" style={{ color: yoy != null ? color : "var(--muted)", fontWeight: 600 }}>
-                            {yoy == null ? "—" : `${yoy >= 0 ? "+" : ""}${yoy.toFixed(2)}%`}
-                          </td>
-                          <td>
-                            <div
-                              style={{
-                                height: 8,
-                                background: "var(--accent)",
-                                borderRadius: 4,
-                                width: `${widthPct}%`,
-                                opacity: 0.6,
-                              }}
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            );
-          })()}
-
-          {/* Reel Getiri: Portföy YoY vs benchmark YoY karşılaştırması */}
-          {wealthSnapshots.length >= 2 && benchmarkPoints.length > 0 && (() => {
-            // Her benchmark code için yıl sonu (Aralık veya en sonki) değerini al
-            const byCodeByYear = new Map<string, Map<string, number>>();
-            const codeName = new Map<string, string>();
-            for (const p of benchmarkPoints) {
-              const yr = p.as_of.slice(0, 4);
-              if (!byCodeByYear.has(p.code)) byCodeByYear.set(p.code, new Map());
-              const m = byCodeByYear.get(p.code)!;
-              // Her yıl için en geç tarihli değeri kullan
-              const existing = m.get(yr);
-              if (existing == null || p.as_of >= (Array.from(m.keys()).find((k) => k === yr) ?? "")) {
-                m.set(yr, Number(p.value));
-              }
-              codeName.set(p.code, p.name);
-            }
-            const codes = Array.from(codeName.keys()).filter((c) => c !== "CPI_TR");
-
-            // Yıl çiftleri için YoY hesabı
-            const yoyRows: Array<{
-              year: string;
-              portfolio: number | null;
-              bench: Record<string, number | null>;
-            }> = [];
-            for (let i = 1; i < wealthSnapshots.length; i++) {
-              const cur = wealthSnapshots[i];
-              const prev = wealthSnapshots[i - 1];
-              const yr = cur.period.slice(0, 4);
-              const prevYr = prev.period.slice(0, 4);
-              const portYoY = Number(prev.total_try) > 0
-                ? ((Number(cur.total_try) - Number(prev.total_try)) / Number(prev.total_try)) * 100
-                : null;
-              const benchYoY: Record<string, number | null> = {};
-              for (const c of codes) {
-                const cv = byCodeByYear.get(c)?.get(yr);
-                const pv = byCodeByYear.get(c)?.get(prevYr);
-                benchYoY[c] = cv != null && pv != null && pv > 0 ? ((cv - pv) / pv) * 100 : null;
-              }
-              yoyRows.push({ year: yr, portfolio: portYoY, bench: benchYoY });
-            }
-
-            return (
-              <div className="card" style={{ marginTop: 16 }}>
-                <div className="card-head">
-                  <div className="card-title">Reel Getiri — Portföy vs Benchmark</div>
-                  <div className="card-sub">
-                    YoY % · pozitif fark = benchmark&apos;ı geçtin, negatif = altında kaldın
-                  </div>
-                </div>
-                <table className="dg">
-                  <thead>
-                    <tr>
-                      <th>Yıl</th>
-                      <th className="num">Portföy</th>
-                      {codes.map((c) => (
-                        <th key={c} className="num">{codeName.get(c) ?? c}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {yoyRows.map((r) => {
-                      const port = r.portfolio;
-                      const portColor =
-                        port == null ? "var(--muted)" : port >= 0 ? "var(--positive)" : "var(--negative)";
-                      return (
-                        <tr key={r.year}>
-                          <td style={{ fontWeight: 600 }}>{r.year}</td>
-                          <td className="num tabular" style={{ color: portColor, fontWeight: 600 }}>
-                            {port == null ? "—" : `${port >= 0 ? "+" : ""}${port.toFixed(2)}%`}
-                          </td>
-                          {codes.map((c) => {
-                            const b = r.bench[c];
-                            if (b == null || port == null) {
-                              return <td key={c} className="num tabular hint">—</td>;
-                            }
-                            const excess = port - b;
-                            const color = excess >= 0 ? "var(--positive)" : "var(--negative)";
-                            return (
-                              <td key={c} className="num tabular" style={{ color }}>
-                                <div style={{ fontSize: 12 }}>{b >= 0 ? "+" : ""}{b.toFixed(1)}%</div>
-                                <div className="hint" style={{ fontSize: 10, color }}>
-                                  fark {excess >= 0 ? "+" : ""}{excess.toFixed(1)}%
-                                </div>
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                <div
-                  className="hint"
-                  style={{ padding: "10px 16px", borderTop: "1px solid var(--border-soft)", fontSize: 11 }}
-                >
-                  Her hücrede üst satır benchmark&apos;ın yıllık % değişimi, alt satır portföyünün
-                  benchmark&apos;a göre farkı (excess return). Pozitif yeşil = senin yılın daha iyi.
-                </div>
-              </div>
-            );
-          })()}
-
           {/* 12 ay nakit akış + varlık sınıfı dağılımı yan yana */}
           <div className="grid-base grid-2" style={{ gap: 16, marginTop: 16, alignItems: "start" }}>
             <div className="card">
               <div className="card-head">
                 <div className="card-title">Aylık Nakit Akış (YTD)</div>
-                <div className="card-sub">{currentYear} yılı · yeşil gelir, kırmızı gider</div>
+                <div className="card-sub">{currentYear} yılı</div>
               </div>
               <div style={{ padding: "20px 24px 24px" }}>
                 <div
@@ -940,7 +728,6 @@ export default async function OzetPage() {
             <div className="card">
               <div className="card-head">
                 <div className="card-title">Varlık Sınıfı Dağılımı</div>
-                <div className="card-sub">hesap + yatırım MV birleşik</div>
               </div>
               <div style={{ padding: "12px 0" }}>
                 {assetClassSlices.length === 0 ? (
@@ -1034,6 +821,138 @@ export default async function OzetPage() {
               </div>
             </div>
           )}
+
+          {/* Geçmiş Yıllar — sondan bir önceki */}
+          {wealthSnapshots.length > 0 && (
+            <div className="card" style={{ marginTop: 16 }}>
+              <div className="card-head">
+                <div className="card-title">Geçmiş Yıllar — Servet Büyümesi</div>
+              </div>
+              <table className="dg">
+                <thead>
+                  <tr>
+                    <th>Dönem</th>
+                    <th className="num">Toplam Servet</th>
+                    <th className="num">Değişim (₺)</th>
+                    <th className="num">YoY %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {wealthSnapshots.map((s, i) => {
+                    const prev = i > 0 ? Number(wealthSnapshots[i - 1].total_try) : null;
+                    const cur = Number(s.total_try);
+                    const diff = prev != null ? cur - prev : null;
+                    const yoy = prev && prev > 0 ? (diff! / prev) * 100 : null;
+                    const pos = (yoy ?? 0) >= 0;
+                    const color = pos ? "var(--positive)" : "var(--negative)";
+                    return (
+                      <tr key={s.id}>
+                        <td style={{ fontWeight: 600 }}>{s.period}</td>
+                        <td className="num tabular" style={{ fontWeight: 600 }}>
+                          {fmt.trydp(cur)}
+                        </td>
+                        <td className="num tabular" style={{ color: diff != null ? color : "var(--muted)" }}>
+                          {diff == null ? "—" : `${diff >= 0 ? "+" : ""}${fmt.tr(diff, 0)} ₺`}
+                        </td>
+                        <td className="num tabular" style={{ color: yoy != null ? color : "var(--muted)", fontWeight: 600 }}>
+                          {yoy == null ? "—" : `${yoy >= 0 ? "+" : ""}${yoy.toFixed(2)}%`}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Reel Getiri — EN SON */}
+          {wealthSnapshots.length >= 2 && benchmarkPoints.length > 0 && (() => {
+            const byCodeByYear = new Map<string, Map<string, number>>();
+            const codeName = new Map<string, string>();
+            for (const p of benchmarkPoints) {
+              const yr = p.as_of.slice(0, 4);
+              if (!byCodeByYear.has(p.code)) byCodeByYear.set(p.code, new Map());
+              const m = byCodeByYear.get(p.code)!;
+              const existing = m.get(yr);
+              if (existing == null || p.as_of >= (Array.from(m.keys()).find((k) => k === yr) ?? "")) {
+                m.set(yr, Number(p.value));
+              }
+              codeName.set(p.code, p.name);
+            }
+            const codes = Array.from(codeName.keys()).filter((c) => c !== "CPI_TR");
+
+            const yoyRows: Array<{
+              year: string;
+              portfolio: number | null;
+              bench: Record<string, number | null>;
+            }> = [];
+            for (let i = 1; i < wealthSnapshots.length; i++) {
+              const cur = wealthSnapshots[i];
+              const prev = wealthSnapshots[i - 1];
+              const yr = cur.period.slice(0, 4);
+              const prevYr = prev.period.slice(0, 4);
+              const portYoY = Number(prev.total_try) > 0
+                ? ((Number(cur.total_try) - Number(prev.total_try)) / Number(prev.total_try)) * 100
+                : null;
+              const benchYoY: Record<string, number | null> = {};
+              for (const c of codes) {
+                const cv = byCodeByYear.get(c)?.get(yr);
+                const pv = byCodeByYear.get(c)?.get(prevYr);
+                benchYoY[c] = cv != null && pv != null && pv > 0 ? ((cv - pv) / pv) * 100 : null;
+              }
+              yoyRows.push({ year: yr, portfolio: portYoY, bench: benchYoY });
+            }
+
+            return (
+              <div className="card" style={{ marginTop: 16 }}>
+                <div className="card-head">
+                  <div className="card-title">Reel Getiri — Portföy vs Benchmark</div>
+                </div>
+                <table className="dg">
+                  <thead>
+                    <tr>
+                      <th>Yıl</th>
+                      <th className="num">Portföy</th>
+                      {codes.map((c) => (
+                        <th key={c} className="num">{codeName.get(c) ?? c}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {yoyRows.map((r) => {
+                      const port = r.portfolio;
+                      const portColor =
+                        port == null ? "var(--muted)" : port >= 0 ? "var(--positive)" : "var(--negative)";
+                      return (
+                        <tr key={r.year}>
+                          <td style={{ fontWeight: 600 }}>{r.year}</td>
+                          <td className="num tabular" style={{ color: portColor, fontWeight: 600 }}>
+                            {port == null ? "—" : `${port >= 0 ? "+" : ""}${port.toFixed(2)}%`}
+                          </td>
+                          {codes.map((c) => {
+                            const b = r.bench[c];
+                            if (b == null || port == null) {
+                              return <td key={c} className="num tabular hint">—</td>;
+                            }
+                            const excess = port - b;
+                            const color = excess >= 0 ? "var(--positive)" : "var(--negative)";
+                            return (
+                              <td key={c} className="num tabular" style={{ color }}>
+                                <div style={{ fontSize: 12 }}>{b >= 0 ? "+" : ""}{b.toFixed(1)}%</div>
+                                <div className="hint" style={{ fontSize: 10, color }}>
+                                  fark {excess >= 0 ? "+" : ""}{excess.toFixed(1)}%
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
         </>
       )}
     </div>
