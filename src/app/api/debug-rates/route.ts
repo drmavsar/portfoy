@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { revalidateTag } from "next/cache";
 
 import { getAssetRates } from "@/app/(app)/_lib/asset-rates";
 
@@ -6,8 +7,13 @@ export const dynamic = "force-dynamic";
 
 const TRUNCGIL_URL = "https://finans.truncgil.com/v4/today.json";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const out: Record<string, unknown> = {};
+  const bust = req.nextUrl.searchParams.get("bust") === "1";
+  if (bust) {
+    revalidateTag("asset-rates", "max");
+    out.cache_busted = true;
+  }
 
   // 1) Ham Truncgil yanıtı — hangi key'ler dönüyor?
   try {

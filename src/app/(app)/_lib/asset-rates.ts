@@ -71,9 +71,9 @@ const TRUNCGIL_ALIASES: Record<string, string[]> = {
   CUMHURIYET: ["cumhuriyetaltini", "cumhuriyetaltn", "cumhuraltin"],
   ATA: ["ataaltini", "ataaltin"],
   RESAT: ["resataltini", "resataltin"],
-  BILEZIK22: ["yia", "22ayarbilezik", "ayarbilezik22"],
-  BILEZIK14: ["14ayarbilezik", "ayarbilezik14"],
-  BILEZIK18: ["18ayarbilezik", "ayarbilezik18"],
+  BILEZIK22: ["yia", "22ayarbilezik", "ayarbilezik22", "22ayaraltin"],
+  BILEZIK14: ["14ayarbilezik", "ayarbilezik14", "14ayaraltin"],
+  BILEZIK18: ["18ayarbilezik", "ayarbilezik18", "18ayaraltin"],
 };
 
 function normalizeKey(k: string): string {
@@ -83,7 +83,7 @@ function normalizeKey(k: string): string {
 async function fetchTruncgil(): Promise<Record<string, number>> {
   try {
     const res = await fetch(TRUNCGIL_URL, {
-      next: { revalidate: 600 },
+      next: { revalidate: 300, tags: ["asset-rates"] },
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)",
         Accept: "application/json",
@@ -123,7 +123,7 @@ async function fetchYahooXauUsd(): Promise<number | null> {
     const res = await fetch(
       "https://query1.finance.yahoo.com/v8/finance/chart/XAUUSD=X?interval=1d&range=2d",
       {
-        next: { revalidate: 600 },
+        next: { revalidate: 300, tags: ["asset-rates"] },
         headers: { "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)" },
       },
     );
@@ -168,7 +168,7 @@ export interface FxTicker {
 export async function getFxTickers(): Promise<FxTicker[]> {
   try {
     const res = await fetch(TRUNCGIL_URL, {
-      next: { revalidate: 600 },
+      next: { revalidate: 300, tags: ["asset-rates"] },
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)",
         Accept: "application/json",
@@ -241,7 +241,7 @@ async function fetchBist100(): Promise<FxTicker | null> {
 export async function getTruncgilUpdateDate(): Promise<string | null> {
   try {
     const res = await fetch(TRUNCGIL_URL, {
-      next: { revalidate: 600 },
+      next: { revalidate: 300, tags: ["asset-rates"] },
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)",
         Accept: "application/json",
@@ -260,7 +260,7 @@ export async function getTruncgilUpdateDate(): Promise<string | null> {
 export async function getAssetChanges(): Promise<Record<string, number>> {
   try {
     const res = await fetch(TRUNCGIL_URL, {
-      next: { revalidate: 600 },
+      next: { revalidate: 300, tags: ["asset-rates"] },
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)",
         Accept: "application/json",
@@ -294,6 +294,49 @@ export async function getAssetChanges(): Promise<Record<string, number>> {
   }
 }
 
+/** Persist edilen kur/altın snapshot'u DB'den oku — kaynaklar fail ederse fallback. */
+async function loadFallbackRates(): Promise<Record<string, number>> {
+  try {
+    const { createClient } = await import("@/lib/supabase/server");
+    const supabase = await createClient();
+    const { data } = await supabase
+      .from("rate_snapshots")
+      .select("rates")
+      .eq("id", 1)
+      .maybeSingle();
+    if (data && typeof data === "object" && data !== null && "rates" in data) {
+      const r = (data as { rates?: unknown }).rates;
+      if (r && typeof r === "object") return r as Record<string, number>;
+    }
+  } catch {
+    /* Supabase yoksa veya migration çalışmamışsa sessizce geç */
+  }
+  return {};
+}
+
+/** Başarılı fetch sonrası DB'ye snapshot yaz — bir sonraki failde fallback kaynak. */
+async function persistRates(rates: Record<string, number>): Promise<void> {
+  try {
+    const { createClient } = await import("@/lib/supabase/server");
+    const supabase = await createClient();
+    await supabase
+      .from("rate_snapshots")
+      .upsert(
+        { id: 1, rates, updated_at: new Date().toISOString() } as never,
+        { onConflict: "id" },
+      );
+  } catch {
+    /* sessizce yut */
+  }
+}
+
+const EXPECTED_KEYS = [
+  "USD", "EUR", "GBP", "CHF", "JPY", "AUD", "CAD",
+  "XAU", "XAG", "CEYREK", "YARIM", "TAM", "CUMHURIYET",
+  "ATA", "RESAT", "BILEZIK14", "BILEZIK18", "BILEZIK22",
+  "BTC", "ETH", "SOL", "USDT", "BNB",
+] as const;
+
 /** Tüm desteklenen para birimi → TRY birim fiyat map'i. */
 export async function getAssetRates(): Promise<Record<string, number>> {
   const [truncgil, fxFallback, crypto] = await Promise.all([
@@ -320,6 +363,21 @@ export async function getAssetRates(): Promise<Record<string, number>> {
 
   // 4) Kripto
   for (const [k, v] of Object.entries(crypto)) out[k] = v;
+
+  // 5) Eksik kalanları DB'deki son iyi snapshot'tan doldur
+  const missing = EXPECTED_KEYS.filter((k) => out[k] == null);
+  if (missing.length > 0) {
+    const fallback = await loadFallbackRates();
+    for (const k of missing) {
+      if (fallback[k] != null && fallback[k] > 0) out[k] = fallback[k];
+    }
+  }
+
+  // 6) Sağlıklı bir response yakaladıysak (USD + XAU varsa) snapshot'u güncelle
+  if (out.USD && out.XAU) {
+    // fire-and-forget; render'ı bloklamasın
+    void persistRates(out);
+  }
 
   return out;
 }
