@@ -122,11 +122,17 @@ export function EkstreClient({
         setError(r.error ?? "Parse hatası.");
         return;
       }
+      // Default kişi: rule önerisi > ilk beneficiary (Mehmet vb.). Hesap seçilince
+      // applyAccountChange tüm satırları gerekirse kart sahibine sabitler.
+      const defaultBen = beneficiaries[0]?.id ?? null;
+      if (!beneficiaryId && defaultBen) setBeneficiaryId(defaultBen);
       const rows: EditableRow[] = (r.rows ?? []).map((row) => ({
         ...row,
         selected: !row.is_transfer,
         category_id: row.suggested_category_id,
-        beneficiary_id: row.suggested_beneficiary_id,
+        beneficiary_id: row.is_transfer
+          ? null
+          : (row.suggested_beneficiary_id ?? defaultBen),
       }));
       setResult({
         card_last4: r.card_last4,
@@ -605,12 +611,11 @@ export function EkstreClient({
                         ) : (
                           <select
                             style={inp}
-                            value={r.beneficiary_id ?? beneficiaryId ?? ""}
+                            value={r.beneficiary_id ?? ""}
                             onChange={(e) =>
                               setBen(i, e.target.value || null)
                             }
                           >
-                            <option value="">— kişi yok —</option>
                             {beneficiaries.map((b) => (
                               <option key={b.id} value={b.id}>
                                 {b.name}

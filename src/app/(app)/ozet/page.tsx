@@ -366,7 +366,7 @@ export default async function OzetPage() {
                 <div style={{ flex: "0 0 auto" }}>
                   <div
                     className="tabular"
-                    style={{ fontSize: 36, fontWeight: 700, color: "var(--accent)" }}
+                    style={{ fontSize: 36, fontWeight: 700, color: "var(--fg)" }}
                   >
                     {fmt.trydp(grandTotal)}
                   </div>
@@ -479,7 +479,7 @@ export default async function OzetPage() {
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "repeat(4, 1fr)",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
                       gap: 16,
                       marginTop: 20,
                       paddingTop: 18,

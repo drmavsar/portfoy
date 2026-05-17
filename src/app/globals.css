@@ -27,9 +27,9 @@
 
   --positive:      #3fb955;
   --positive-soft: #0f2618;
-  --negative:      #ff5c5c;        /* vivid red — büyük negatif için */
-  --negative-soft: #2a1418;
-  --negative-mute: #b96b6b;        /* soft red — küçük negatif vurgu */
+  --negative:      #ff3838;        /* yüksek kontrast kırmızı — yakın görme erişilebilirliği */
+  --negative-soft: #3a1216;
+  --negative-mute: #d96060;        /* soft red — küçük negatif vurgu */
   --warning:     #d29922;
   --warning-soft:#2a200a;
   --info:        #58a6ff;
