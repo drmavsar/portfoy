@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 
 import type { AccountRow, BeneficiaryLite, CustodyRow } from "@/app/(app)/hesaplar/actions";
@@ -249,6 +250,16 @@ export function CashflowClient({
           <div className="page-sub">{subtitle}</div>
         </div>
         <div className="page-actions">
+          {!isInflow && (
+            <Link
+              href="/ekstre"
+              className="btn"
+              style={{ textDecoration: "none" }}
+              aria-disabled={!configured}
+            >
+              <Icon name="upload" size={14} /> Ekstre Yükle
+            </Link>
+          )}
           <button
             className="btn btn-prim"
             onClick={() => setModalOpen(true)}

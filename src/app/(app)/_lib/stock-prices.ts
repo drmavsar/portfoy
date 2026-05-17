@@ -25,6 +25,7 @@ interface YahooChartResponse {
         currency?: string;
         regularMarketTime?: number;
       };
+      indicators?: { quote?: Array<{ close?: Array<number | null> }> };
     }>;
     error?: { code: string; description: string } | null;
   };
@@ -35,9 +36,26 @@ function asYahooSymbol(symbol: string): string {
   return `${symbol}.IS`;
 }
 
+/**
+ * `previousClose` Yahoo'da bedelli/split sonrası bazen DÜZELTILMEMIŞ döner;
+ * `closes` array ise düzeltilmiş seridir. Tutarlılık için günlük baz olarak
+ * düzeltilmiş kapanış serisini kullan: piyasa açıksa son close = dün; kapalıysa
+ * son close = bugün ⇒ bir öncesi dün.
+ */
+function priorCloseFromSeries(price: number, closes: number[]): number | null {
+  if (closes.length === 0) return null;
+  const last = closes[closes.length - 1];
+  // last ≈ price → piyasa kapalı, "last" bugünün kapanışıdır; T-1 = closes[-2]
+  if (last > 0 && Math.abs(last - price) / price < 0.005) {
+    return closes.length >= 2 ? closes[closes.length - 2] : null;
+  }
+  // aksi halde "last" dünün kapanışıdır (piyasa açık)
+  return last;
+}
+
 async function fetchOne(symbol: string): Promise<StockQuote | null> {
-  // range=2d → sadece dün + bugün. previousClose alanı T-1 kapanışı verir.
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${asYahooSymbol(symbol)}?interval=1d&range=2d`;
+  // range=5d → son birkaç işlem günü kapanışları (düzeltilmiş seri için)
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${asYahooSymbol(symbol)}?interval=1d&range=5d`;
   try {
     const res = await fetch(url, {
       next: { revalidate: 300 },
@@ -45,13 +63,18 @@ async function fetchOne(symbol: string): Promise<StockQuote | null> {
     });
     if (!res.ok) return null;
     const json = (await res.json()) as YahooChartResponse;
-    const meta = json.chart?.result?.[0]?.meta;
+    const r = json.chart?.result?.[0];
+    const meta = r?.meta;
     if (!meta?.regularMarketPrice) return null;
     const price = meta.regularMarketPrice;
-    // previousClose = T-1 günün kapanışı (doğru günlük baz)
-    // chartPreviousClose = range başlangıcındaki kapanış (range=2d için yine T-1 ama tek başına previousClose öncelikli)
-    const prevClose = meta.previousClose ?? meta.chartPreviousClose ?? null;
-    const changePct = prevClose ? ((price - prevClose) / prevClose) * 100 : null;
+    const closes = (r?.indicators?.quote?.[0]?.close ?? [])
+      .filter((x): x is number => typeof x === "number" && Number.isFinite(x));
+    // düzeltilmiş seriden hesap: split/bedelli sonrası previousClose alanı yanlış olabilir
+    const prevClose = priorCloseFromSeries(price, closes)
+      ?? meta.previousClose
+      ?? meta.chartPreviousClose
+      ?? null;
+    const changePct = prevClose && prevClose > 0 ? ((price - prevClose) / prevClose) * 100 : null;
     return {
       symbol,
       price,
@@ -110,13 +133,25 @@ async function fetchOneExt(symbol: string): Promise<StockQuoteExt | null> {
     const meta = r?.meta;
     if (!meta?.regularMarketPrice) return null;
     const price = meta.regularMarketPrice;
-    // T-1 günü kapanışı için previousClose öncelik (range=3mo'da chartPreviousClose 3 ay öncesi olur)
-    const prevClose = meta.previousClose ?? meta.chartPreviousClose ?? null;
-    const changePct = prevClose ? ((price - prevClose) / prevClose) * 100 : null;
-
     const closes = (r?.indicators?.quote?.[0]?.close ?? [])
       .filter((x): x is number => typeof x === "number" && Number.isFinite(x));
-    const closeAtBack = (n: number) => (closes.length > n ? closes[closes.length - 1 - n] : null);
+
+    // Tüm period'lar aynı düzeltilmiş seriden hesaplanır — split/bedelli sonrası
+    // Yahoo'nun previousClose alanı yanlış olabildiği için (günlük >> haftalık
+    // çelişkilerini engellemek üzere) closes array tek hakikat.
+    const prevClose = priorCloseFromSeries(price, closes)
+      ?? meta.previousClose
+      ?? meta.chartPreviousClose
+      ?? null;
+    const changePct = prevClose && prevClose > 0 ? ((price - prevClose) / prevClose) * 100 : null;
+
+    // closes son elemanı bugünün kapanışı mı yoksa dünün mü?
+    const lastIsToday = closes.length > 0 && Math.abs(closes[closes.length - 1] - price) / price < 0.005;
+    const offset = lastIsToday ? 0 : 1; // piyasa açıksa "1 gün önce" closes[length-1]
+    const closeAtBack = (n: number) => {
+      const idx = closes.length - 1 - n + offset;
+      return idx >= 0 && idx < closes.length ? closes[idx] : null;
+    };
     const week5 = closeAtBack(5); // 5 trading days ≈ 1 week
     const month22 = closeAtBack(22); // 22 trading days ≈ 1 month
     const weekChg = week5 && week5 > 0 ? ((price - week5) / week5) * 100 : null;
