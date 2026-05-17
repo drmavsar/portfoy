@@ -1,16 +1,26 @@
-import { listAccounts, listCustodyLocations } from "@/app/(app)/hesaplar/actions";
+import { listAccounts, listCustodyLocations, type AccountRow } from "@/app/(app)/hesaplar/actions";
+import { getTcmbRates } from "@/app/(app)/_lib/fx-rates";
 import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
 
 export const dynamic = "force-dynamic";
 
+function tryValueOf(a: AccountRow, fxRates: Record<string, number | undefined>): number {
+  if (a.currency === "TRY") return a.balance_try ?? a.opening_balance ?? 0;
+  const native = a.balance_native;
+  const rate = fxRates[a.currency];
+  if (native != null && rate != null) return Number(native) * rate;
+  return a.balance_try ?? 0;
+}
+
 export default async function OzetPage() {
-  const [accounts, custodies] = await Promise.all([
+  const [accounts, custodies, fxRates] = await Promise.all([
     listAccounts(),
     listCustodyLocations(),
+    getTcmbRates(),
   ]);
 
-  const totalTry = accounts.reduce((s, a) => s + (a.balance_try ?? a.opening_balance ?? 0), 0);
+  const totalTry = accounts.reduce((s, a) => s + tryValueOf(a, fxRates), 0);
 
   const byCustody = new Map<string, { name: string; color: string; total: number }>();
   for (const c of custodies) {
@@ -20,7 +30,7 @@ export default async function OzetPage() {
     if (!a.custody_id) continue;
     const g = byCustody.get(a.custody_id);
     if (!g) continue;
-    g.total += a.balance_try ?? a.opening_balance ?? 0;
+    g.total += tryValueOf(a, fxRates);
   }
   const grouped = Array.from(byCustody.values())
     .filter((g) => g.total > 0)

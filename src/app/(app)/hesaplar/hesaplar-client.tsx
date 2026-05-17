@@ -47,14 +47,28 @@ interface Props {
   custodies: CustodyRow[];
   beneficiaries: BeneficiaryLite[];
   supabaseConfigured: boolean;
+  fxRates: Record<string, number | undefined>;
 }
 
-export function HesaplarClient({ accounts, custodies, beneficiaries, supabaseConfigured }: Props) {
+/** Hesabın anlık TRY değerini hesapla:
+ *  - TRY hesap → opening_balance (balance_try kullanıcının manuel girdiği değer)
+ *  - Döviz/altın → balance_native × güncel kur
+ *  - Kur yoksa → balance_try (manuel girilmişse) fallback
+ */
+function tryValueOf(a: AccountRow, fxRates: Record<string, number | undefined>): number {
+  if (a.currency === "TRY") return a.balance_try ?? a.opening_balance ?? 0;
+  const native = a.balance_native;
+  const rate = fxRates[a.currency];
+  if (native != null && rate != null) return Number(native) * rate;
+  return a.balance_try ?? 0;
+}
+
+export function HesaplarClient({ accounts, custodies, beneficiaries, supabaseConfigured, fxRates }: Props) {
   const [newOpen, setNewOpen] = useState(false);
   const [busy, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  // Group accounts by custody
+  // Group accounts by custody — totaller anlık FX ile
   const grouped = useMemo(() => {
     const map = new Map<string, { custody: CustodyRow; accounts: AccountRow[]; total: number }>();
     for (const c of custodies) {
@@ -65,10 +79,10 @@ export function HesaplarClient({ accounts, custodies, beneficiaries, supabaseCon
       const g = map.get(a.custody_id);
       if (!g) continue;
       g.accounts.push(a);
-      g.total += a.balance_try ?? a.opening_balance ?? 0;
+      g.total += tryValueOf(a, fxRates);
     }
     return Array.from(map.values()).filter((g) => g.accounts.length > 0);
-  }, [accounts, custodies]);
+  }, [accounts, custodies, fxRates]);
 
   const grand = grouped.reduce((s, g) => s + g.total, 0);
 
@@ -213,7 +227,7 @@ export function HesaplarClient({ accounts, custodies, beneficiaries, supabaseCon
                       <div className="subacc-meta">{maskIBAN(a.iban)}</div>
                       <div>
                         <div className="subacc-try">
-                          {fmt.tr(a.balance_try ?? a.opening_balance ?? 0, 2)} ₺
+                          {fmt.tr(tryValueOf(a, fxRates), 2)} ₺
                         </div>
                         {a.currency !== "TRY" && a.balance_native != null && (
                           <div className="subacc-raw">
@@ -222,6 +236,11 @@ export function HesaplarClient({ accounts, custodies, beneficiaries, supabaseCon
                               ["BTC", "ETH"].includes(a.currency) ? 4 : a.currency === "XAU" ? 2 : 0,
                             )}{" "}
                             {a.currency}
+                            {fxRates[a.currency] != null && (
+                              <span style={{ marginLeft: 6, color: "var(--muted)" }}>
+                                @ {fmt.tr(fxRates[a.currency] ?? 0, 4)}
+                              </span>
+                            )}
                           </div>
                         )}
                       </div>
