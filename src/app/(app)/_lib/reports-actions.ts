@@ -13,7 +13,7 @@ export interface RawTxn {
 }
 
 /** Raporlar için ham transactions (son N ay, committed, transfer hariç). */
-export async function listTransactionsForReports(sinceMonths: number = 12): Promise<RawTxn[]> {
+export async function listTransactionsForReports(sinceMonths: number = 24): Promise<RawTxn[]> {
   if (!(await isSupabaseConfigured())) return [];
   const supabase = await createClient();
   const since = new Date();
