@@ -36,8 +36,19 @@ function MoversCard({
               const color = v >= 0 ? "var(--positive)" : "var(--negative)";
               return (
                 <tr key={r.asset.symbol}>
-                  <td style={{ fontWeight: 600, fontSize: 12, padding: "6px 12px" }}>
-                    {r.asset.symbol}
+                  <td style={{ fontSize: 12, padding: "6px 12px" }}>
+                    {r.asset.external_url ? (
+                      <a
+                        href={r.asset.external_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: "inherit", textDecoration: "none", fontWeight: 600, borderBottom: "1px dotted var(--muted)" }}
+                      >
+                        {r.asset.symbol}
+                      </a>
+                    ) : (
+                      <span style={{ fontWeight: 600 }}>{r.asset.symbol}</span>
+                    )}
                   </td>
                   <td style={{ fontSize: 11, color: "var(--muted)", padding: "6px 8px" }}>
                     {r.asset.name}
@@ -238,7 +249,20 @@ export default async function RadarPage() {
                   v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
                 return (
                   <tr key={r.asset.symbol}>
-                    <td><span style={{ fontWeight: 600 }}>{r.asset.symbol}</span></td>
+                    <td>
+                      {r.asset.external_url ? (
+                        <a
+                          href={r.asset.external_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: "inherit", textDecoration: "none", fontWeight: 600, borderBottom: "1px dotted var(--muted)" }}
+                        >
+                          {r.asset.symbol}
+                        </a>
+                      ) : (
+                        <span style={{ fontWeight: 600 }}>{r.asset.symbol}</span>
+                      )}
+                    </td>
                     <td style={{ fontSize: 13 }}>{r.asset.name}</td>
                     <td className="num tabular">{fmt.tr(r.quote.price, 2)} ₺</td>
                     <td className="num tabular" style={{ color: pctColor(d), fontWeight: 600 }}>{pctText(d)}</td>

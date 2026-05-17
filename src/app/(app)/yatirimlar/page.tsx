@@ -269,7 +269,18 @@ export default async function YatirimlarPage() {
                           <tr key={`${h.portfolio_id}-${h.asset_id}`}>
                             <td>
                               <div style={{ fontSize: 13, fontWeight: 600 }}>
-                                {h.asset?.symbol ?? "?"}
+                                {h.asset?.external_url ? (
+                                  <a
+                                    href={h.asset.external_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{ color: "inherit", textDecoration: "none", borderBottom: "1px dotted var(--muted)" }}
+                                  >
+                                    {h.asset.symbol}
+                                  </a>
+                                ) : (
+                                  h.asset?.symbol ?? "?"
+                                )}
                               </div>
                               {h.asset && <div className="hint">{h.asset.name}</div>}
                             </td>
