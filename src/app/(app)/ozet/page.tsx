@@ -15,6 +15,9 @@ import { getAssetChanges, getAssetRates, getTruncgilUpdateDate } from "@/app/(ap
 import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
 import { listTransactionsForReports } from "@/app/(app)/_lib/reports-actions";
 import { listBenchmarkPoints, listWealthSnapshots } from "@/app/(app)/_lib/wealth-snapshots-actions";
+import { captureDailySnapshot, listDailySnapshots } from "@/app/(app)/_lib/daily-snapshots-actions";
+import { AssetCompositionChart } from "@/app/(app)/_components/asset-composition-chart";
+import { PersonEquityChart } from "@/app/(app)/_components/person-equity-chart";
 import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
 
@@ -179,6 +182,28 @@ export default async function OzetPage() {
     .sort((a, b) => b.mv - a.mv);
 
   const grandTotal = accountTotal + investmentMv;
+
+  // Kişi-bazlı hisse MV (snapshot için)
+  const equityByPerson: Record<string, number> = {};
+  for (const h of enriched) {
+    const benId = portfolioBeneficiary.get(h.portfolio_id);
+    if (!benId) continue;
+    equityByPerson[benId] = (equityByPerson[benId] ?? 0) + h.mv;
+  }
+
+  // Günlük snapshot — bugün için yoksa al
+  if (grandTotal > 0) {
+    await captureDailySnapshot({
+      total_wealth: grandTotal,
+      cash_try: cashTotal,
+      fx_try: fxTotal,
+      metal_try: metalTotal,
+      equity_mv: investmentMv,
+      crypto_try: 0,
+      equity_by_person: equityByPerson,
+    });
+  }
+  const dailySnapshots = await listDailySnapshots(180);
 
   // Varlık sınıfı dağılımı (hesaplar + yatırımlar tek pasta)
   const assetClassMap = new Map<string, AssetClassSlice>();
@@ -973,6 +998,42 @@ export default async function OzetPage() {
               </div>
             </div>
           </div>
+
+          {/* Tarihsel grafikler — daily_snapshots */}
+          <div className="card" style={{ marginTop: 16 }}>
+            <div className="card-head">
+              <div className="card-title">Varlık Kompozisyonu &amp; Trend</div>
+              <div className="card-sub">
+                Son 6 ay · stacked area · {dailySnapshots.length} günlük snapshot
+              </div>
+            </div>
+            <div style={{ padding: "16px 12px 12px" }}>
+              <AssetCompositionChart rows={dailySnapshots} />
+            </div>
+          </div>
+
+          {beneficiaries.length > 0 && dailySnapshots.length > 0 && (
+            <div className="card" style={{ marginTop: 16 }}>
+              <div className="card-head">
+                <div className="card-title">Kişi Bazlı Hisse Portföyü Tarihsel</div>
+                <div className="card-sub">son 6 ay · sadece hisse MV</div>
+              </div>
+              <div style={{ padding: "16px 12px 12px" }}>
+                <PersonEquityChart
+                  rows={dailySnapshots}
+                  persons={beneficiaries
+                    .filter((b) => dailySnapshots.some(
+                      (s) => Number((s.equity_by_person as Record<string, number>)[b.id] ?? 0) > 0,
+                    ))
+                    .map((b) => ({
+                      id: b.id,
+                      name: b.name,
+                      color: b.color ?? "#7d8699",
+                    }))}
+                />
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
