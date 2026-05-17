@@ -1,5 +1,5 @@
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
-import { getTcmbRates } from "@/app/(app)/_lib/fx-rates";
+import { getAssetRates } from "@/app/(app)/_lib/asset-rates";
 
 import { HesaplarClient } from "./hesaplar-client";
 import {
@@ -16,7 +16,7 @@ export default async function HesaplarPage() {
     listAccounts(),
     listCustodyLocations(),
     listBeneficiariesLite(),
-    getTcmbRates(),
+    getAssetRates(),
   ]);
 
   return (
