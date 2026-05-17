@@ -1,5 +1,5 @@
 import { listAccounts, listCustodyLocations, type AccountRow } from "@/app/(app)/hesaplar/actions";
-import { getTcmbRates } from "@/app/(app)/_lib/fx-rates";
+import { getAssetRates } from "@/app/(app)/_lib/asset-rates";
 import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
 
@@ -17,7 +17,7 @@ export default async function OzetPage() {
   const [accounts, custodies, fxRates] = await Promise.all([
     listAccounts(),
     listCustodyLocations(),
-    getTcmbRates(),
+    getAssetRates(),
   ]);
 
   const totalTry = accounts.reduce((s, a) => s + tryValueOf(a, fxRates), 0);
