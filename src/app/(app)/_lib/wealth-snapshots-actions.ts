@@ -24,3 +24,28 @@ export async function listWealthSnapshots(): Promise<WealthSnapshotRow[]> {
   }
   return (data ?? []) as unknown as WealthSnapshotRow[];
 }
+
+export interface BenchmarkPoint {
+  code: string;
+  name: string;
+  as_of: string;
+  value: number;
+}
+
+export async function listBenchmarkPoints(): Promise<BenchmarkPoint[]> {
+  if (!(await isSupabaseConfigured())) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("benchmark_points")
+    .select("as_of, value, benchmark_series!inner(code, name)")
+    .order("as_of", { ascending: true });
+  if (error) {
+    console.error("listBenchmarkPoints error", error);
+    return [];
+  }
+  type Row = { as_of: string; value: number; benchmark_series: { code: string; name: string } | Array<{ code: string; name: string }> };
+  return ((data ?? []) as unknown as Row[]).map((r) => {
+    const s = Array.isArray(r.benchmark_series) ? r.benchmark_series[0] : r.benchmark_series;
+    return { code: s?.code ?? "?", name: s?.name ?? "?", as_of: r.as_of, value: Number(r.value) };
+  });
+}
