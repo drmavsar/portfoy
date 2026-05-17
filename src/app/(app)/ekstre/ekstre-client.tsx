@@ -90,6 +90,26 @@ export function EkstreClient({
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  /** Hesap değişince: hesabın sahibi varsa tüm satırları o kişiye sabitle;
+   *  yoksa rule-bazlı öneriyi (suggested_beneficiary_id) geri yükle. */
+  const applyAccountChange = (newAccountId: string) => {
+    setAccountId(newAccountId);
+    const account = accounts.find((a) => a.id === newAccountId);
+    const fixedBen = account?.beneficiary_id ?? null;
+    if (fixedBen) setBeneficiaryId(fixedBen);
+    setResult((prev) =>
+      prev
+        ? {
+            ...prev,
+            rows: prev.rows.map((r) => ({
+              ...r,
+              beneficiary_id: fixedBen ?? r.suggested_beneficiary_id,
+            })),
+          }
+        : prev,
+    );
+  };
+
   const onUpload = () => {
     if (!file) return;
     setError(null);
@@ -119,7 +139,24 @@ export function EkstreClient({
         const match = accounts.find((a) =>
           `${a.name} ${a.iban ?? ""}`.includes(r.card_last4 as string),
         );
-        if (match) setAccountId(match.id);
+        if (match) {
+          // Match found → applyAccountChange ile beneficiary'i de sabitle
+          setAccountId(match.id);
+          if (match.beneficiary_id) setBeneficiaryId(match.beneficiary_id);
+          // rows'a beneficiary'i propagate et
+          const fixedBen = match.beneficiary_id ?? null;
+          setResult((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  rows: prev.rows.map((row) => ({
+                    ...row,
+                    beneficiary_id: fixedBen ?? row.beneficiary_id,
+                  })),
+                }
+              : prev,
+          );
+        }
       }
     });
   };
@@ -380,7 +417,7 @@ export function EkstreClient({
               <select
                 style={inp}
                 value={accountId}
-                onChange={(e) => setAccountId(e.target.value)}
+                onChange={(e) => applyAccountChange(e.target.value)}
               >
                 <option value="">Hesap seç…</option>
                 {accounts.map((a) => (
@@ -568,12 +605,12 @@ export function EkstreClient({
                         ) : (
                           <select
                             style={inp}
-                            value={r.beneficiary_id ?? ""}
+                            value={r.beneficiary_id ?? beneficiaryId ?? ""}
                             onChange={(e) =>
                               setBen(i, e.target.value || null)
                             }
                           >
-                            <option value="">(global)</option>
+                            <option value="">— kişi yok —</option>
                             {beneficiaries.map((b) => (
                               <option key={b.id} value={b.id}>
                                 {b.name}
