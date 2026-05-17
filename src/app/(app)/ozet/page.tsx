@@ -1,12 +1,15 @@
 import {
   listAccounts,
+  listBeneficiariesLite,
   listCustodyLocations,
   type AccountRow,
+  type BeneficiaryLite,
 } from "@/app/(app)/hesaplar/actions";
 import {
   listAssets,
   listHoldings,
   listPortfolios,
+  listTrades,
 } from "@/app/(app)/_lib/wealth-actions";
 import { getAssetRates } from "@/app/(app)/_lib/asset-rates";
 import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
@@ -24,27 +27,37 @@ function tryValueOf(a: AccountRow, fxRates: Record<string, number | undefined>):
 }
 
 export default async function OzetPage() {
-  const [accounts, custodies, fxRates, holdings, assets, portfolios] = await Promise.all([
+  const [accounts, custodies, beneficiaries, fxRates, holdings, assets, portfolios, trades] = await Promise.all([
     listAccounts(),
     listCustodyLocations(),
+    listBeneficiariesLite(),
     getAssetRates(),
     listHoldings(),
     listAssets(),
     listPortfolios(),
+    listTrades(),
   ]);
 
-  // Hesap totalleri
+  const benMap: Record<string, BeneficiaryLite> = Object.fromEntries(beneficiaries.map((b) => [b.id, b]));
+
+  // Hesap totalleri + custody × beneficiary kırılımı
   const accountTotal = accounts.reduce((s, a) => s + tryValueOf(a, fxRates), 0);
 
-  const byCustody = new Map<string, { name: string; color: string; total: number }>();
+  const byCustody = new Map<
+    string,
+    { name: string; color: string; total: number; byBen: Map<string, number> }
+  >();
   for (const c of custodies) {
-    byCustody.set(c.id, { name: c.name, color: c.color ?? "#6ea8fe", total: 0 });
+    byCustody.set(c.id, { name: c.name, color: c.color ?? "#6ea8fe", total: 0, byBen: new Map() });
   }
   for (const a of accounts) {
     if (!a.custody_id) continue;
     const g = byCustody.get(a.custody_id);
     if (!g) continue;
-    g.total += tryValueOf(a, fxRates);
+    const v = tryValueOf(a, fxRates);
+    g.total += v;
+    const benKey = a.beneficiary_id ?? "__unassigned__";
+    g.byBen.set(benKey, (g.byBen.get(benKey) ?? 0) + v);
   }
   const groupedAccounts = Array.from(byCustody.values())
     .filter((g) => g.total > 0)
@@ -71,6 +84,45 @@ export default async function OzetPage() {
   const investmentMv = enriched.reduce((s, h) => s + h.mv, 0);
   const investmentCost = enriched.reduce((s, h) => s + h.cost, 0);
   const investmentPnl = investmentMv - investmentCost;
+
+  // Portföy → dominant beneficiary (trade'lerin ilki)
+  const portfolioBeneficiary = new Map<string, string>();
+  for (const t of trades) {
+    if (t.beneficiary_id && !portfolioBeneficiary.has(t.portfolio_id)) {
+      portfolioBeneficiary.set(t.portfolio_id, t.beneficiary_id);
+    }
+  }
+
+  // Kişi bazlı: hesap + yatırım toplamı
+  const personTotals = new Map<string, { account: number; investment: number }>();
+  const bumpAcc = (key: string, v: number) => {
+    const cur = personTotals.get(key) ?? { account: 0, investment: 0 };
+    cur.account += v;
+    personTotals.set(key, cur);
+  };
+  const bumpInv = (key: string, v: number) => {
+    const cur = personTotals.get(key) ?? { account: 0, investment: 0 };
+    cur.investment += v;
+    personTotals.set(key, cur);
+  };
+  for (const a of accounts) {
+    bumpAcc(a.beneficiary_id ?? "__unassigned__", tryValueOf(a, fxRates));
+  }
+  for (const h of enriched) {
+    const ben = portfolioBeneficiary.get(h.portfolio_id) ?? "__unassigned__";
+    bumpInv(ben, h.mv);
+  }
+  const personRows = Array.from(personTotals.entries())
+    .map(([id, v]) => ({
+      id,
+      name: id === "__unassigned__" ? "(Atanmamış)" : (benMap[id]?.name ?? "?"),
+      color: id === "__unassigned__" ? "#7d8699" : (benMap[id]?.color ?? "#7d8699"),
+      account: v.account,
+      investment: v.investment,
+      total: v.account + v.investment,
+    }))
+    .filter((r) => r.total > 0)
+    .sort((a, b) => b.total - a.total);
 
   // Portföy bazında yatırım dağılımı
   const portfolioGroups = portfolios
@@ -161,38 +213,78 @@ export default async function OzetPage() {
               <div className="card">
                 <div className="card-head">
                   <div className="card-title">Kurum Bazlı Hesap Dağılımı</div>
+                  <div className="card-sub">altında kişi kırılımı</div>
                 </div>
                 <div style={{ padding: "12px 0" }}>
                   {groupedAccounts.map((g) => {
                     const pct = accountTotal > 0 ? (g.total / accountTotal) * 100 : 0;
+                    const benRows = Array.from(g.byBen.entries())
+                      .map(([id, v]) => ({
+                        id,
+                        name: id === "__unassigned__" ? "(Atanmamış)" : (benMap[id]?.name ?? "?"),
+                        color: id === "__unassigned__" ? "#7d8699" : (benMap[id]?.color ?? "#7d8699"),
+                        value: v,
+                      }))
+                      .filter((b) => b.value > 0)
+                      .sort((a, b) => b.value - a.value);
                     return (
-                      <div
-                        key={g.name}
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "1fr auto 60px",
-                          gap: 12,
-                          padding: "8px 20px",
-                          alignItems: "center",
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <span
+                      <div key={g.name} style={{ padding: "8px 20px 10px" }}>
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "1fr auto 60px",
+                            gap: 12,
+                            alignItems: "center",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <span style={{ width: 10, height: 10, borderRadius: 50, background: g.color }} />
+                            <span style={{ fontSize: 13, fontWeight: 500 }}>{g.name}</span>
+                          </div>
+                          <div className="tabular" style={{ fontWeight: 600, fontSize: 13 }}>
+                            {fmt.trydp(g.total)}
+                          </div>
+                          <div className="hint tabular" style={{ textAlign: "right" }}>
+                            %{pct.toFixed(1)}
+                          </div>
+                        </div>
+                        {benRows.length > 0 && (
+                          <div
                             style={{
-                              width: 10,
-                              height: 10,
-                              borderRadius: 50,
-                              background: g.color,
+                              display: "flex",
+                              gap: 8,
+                              flexWrap: "wrap",
+                              marginTop: 6,
+                              marginLeft: 20,
                             }}
-                          />
-                          <span style={{ fontSize: 13 }}>{g.name}</span>
-                        </div>
-                        <div className="tabular" style={{ fontWeight: 500, fontSize: 13 }}>
-                          {fmt.trydp(g.total)}
-                        </div>
-                        <div className="hint tabular" style={{ textAlign: "right" }}>
-                          %{pct.toFixed(1)}
-                        </div>
+                          >
+                            {benRows.map((b) => (
+                              <span
+                                key={b.id}
+                                style={{
+                                  fontSize: 11,
+                                  color: "var(--muted)",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 4,
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    width: 6,
+                                    height: 6,
+                                    borderRadius: 50,
+                                    background: b.color,
+                                  }}
+                                />
+                                {b.name}{" "}
+                                <span className="tabular" style={{ color: "var(--fg-soft)" }}>
+                                  {fmt.tr(b.value, 0)} ₺
+                                </span>
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -238,6 +330,47 @@ export default async function OzetPage() {
               </div>
             )}
           </div>
+
+          {personRows.length > 0 && (
+            <div className="card" style={{ marginTop: 16 }}>
+              <div className="card-head">
+                <div className="card-title">Kişi Bazlı Toplam Servet</div>
+                <div className="card-sub">hesap + yatırım MV</div>
+              </div>
+              <table className="dg">
+                <thead>
+                  <tr>
+                    <th>Kişi</th>
+                    <th className="num">Hesaplar</th>
+                    <th className="num">Yatırımlar</th>
+                    <th className="num">Toplam</th>
+                    <th className="num" style={{ width: 80 }}>Pay</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {personRows.map((p) => {
+                    const grandPct = grandTotal > 0 ? (p.total / grandTotal) * 100 : 0;
+                    return (
+                      <tr key={p.id}>
+                        <td>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ width: 8, height: 8, borderRadius: 50, background: p.color }} />
+                            {p.name}
+                          </span>
+                        </td>
+                        <td className="num tabular">{fmt.tr(p.account, 0)} ₺</td>
+                        <td className="num tabular">{fmt.tr(p.investment, 0)} ₺</td>
+                        <td className="num tabular" style={{ fontWeight: 600 }}>
+                          {fmt.tr(p.total, 0)} ₺
+                        </td>
+                        <td className="num tabular hint">%{grandPct.toFixed(1)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <div
             className="hint"
