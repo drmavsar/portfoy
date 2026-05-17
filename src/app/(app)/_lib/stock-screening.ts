@@ -6,8 +6,6 @@
 
 export interface ScreeningRow {
   symbol: string;
-  name?: string;
-  sector?: string;
   price: number;
   prev_close: number | null;
   daily_pct: number | null;
