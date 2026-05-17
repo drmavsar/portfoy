@@ -23,6 +23,7 @@ interface Props {
 interface EditableRow extends StatementPreviewRow {
   selected: boolean;
   category_id: string | null;
+  beneficiary_id: string | null;
 }
 
 interface ParsedResult {
@@ -105,6 +106,7 @@ export function EkstreClient({
         ...row,
         selected: !row.is_transfer,
         category_id: row.suggested_category_id,
+        beneficiary_id: row.suggested_beneficiary_id,
       }));
       setResult({
         card_last4: r.card_last4,
@@ -148,6 +150,19 @@ export function EkstreClient({
     );
   };
 
+  const setBen = (i: number, ben: string | null) => {
+    setResult((prev) =>
+      prev
+        ? {
+            ...prev,
+            rows: prev.rows.map((r, idx) =>
+              idx === i ? { ...r, beneficiary_id: ben } : r,
+            ),
+          }
+        : prev,
+    );
+  };
+
   const selectAll = (only: "expense" | "all" | "none") => {
     setResult((prev) =>
       prev
@@ -179,6 +194,7 @@ export function EkstreClient({
         direction: r.direction,
         is_transfer: r.is_transfer,
         category_id: r.category_id,
+        beneficiary_id: r.beneficiary_id,
         hash_dedupe: r.hash_dedupe,
       }));
     if (rows.length === 0) {
@@ -484,6 +500,9 @@ export function EkstreClient({
                     <th style={{ padding: "8px 10px", textAlign: "left", width: 170 }}>
                       Kategori
                     </th>
+                    <th style={{ padding: "8px 10px", textAlign: "left", width: 120 }}>
+                      Kişi
+                    </th>
                     <th style={{ padding: "8px 10px", textAlign: "right", width: 110 }}>
                       Tutar
                     </th>
@@ -538,6 +557,26 @@ export function EkstreClient({
                             {expenseCats.map((c) => (
                               <option key={c.id} value={c.id}>
                                 {c.icon ?? "·"} {c.name}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </td>
+                      <td style={{ padding: "6px 10px" }}>
+                        {r.is_transfer ? (
+                          <span style={{ color: "var(--muted)", fontSize: 11 }}>—</span>
+                        ) : (
+                          <select
+                            style={inp}
+                            value={r.beneficiary_id ?? ""}
+                            onChange={(e) =>
+                              setBen(i, e.target.value || null)
+                            }
+                          >
+                            <option value="">(global)</option>
+                            {beneficiaries.map((b) => (
+                              <option key={b.id} value={b.id}>
+                                {b.name}
                               </option>
                             ))}
                           </select>

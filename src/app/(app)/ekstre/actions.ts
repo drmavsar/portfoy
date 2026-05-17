@@ -16,6 +16,7 @@ export interface StatementPreviewRow {
   direction: "outflow" | "inflow";
   is_transfer: boolean; // pozitif tutar (kart ödemesi vb.) → true
   suggested_category_id: string | null;
+  suggested_beneficiary_id: string | null; // kural eşleşirse rule'dan gelir
   hash_dedupe: string;
   raw_amount_str: string;
 }
@@ -75,7 +76,55 @@ function categorySlugCandidates(etiket: string): string[] {
   if (e.includes("giyim")) return ["giyim", "moda"];
   if (e.includes("teknoloji") || e.includes("elektronik"))
     return ["teknoloji", "elektronik"];
+  if (e.includes("kurum") || e.includes("abonelik"))
+    return ["dijital-platform", "abonelik"];
+  if (e.includes("vergi")) return ["vergi"];
   return [];
+}
+
+interface ClassificationRule {
+  match_merchant_ilike: string | null;
+  match_description_ilike: string | null;
+  set_category_id: string | null;
+  set_beneficiary_id: string | null;
+  set_is_transfer: boolean | null;
+}
+
+/** SQL ILIKE pattern (%, _) → RegExp; case-insensitive */
+function ilikeToRegExp(pattern: string): RegExp {
+  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = escaped.replace(/%/g, ".*").replace(/_/g, ".");
+  return new RegExp("^" + re + "$", "i");
+}
+
+function applyRule(
+  rules: ClassificationRule[],
+  merchant: string,
+  description: string,
+): {
+  category_id: string | null;
+  beneficiary_id: string | null;
+  is_transfer: boolean | null;
+} {
+  for (const r of rules) {
+    let matched = false;
+    if (r.match_merchant_ilike) {
+      if (ilikeToRegExp(r.match_merchant_ilike).test(merchant)) matched = true;
+      else continue;
+    }
+    if (r.match_description_ilike) {
+      if (ilikeToRegExp(r.match_description_ilike).test(description)) matched = true;
+      else continue;
+    }
+    if (matched) {
+      return {
+        category_id: r.set_category_id,
+        beneficiary_id: r.set_beneficiary_id,
+        is_transfer: r.set_is_transfer,
+      };
+    }
+  }
+  return { category_id: null, beneficiary_id: null, is_transfer: null };
 }
 
 export async function parseStatementXls(
@@ -88,17 +137,31 @@ export async function parseStatementXls(
     return { ok: false, error: "Dosya 5MB'tan büyük." };
 
   let userCategories: { id: string; slug: string }[] = [];
+  let rules: ClassificationRule[] = [];
   if (await isSupabaseConfigured()) {
     try {
       const supabase = await createClient();
-      const { data } = await supabase
-        .from("categories")
-        .select("id, slug, kind")
-        .eq("kind", "expense")
-        .is("archived_at", null);
-      userCategories = (data ?? []) as { id: string; slug: string }[];
+      const [catRes, ruleRes] = await Promise.all([
+        supabase
+          .from("categories")
+          .select("id, slug, kind")
+          .eq("kind", "expense")
+          .is("archived_at", null),
+        supabase
+          .from("classification_rules")
+          .select(
+            "match_merchant_ilike, match_description_ilike, set_category_id, set_beneficiary_id, set_is_transfer, priority, is_enabled",
+          )
+          .eq("is_enabled", true)
+          .order("priority", { ascending: true }),
+      ]);
+      userCategories = (catRes.data ?? []) as { id: string; slug: string }[];
+      rules = ((ruleRes.data ?? []) as ClassificationRule[]).filter(
+        (r) => r.match_merchant_ilike || r.match_description_ilike,
+      );
     } catch {
       userCategories = [];
+      rules = [];
     }
   }
 
@@ -195,8 +258,14 @@ export async function parseStatementXls(
       const merchant = islemCell || etiketCell || "—";
       const amount = Math.abs(rawAmount);
       const direction: "outflow" | "inflow" = rawAmount < 0 ? "outflow" : "inflow";
-      const is_transfer = rawAmount > 0;
-      const suggested = is_transfer ? null : findCatIdForEtiket(etiketCell);
+
+      // Önce DB'deki classification_rules; eşleşmezse etiket-bazlı slug eşlemesi
+      const ruleMatch = applyRule(rules, merchant, etiketCell);
+      const is_transfer = ruleMatch.is_transfer ?? rawAmount > 0;
+      const suggested = is_transfer
+        ? null
+        : (ruleMatch.category_id ?? findCatIdForEtiket(etiketCell));
+      const suggestedBen = is_transfer ? null : ruleMatch.beneficiary_id;
 
       const hash = sha256(
         `garanti|${card_last4 ?? "????"}|${date}|${rawAmount.toFixed(2)}|${merchant}`,
@@ -212,6 +281,7 @@ export async function parseStatementXls(
         direction,
         is_transfer,
         suggested_category_id: suggested,
+        suggested_beneficiary_id: suggestedBen,
         hash_dedupe: hash,
         raw_amount_str: tutarCell,
       });
@@ -244,6 +314,7 @@ export interface CommitRow {
   direction: "outflow" | "inflow";
   is_transfer: boolean;
   category_id: string | null;
+  beneficiary_id: string | null; // null ise global seçim kullanılır
   hash_dedupe: string;
 }
 
@@ -332,7 +403,7 @@ export async function commitStatementRows(
     description: r.etiket ? `${r.etiket} · ${r.merchant_raw}` : r.merchant_raw,
     merchant_raw: r.merchant_raw,
     category_id: r.is_transfer ? null : r.category_id,
-    beneficiary_id: input.beneficiary_id,
+    beneficiary_id: r.is_transfer ? null : (r.beneficiary_id ?? input.beneficiary_id),
     is_transfer: r.is_transfer,
     hash_dedupe: r.hash_dedupe,
     status: "committed",
