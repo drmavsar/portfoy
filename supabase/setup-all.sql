@@ -1,10 +1,6 @@
--- ============================================================
 -- Mehmet's Assets — All-in-one Supabase setup (idempotent)
--- ============================================================
 
--- ============================================================
 -- FILE: supabase/migrations/0001_extensions_and_enums.sql
--- ============================================================
 -- =====================================================================
 -- Migration 0001: Extensions, enums and shared utilities
 -- =====================================================================
@@ -78,9 +74,7 @@ begin
 end;
 $$;
 
--- ============================================================
 -- FILE: supabase/migrations/0002_dimensions.sql
--- ============================================================
 -- =====================================================================
 -- Migration 0002: Dynamic dimensions
 -- =====================================================================
@@ -182,9 +176,7 @@ create table if not exists public.tags (
   unique (user_id, slug)
 );
 
--- ============================================================
 -- FILE: supabase/migrations/0003_cashflow.sql
--- ============================================================
 -- =====================================================================
 -- Migration 0003: Cashflow - accounts, statements, transactions, rules
 -- =====================================================================
@@ -400,9 +392,7 @@ create trigger budgets_set_updated_at
   before update on public.budgets
   for each row execute function public.tg_set_updated_at();
 
--- ============================================================
 -- FILE: supabase/migrations/0004_classification_rules.sql
--- ============================================================
 -- =====================================================================
 -- Migration 0004: Classification rule engine
 -- =====================================================================
@@ -474,9 +464,7 @@ create table if not exists public.merchant_aliases (
   unique (user_id, pattern)
 );
 
--- ============================================================
 -- FILE: supabase/migrations/0005_wealth.sql
--- ============================================================
 -- =====================================================================
 -- Migration 0005: Wealth - assets, trades, holdings, price history
 -- =====================================================================
@@ -613,9 +601,7 @@ create table if not exists public.holding_snapshots (
   primary key (user_id, portfolio_id, asset_id, as_of)
 );
 
--- ============================================================
 -- FILE: supabase/migrations/0006_screener.sql
--- ============================================================
 -- =====================================================================
 -- Migration 0006: Algorithmic screener (technical + fundamental + catalysts)
 -- =====================================================================
@@ -738,9 +724,7 @@ create table if not exists public.scan_runs (
   error         text
 );
 
--- ============================================================
 -- FILE: supabase/migrations/0007_rls_policies.sql
--- ============================================================
 -- =====================================================================
 -- Migration 0007: Row-Level Security
 -- =====================================================================
@@ -876,9 +860,7 @@ drop policy if exists scan_runs_read on public.scan_runs;
 create policy scan_runs_read on public.scan_runs
   for select to authenticated using (true);
 
--- ============================================================
 -- FILE: supabase/migrations/0008_views_and_helpers.sql
--- ============================================================
 -- =====================================================================
 -- Migration 0008: Reporting views and computed helpers
 -- =====================================================================
@@ -1034,9 +1016,7 @@ left join public.technical_scans ts
   on ts.asset_id = sr.asset_id and ts.as_of = sr.as_of
 where sr.as_of = (select max(as_of) from public.screener_ranks);
 
--- ============================================================
 -- FILE: supabase/migrations/0009_beneficiaries_role.sql
--- ============================================================
 -- =====================================================================
 -- Migration 0009: beneficiaries.role kolonu
 -- =====================================================================
@@ -1049,9 +1029,7 @@ alter table public.beneficiaries
 
 create index if not exists beneficiaries_role_idx on public.beneficiaries(user_id, role);
 
--- ============================================================
 -- FILE: supabase/migrations/0010_accounts_ui_fields.sql
--- ============================================================
 -- =====================================================================
 -- Migration 0010: Hesaplar UI alanları
 -- =====================================================================
@@ -1100,9 +1078,7 @@ update public.custody_locations set color='#b388f2', short='GKR' where slug='gar
 update public.custody_locations set color='#d4a056', short='KSA' where slug='fiziki-kasa'    and short is null;
 update public.custody_locations set color='#7d8699', short='BNK' where slug='banka'          and short is null;
 
--- ============================================================
 -- FILE: supabase/migrations/0011_trades_beneficiary.sql
--- ============================================================
 -- =====================================================================
 -- Migration 0011: trades tablosuna beneficiary_id (sahiplik)
 -- =====================================================================
@@ -1119,9 +1095,36 @@ create index if not exists trades_beneficiary_idx on public.trades(beneficiary_i
 -- v_holdings_wac'a beneficiary kırılımı eklemiyoruz şimdilik; sayfa
 -- aggregate'i client-side filtreleyecek.
 
--- ============================================================
+-- FILE: supabase/migrations/0012_wealth_snapshots.sql
+-- =====================================================================
+-- Migration 0012: wealth_snapshots — yıl/dönem sonu toplam servet kayıtları
+-- =====================================================================
+
+create table if not exists public.wealth_snapshots (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  period      text not null,   -- '2022', '2023-12', '2026-05-17' gibi
+  total_try   numeric(18,2) not null,
+  notes       text,
+  created_at  timestamptz not null default now(),
+  unique (user_id, period)
+);
+
+create index if not exists wealth_snapshots_user_period_idx
+  on public.wealth_snapshots(user_id, period);
+
+alter table public.wealth_snapshots enable row level security;
+drop policy if exists ws_own_read on public.wealth_snapshots;
+create policy ws_own_read on public.wealth_snapshots
+  for select to authenticated
+  using (user_id = auth.uid());
+drop policy if exists ws_own_write on public.wealth_snapshots;
+create policy ws_own_write on public.wealth_snapshots
+  for all to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
 -- FILE: supabase/seed/0001_default_dimensions.sql
--- ============================================================
 -- =====================================================================
 -- Seed script: runs once per new auth user via a trigger-friendly RPC.
 -- This file is intentionally a function definition, not raw INSERTs,
@@ -1289,9 +1292,7 @@ grant execute on function public.bootstrap_garanti_card(uuid, text, text) to aut
 revoke all on function public.bootstrap_user_defaults() from public;
 grant execute on function public.bootstrap_user_defaults() to authenticated;
 
--- ============================================================
 -- FILE: supabase/seed/0002_reference_data.sql
--- ============================================================
 -- =====================================================================
 -- Reference data shared across all users (run as service_role).
 -- =====================================================================

@@ -13,8 +13,35 @@ import {
 } from "@/app/(app)/_lib/wealth-actions";
 import { getAssetRates } from "@/app/(app)/_lib/asset-rates";
 import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
+import { listTransactionsForReports } from "@/app/(app)/_lib/reports-actions";
+import { listWealthSnapshots } from "@/app/(app)/_lib/wealth-snapshots-actions";
 import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
+
+const MONTH_TR = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
+
+function monthLabel(period: string): string {
+  const [y, m] = period.split("-");
+  return `${MONTH_TR[Number(m) - 1]} ${y.slice(2)}`;
+}
+
+interface AssetClassSlice {
+  label: string;
+  value: number;
+  color: string;
+}
+
+function classifyAccountClass(currency: string): { key: string; label: string; color: string } {
+  if (currency === "TRY") return { key: "cash_try", label: "Nakit (₺)", color: "#4cc9b0" };
+  if (["USD", "EUR", "GBP", "CHF", "JPY", "AUD", "CAD"].includes(currency))
+    return { key: "fx", label: "Döviz", color: "#6ea8fe" };
+  if (currency === "XAU_OZ" || currency === "XAU" || currency === "XAG" ||
+      ["CEYREK", "YARIM", "TAM", "CUMHURIYET", "ATA", "RESAT", "BILEZIK22", "BILEZIK14", "BILEZIK18"].includes(currency))
+    return { key: "metal", label: "Altın & Gümüş", color: "#d4a056" };
+  if (["BTC", "ETH", "SOL", "USDT", "BNB"].includes(currency))
+    return { key: "crypto", label: "Kripto", color: "#b388f2" };
+  return { key: "other", label: "Diğer", color: "#7d8699" };
+}
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +54,7 @@ function tryValueOf(a: AccountRow, fxRates: Record<string, number | undefined>):
 }
 
 export default async function OzetPage() {
-  const [accounts, custodies, beneficiaries, fxRates, holdings, assets, portfolios, trades] = await Promise.all([
+  const [accounts, custodies, beneficiaries, fxRates, holdings, assets, portfolios, trades, txns, wealthSnapshots] = await Promise.all([
     listAccounts(),
     listCustodyLocations(),
     listBeneficiariesLite(),
@@ -36,6 +63,8 @@ export default async function OzetPage() {
     listAssets(),
     listPortfolios(),
     listTrades(),
+    listTransactionsForReports(12),
+    listWealthSnapshots(),
   ]);
 
   const benMap: Record<string, BeneficiaryLite> = Object.fromEntries(beneficiaries.map((b) => [b.id, b]));
@@ -135,6 +164,56 @@ export default async function OzetPage() {
     .sort((a, b) => b.mv - a.mv);
 
   const grandTotal = accountTotal + investmentMv;
+
+  // Varlık sınıfı dağılımı (hesaplar + yatırımlar tek pasta)
+  const assetClassMap = new Map<string, AssetClassSlice>();
+  const addSlice = (key: string, label: string, color: string, value: number) => {
+    if (value <= 0) return;
+    const cur = assetClassMap.get(key) ?? { label, color, value: 0 };
+    cur.value += value;
+    assetClassMap.set(key, cur);
+  };
+  for (const a of accounts) {
+    const c = classifyAccountClass(a.currency);
+    addSlice(c.key, c.label, c.color, tryValueOf(a, fxRates));
+  }
+  for (const h of enriched) {
+    const asset = assetMap[h.asset_id];
+    if (asset?.asset_class === "equity_tr" || asset?.asset_class === "equity_us") {
+      addSlice("equity", "Hisse", "#e26a8f", h.mv);
+    } else if (asset?.asset_class === "crypto") {
+      addSlice("crypto", "Kripto", "#b388f2", h.mv);
+    } else if (asset?.asset_class === "metal") {
+      addSlice("metal", "Altın & Gümüş", "#d4a056", h.mv);
+    } else if (asset?.asset_class === "fx") {
+      addSlice("fx", "Döviz", "#6ea8fe", h.mv);
+    } else {
+      addSlice("other", "Diğer", "#7d8699", h.mv);
+    }
+  }
+  const assetClassSlices = Array.from(assetClassMap.values()).sort((a, b) => b.value - a.value);
+
+  // YTD nakit akış — Ocak'tan içinde bulunulan aya
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const monthsCount = today.getMonth() + 1; // Ocak=1, Aralık=12
+  const months: Array<{ period: string; inflow: number; outflow: number }> = [];
+  for (let i = 0; i < monthsCount; i++) {
+    const period = `${currentYear}-${String(i + 1).padStart(2, "0")}`;
+    months.push({ period, inflow: 0, outflow: 0 });
+  }
+  const monthMap = new Map(months.map((m) => [m.period, m]));
+  for (const t of txns) {
+    const p = t.occurred_on.slice(0, 7);
+    const m = monthMap.get(p);
+    if (!m) continue;
+    if (t.direction === "inflow") m.inflow += Number(t.amount);
+    else if (t.direction === "outflow") m.outflow += Number(t.amount);
+  }
+  const maxMonthVal = Math.max(
+    ...months.map((m) => Math.max(m.inflow, m.outflow)),
+    1,
+  );
 
   return (
     <div>
@@ -372,12 +451,197 @@ export default async function OzetPage() {
             </div>
           )}
 
-          <div
-            className="hint"
-            style={{ marginTop: 18, padding: 12, background: "var(--surface-2)", borderRadius: 8 }}
-          >
-            Gelir-gider trendi, varlık sınıfı dağılımı, korelasyon haritası gibi zengin widget'lar
-            ilerleyen sprint'lerde gelecek.
+          {/* Yıl-bazlı geçmiş servet karşılaştırması */}
+          {wealthSnapshots.length > 0 && (() => {
+            const maxVal = Math.max(...wealthSnapshots.map((s) => Number(s.total_try)), 1);
+            return (
+              <div className="card" style={{ marginTop: 16 }}>
+                <div className="card-head">
+                  <div className="card-title">Geçmiş Yıllar — Servet Büyümesi</div>
+                  <div className="card-sub">YoY % değişim</div>
+                </div>
+                <table className="dg">
+                  <thead>
+                    <tr>
+                      <th>Dönem</th>
+                      <th className="num">Toplam Servet</th>
+                      <th className="num">Değişim (₺)</th>
+                      <th className="num">YoY %</th>
+                      <th style={{ width: "30%" }}>Görsel</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {wealthSnapshots.map((s, i) => {
+                      const prev = i > 0 ? Number(wealthSnapshots[i - 1].total_try) : null;
+                      const cur = Number(s.total_try);
+                      const diff = prev != null ? cur - prev : null;
+                      const yoy = prev && prev > 0 ? (diff! / prev) * 100 : null;
+                      const widthPct = (cur / maxVal) * 100;
+                      const pos = (yoy ?? 0) >= 0;
+                      const color = pos ? "var(--positive)" : "var(--negative)";
+                      return (
+                        <tr key={s.id}>
+                          <td style={{ fontWeight: 600 }}>{s.period}</td>
+                          <td className="num tabular" style={{ fontWeight: 600 }}>
+                            {fmt.trydp(cur)}
+                          </td>
+                          <td className="num tabular" style={{ color: diff != null ? color : "var(--muted)" }}>
+                            {diff == null ? "—" : `${diff >= 0 ? "+" : ""}${fmt.tr(diff, 0)} ₺`}
+                          </td>
+                          <td className="num tabular" style={{ color: yoy != null ? color : "var(--muted)", fontWeight: 600 }}>
+                            {yoy == null ? "—" : `${yoy >= 0 ? "+" : ""}${yoy.toFixed(2)}%`}
+                          </td>
+                          <td>
+                            <div
+                              style={{
+                                height: 8,
+                                background: "var(--accent)",
+                                borderRadius: 4,
+                                width: `${widthPct}%`,
+                                opacity: 0.6,
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
+
+          {/* 12 ay nakit akış + varlık sınıfı dağılımı yan yana */}
+          <div className="grid-base grid-2" style={{ gap: 16, marginTop: 16, alignItems: "start" }}>
+            <div className="card">
+              <div className="card-head">
+                <div className="card-title">Aylık Nakit Akış (YTD)</div>
+                <div className="card-sub">{currentYear} yılı · yeşil gelir, kırmızı gider</div>
+              </div>
+              <div style={{ padding: "20px 24px 24px" }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: `repeat(${months.length}, 1fr)`,
+                    gap: 6,
+                    alignItems: "end",
+                    height: 160,
+                  }}
+                >
+                  {months.map((b) => {
+                    const inH = (b.inflow / maxMonthVal) * 100;
+                    const outH = (b.outflow / maxMonthVal) * 100;
+                    return (
+                      <div
+                        key={b.period}
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          height: "100%",
+                          justifyContent: "flex-end",
+                          position: "relative",
+                        }}
+                      >
+                        <div style={{ display: "flex", gap: 2, height: "100%", alignItems: "flex-end" }}>
+                          <div
+                            title={`Gelir ${fmt.tr(b.inflow, 0)} ₺`}
+                            style={{
+                              width: 8,
+                              height: `${inH}%`,
+                              background: "var(--positive)",
+                              borderRadius: "2px 2px 0 0",
+                              minHeight: b.inflow > 0 ? 2 : 0,
+                            }}
+                          />
+                          <div
+                            title={`Gider ${fmt.tr(b.outflow, 0)} ₺`}
+                            style={{
+                              width: 8,
+                              height: `${outH}%`,
+                              background: "var(--negative)",
+                              borderRadius: "2px 2px 0 0",
+                              minHeight: b.outflow > 0 ? 2 : 0,
+                            }}
+                          />
+                        </div>
+                        <div
+                          style={{
+                            marginTop: 6,
+                            fontSize: 9,
+                            color: "var(--muted)",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {monthLabel(b.period).slice(0, 3)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="card-head">
+                <div className="card-title">Varlık Sınıfı Dağılımı</div>
+                <div className="card-sub">hesap + yatırım MV birleşik</div>
+              </div>
+              <div style={{ padding: "12px 0" }}>
+                {assetClassSlices.length === 0 ? (
+                  <div className="empty"><div>Veri yok</div></div>
+                ) : (
+                  <>
+                    <div
+                      style={{
+                        display: "flex",
+                        height: 14,
+                        margin: "0 20px 14px",
+                        borderRadius: 7,
+                        overflow: "hidden",
+                      }}
+                    >
+                      {assetClassSlices.map((s) => {
+                        const pct = (s.value / grandTotal) * 100;
+                        return (
+                          <div
+                            key={s.label}
+                            title={`${s.label}: ${fmt.tr(s.value, 0)} ₺ · %${pct.toFixed(1)}`}
+                            style={{ background: s.color, width: `${pct}%` }}
+                          />
+                        );
+                      })}
+                    </div>
+                    {assetClassSlices.map((s) => {
+                      const pct = (s.value / grandTotal) * 100;
+                      return (
+                        <div
+                          key={s.label}
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "1fr auto 60px",
+                            gap: 12,
+                            padding: "6px 20px",
+                            alignItems: "center",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <span style={{ width: 10, height: 10, borderRadius: 50, background: s.color }} />
+                            <span style={{ fontSize: 13 }}>{s.label}</span>
+                          </div>
+                          <div className="tabular" style={{ fontWeight: 500, fontSize: 13 }}>
+                            {fmt.trydp(s.value)}
+                          </div>
+                          <div className="hint tabular" style={{ textAlign: "right" }}>
+                            %{pct.toFixed(1)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
+              </div>
+            </div>
           </div>
         </>
       )}
