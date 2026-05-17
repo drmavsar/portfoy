@@ -142,14 +142,15 @@ export function EkstreClient({
         skipped: r.skipped_count ?? 0,
       });
       if (r.card_last4) {
-        const match = accounts.find((a) =>
-          `${a.name} ${a.iban ?? ""}`.includes(r.card_last4 as string),
-        );
+        const last4 = r.card_last4 as string;
+        const match = accounts.find((a) => {
+          const haystack = `${a.name} ${a.iban ?? ""}`;
+          // ad veya IBAN içinde son 4 hane geçiyor mu (regex değil substring)
+          return haystack.includes(last4);
+        });
         if (match) {
-          // Match found → applyAccountChange ile beneficiary'i de sabitle
           setAccountId(match.id);
           if (match.beneficiary_id) setBeneficiaryId(match.beneficiary_id);
-          // rows'a beneficiary'i propagate et
           const fixedBen = match.beneficiary_id ?? null;
           setResult((prev) =>
             prev
@@ -200,6 +201,22 @@ export function EkstreClient({
             ...prev,
             rows: prev.rows.map((r, idx) =>
               idx === i ? { ...r, beneficiary_id: ben } : r,
+            ),
+          }
+        : prev,
+    );
+  };
+
+  /** Üst Kişi dropdown'unda seçili olan kişiyi tüm transfer-olmayan satırlara
+   *  uygula. Rule eşleşmelerini ve kart sahibi otomasyonunu ezer. */
+  const assignAllToGlobal = () => {
+    if (!beneficiaryId) return;
+    setResult((prev) =>
+      prev
+        ? {
+            ...prev,
+            rows: prev.rows.map((r) =>
+              r.is_transfer ? r : { ...r, beneficiary_id: beneficiaryId },
             ),
           }
         : prev,
@@ -433,18 +450,29 @@ export function EkstreClient({
                   </option>
                 ))}
               </select>
-              <select
-                style={inp}
-                value={beneficiaryId}
-                onChange={(e) => setBeneficiaryId(e.target.value)}
-              >
-                <option value="">Kişi (opsiyonel)…</option>
-                {beneficiaries.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
+              <div style={{ display: "flex", gap: 6 }}>
+                <select
+                  style={{ ...inp, flex: 1 }}
+                  value={beneficiaryId}
+                  onChange={(e) => setBeneficiaryId(e.target.value)}
+                >
+                  <option value="">Kişi (opsiyonel)…</option>
+                  {beneficiaries.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="btn"
+                  onClick={assignAllToGlobal}
+                  disabled={!beneficiaryId}
+                  title="Tüm seçili satırların kişisini bu kişiye sabitle (kuralları ezer)"
+                  style={{ whiteSpace: "nowrap" }}
+                >
+                  <Icon name="check" size={12} /> Tümüne ata
+                </button>
+              </div>
               <div style={{ display: "flex", gap: 6 }}>
                 <button
                   className="btn"
