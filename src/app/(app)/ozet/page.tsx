@@ -335,6 +335,85 @@ export default async function OzetPage() {
             </div>
           </div>
 
+          {/* Bugünkü Servet Değişimi — Toplam Servet hemen altında */}
+          {dayChangeRows.length > 0 && (
+            <div className="card" style={{ marginBottom: 18 }}>
+              <div className="card-head">
+                <div className="card-title">Bugünkü Servet Değişimi</div>
+                <div className="card-sub">varlık sınıfı bazlı katkı · anlık piyasa</div>
+                <div
+                  className="tabular"
+                  style={{
+                    marginLeft: "auto",
+                    fontSize: 22,
+                    fontWeight: 700,
+                    color: totalDayChange >= 0 ? "var(--positive)" : "var(--negative)",
+                  }}
+                >
+                  {totalDayChange >= 0 ? "+" : ""}
+                  {fmt.tr(totalDayChange, 0)} ₺
+                </div>
+              </div>
+              <table className="dg">
+                <thead>
+                  <tr>
+                    <th>Varlık Sınıfı</th>
+                    <th className="num">Değer</th>
+                    <th className="num">Bugün (₺)</th>
+                    <th className="num">Bugün %</th>
+                    <th style={{ width: "30%" }}>Katkı</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dayChangeRows.map((r) => {
+                    const color = r.change >= 0 ? "var(--positive)" : "var(--negative)";
+                    const maxAbs = Math.max(
+                      ...dayChangeRows.map((x) => Math.abs(x.change)),
+                      1,
+                    );
+                    const widthPct = (Math.abs(r.change) / maxAbs) * 100;
+                    return (
+                      <tr key={r.label}>
+                        <td>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ width: 10, height: 10, borderRadius: 50, background: r.color }} />
+                            {r.label}
+                          </span>
+                        </td>
+                        <td className="num tabular hint">{fmt.trydp(r.value)}</td>
+                        <td className="num tabular" style={{ color, fontWeight: 600 }}>
+                          {r.change >= 0 ? "+" : ""}{fmt.tr(r.change, 0)} ₺
+                        </td>
+                        <td className="num tabular" style={{ color }}>
+                          {r.pct >= 0 ? "+" : ""}{r.pct.toFixed(2)}%
+                        </td>
+                        <td>
+                          <div
+                            style={{
+                              height: 8,
+                              background: color,
+                              borderRadius: 4,
+                              width: `${Math.max(4, widthPct)}%`,
+                              marginLeft: r.change >= 0 ? 0 : "auto",
+                              opacity: 0.7,
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div
+                className="hint"
+                style={{ padding: "10px 16px", borderTop: "1px solid var(--border-soft)", fontSize: 11 }}
+              >
+                Hisse: anlık fiyat − önceki kapanış. Döviz/Altın/Kripto: Truncgil günlük %
+                değişimi. Bazı semboller için günlük veri yoksa sınıf toplamına dahil edilmez.
+              </div>
+            </div>
+          )}
+
           <div className="grid-base grid-2" style={{ gap: 16, alignItems: "start" }}>
             {groupedAccounts.length > 0 && (
               <div className="card">
@@ -496,85 +575,6 @@ export default async function OzetPage() {
                   })}
                 </tbody>
               </table>
-            </div>
-          )}
-
-          {/* Bugünkü Servet Değişimi — varlık sınıfı katkı kırılımı */}
-          {dayChangeRows.length > 0 && (
-            <div className="card" style={{ marginBottom: 18 }}>
-              <div className="card-head">
-                <div className="card-title">Bugünkü Servet Değişimi</div>
-                <div className="card-sub">varlık sınıfı bazlı katkı · anlık piyasa</div>
-                <div
-                  className="tabular"
-                  style={{
-                    marginLeft: "auto",
-                    fontSize: 22,
-                    fontWeight: 700,
-                    color: totalDayChange >= 0 ? "var(--positive)" : "var(--negative)",
-                  }}
-                >
-                  {totalDayChange >= 0 ? "+" : ""}
-                  {fmt.tr(totalDayChange, 0)} ₺
-                </div>
-              </div>
-              <table className="dg">
-                <thead>
-                  <tr>
-                    <th>Varlık Sınıfı</th>
-                    <th className="num">Değer</th>
-                    <th className="num">Bugün (₺)</th>
-                    <th className="num">Bugün %</th>
-                    <th style={{ width: "30%" }}>Katkı</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dayChangeRows.map((r) => {
-                    const color = r.change >= 0 ? "var(--positive)" : "var(--negative)";
-                    const maxAbs = Math.max(
-                      ...dayChangeRows.map((x) => Math.abs(x.change)),
-                      1,
-                    );
-                    const widthPct = (Math.abs(r.change) / maxAbs) * 100;
-                    return (
-                      <tr key={r.label}>
-                        <td>
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                            <span style={{ width: 10, height: 10, borderRadius: 50, background: r.color }} />
-                            {r.label}
-                          </span>
-                        </td>
-                        <td className="num tabular hint">{fmt.trydp(r.value)}</td>
-                        <td className="num tabular" style={{ color, fontWeight: 600 }}>
-                          {r.change >= 0 ? "+" : ""}{fmt.tr(r.change, 0)} ₺
-                        </td>
-                        <td className="num tabular" style={{ color }}>
-                          {r.pct >= 0 ? "+" : ""}{r.pct.toFixed(2)}%
-                        </td>
-                        <td>
-                          <div
-                            style={{
-                              height: 8,
-                              background: color,
-                              borderRadius: 4,
-                              width: `${Math.max(4, widthPct)}%`,
-                              marginLeft: r.change >= 0 ? 0 : "auto",
-                              opacity: 0.7,
-                            }}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              <div
-                className="hint"
-                style={{ padding: "10px 16px", borderTop: "1px solid var(--border-soft)", fontSize: 11 }}
-              >
-                Hisse: anlık fiyat − önceki kapanış. Döviz/Altın/Kripto: Truncgil günlük %
-                değişimi. Bazı semboller için günlük veri yoksa sınıf toplamına dahil edilmez.
-              </div>
             </div>
           )}
 
