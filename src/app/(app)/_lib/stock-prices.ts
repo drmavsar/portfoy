@@ -11,6 +11,7 @@ export interface StockQuote {
   change_pct: number | null;
   currency: string;
   source: "yahoo" | "fallback";
+  market_time: number | null; // unix epoch (saniye)
 }
 
 interface YahooChartResponse {
@@ -22,6 +23,7 @@ interface YahooChartResponse {
         chartPreviousClose?: number;
         previousClose?: number;
         currency?: string;
+        regularMarketTime?: number;
       };
     }>;
     error?: { code: string; description: string } | null;
@@ -54,6 +56,7 @@ async function fetchOne(symbol: string): Promise<StockQuote | null> {
       change_pct: changePct,
       currency: meta.currency ?? "TRY",
       source: "yahoo",
+      market_time: meta.regularMarketTime ?? null,
     };
   } catch (err) {
     console.error("fetchOne", symbol, err);
@@ -94,6 +97,7 @@ async function fetchOneExt(symbol: string): Promise<StockQuoteExt | null> {
             chartPreviousClose?: number;
             previousClose?: number;
             currency?: string;
+            regularMarketTime?: number;
           };
           indicators?: { quote?: Array<{ close?: Array<number | null> }> };
         }>;
@@ -121,6 +125,7 @@ async function fetchOneExt(symbol: string): Promise<StockQuoteExt | null> {
       change_pct: changePct,
       currency: meta.currency ?? "TRY",
       source: "yahoo",
+      market_time: meta.regularMarketTime ?? null,
       week_change_pct: weekChg,
       month_change_pct: monthChg,
     };

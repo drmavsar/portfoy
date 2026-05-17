@@ -237,6 +237,25 @@ async function fetchBist100(): Promise<FxTicker | null> {
   }
 }
 
+/** Truncgil yanıtının Update_Date alanı (string olarak: '17-05-2026 10:30' veya ISO). */
+export async function getTruncgilUpdateDate(): Promise<string | null> {
+  try {
+    const res = await fetch(TRUNCGIL_URL, {
+      next: { revalidate: 600 },
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)",
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as Record<string, unknown>;
+    const ud = json.Update_Date ?? json.update_date ?? json.updateDate;
+    return typeof ud === "string" ? ud : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Currency → günlük % değişim (sadece Truncgil + CoinGecko 24h). */
 export async function getAssetChanges(): Promise<Record<string, number>> {
   try {
