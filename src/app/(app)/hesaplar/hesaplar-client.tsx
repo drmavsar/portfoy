@@ -394,17 +394,17 @@ export function HesaplarClient({
                             <div
                               style={{
                                 display: "grid",
-                                gridTemplateColumns: "32px 1fr auto",
+                                gridTemplateColumns: "28px 1fr auto",
                                 gap: 10,
                                 alignItems: "center",
-                                padding: "8px 18px",
+                                padding: "6px 18px",
                                 background: "var(--surface-2)",
                               }}
                             >
                               {custody ? (
                                 <div
                                   className="bank-logo"
-                                  style={{ background: custody.color ?? "#6ea8fe", width: 24, height: 24, fontSize: 9 }}
+                                  style={{ background: custody.color ?? "#6ea8fe", width: 22, height: 22, fontSize: 9 }}
                                 >
                                   {shortOf(custody)}
                                 </div>
@@ -418,54 +418,66 @@ export function HesaplarClient({
                                 {fmt.trydp(custodyTotal)}
                               </div>
                             </div>
-                            {accs.map((a) => (
-                              <div key={a.id} className="subacc-row">
-                                <div className="subacc-icon">
-                                  <Icon name={subIcon[a.account_type] ?? "wallet"} size={14} />
-                                </div>
-                                <div>
-                                  <div className="subacc-name">{a.name}</div>
-                                  <div className="subacc-tag">
-                                    {ACCOUNT_TYPE_LABEL[a.account_type] ?? a.account_type.toUpperCase()}
-                                  </div>
-                                </div>
-                                <div className="subacc-meta">{maskIBAN(a.iban)}</div>
-                                <div>
-                                  <div className="subacc-try">
-                                    {fmt.tr(tryValueOf(a, fxRates), 2)} ₺
-                                  </div>
-                                  {a.currency !== "TRY" && a.balance_native != null && (
-                                    <div className="subacc-raw">
-                                      {fmt.tr(a.balance_native, decimalsFor(a.currency))}{" "}
-                                      {CURRENCY_LABEL_SHORT[a.currency] ?? a.currency}
-                                      {fxRates[a.currency] != null && (
-                                        <span style={{ marginLeft: 6, color: "var(--muted)" }}>
-                                          @ {fmt.tr(fxRates[a.currency] ?? 0, 2)}
+                            <table className="dg">
+                              <tbody>
+                                {accs.map((a) => (
+                                  <tr key={a.id}>
+                                    <td style={{ width: 28, padding: "6px 6px 6px 18px" }}>
+                                      <Icon name={subIcon[a.account_type] ?? "wallet"} size={13} />
+                                    </td>
+                                    <td style={{ fontSize: 13, fontWeight: 500, padding: "6px 8px" }}>
+                                      {a.name}
+                                      <span
+                                        className="hint"
+                                        style={{ marginLeft: 8, fontSize: 10, letterSpacing: "0.06em" }}
+                                      >
+                                        {ACCOUNT_TYPE_LABEL[a.account_type] ?? a.account_type.toUpperCase()}
+                                      </span>
+                                    </td>
+                                    <td
+                                      className="mono"
+                                      style={{ fontSize: 11, color: "var(--muted)", padding: "6px 8px" }}
+                                    >
+                                      {maskIBAN(a.iban)}
+                                    </td>
+                                    <td className="num tabular" style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
+                                      {a.currency !== "TRY" && a.balance_native != null ? (
+                                        <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                                          {fmt.tr(a.balance_native, decimalsFor(a.currency))}{" "}
+                                          {CURRENCY_LABEL_SHORT[a.currency] ?? a.currency}
                                         </span>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                                <div style={{ display: "flex", gap: 4 }}>
-                                  <button
-                                    className="icon-btn"
-                                    onClick={() => setEditing(a)}
-                                    disabled={busy}
-                                    title="Düzenle"
-                                  >
-                                    <Icon name="edit" size={12} />
-                                  </button>
-                                  <button
-                                    className="icon-btn"
-                                    onClick={() => remove(a.id)}
-                                    disabled={busy}
-                                    title="Sil"
-                                  >
-                                    <Icon name="trash" size={12} />
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
+                                      ) : null}
+                                    </td>
+                                    <td
+                                      className="num tabular"
+                                      style={{ fontWeight: 600, padding: "6px 12px", whiteSpace: "nowrap" }}
+                                    >
+                                      {fmt.tr(tryValueOf(a, fxRates), 2)} ₺
+                                    </td>
+                                    <td style={{ width: 64, padding: "6px 12px 6px 6px" }}>
+                                      <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                                        <button
+                                          className="icon-btn"
+                                          onClick={() => setEditing(a)}
+                                          disabled={busy}
+                                          title="Düzenle"
+                                        >
+                                          <Icon name="edit" size={12} />
+                                        </button>
+                                        <button
+                                          className="icon-btn"
+                                          onClick={() => remove(a.id)}
+                                          disabled={busy}
+                                          title="Sil"
+                                        >
+                                          <Icon name="trash" size={12} />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
                           </div>
                         );
                       })}
