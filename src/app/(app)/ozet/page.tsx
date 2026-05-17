@@ -224,7 +224,13 @@ export default async function OzetPage() {
   const truncgilSource = "Truncgil · Selling";
 
   for (const a of accounts) {
-    if (a.currency === "TRY") continue; // TRY'de günlük değişim yok
+    if (a.currency === "TRY") {
+      // TRY hesapta günlük değişim 0 (faiz tahakkuku ayrı iş)
+      const valueTry = tryValueOf(a, fxRates);
+      const cls = classifyAccountClass(a.currency);
+      bumpDay(cls.key, cls.label, cls.color, 0, valueTry, "TRY · faiz yok", null);
+      continue;
+    }
     const native = a.balance_native;
     const rate = fxRates[a.currency];
     const chgPct = fxChanges[a.currency];
