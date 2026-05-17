@@ -20,6 +20,15 @@ interface EnrichedHolding extends HoldingRow {
   pnl_pct: number | null;
 }
 
+function qtyDecimals(assetClass: string | undefined, symbol: string | undefined): number {
+  if (assetClass === "crypto") {
+    if (symbol === "BTC") return 8;
+    return 4;
+  }
+  if (assetClass === "metal") return 2;
+  return 0; // equity_tr / equity_us / fx → adet (tam sayı)
+}
+
 interface Group {
   portfolio: PortfolioRow;
   rows: EnrichedHolding[];
@@ -214,7 +223,9 @@ export default async function YatirimlarPage() {
                               </div>
                               {h.asset && <div className="hint">{h.asset.name}</div>}
                             </td>
-                            <td className="num tabular">{fmt.tr(Number(h.quantity), 4)}</td>
+                            <td className="num tabular">
+                              {fmt.tr(Number(h.quantity), qtyDecimals(h.asset?.asset_class, h.asset?.symbol))}
+                            </td>
                             <td className="num tabular">{fmt.tr(Number(h.wac_try), 2)}</td>
                             <td className="num tabular">
                               {h.quote ? `${fmt.tr(h.quote.price, 2)}` : "—"}
