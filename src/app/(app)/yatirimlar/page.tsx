@@ -18,6 +18,7 @@ interface EnrichedHolding extends HoldingRow {
   market_value: number;
   pnl: number;
   pnl_pct: number | null;
+  day_change_try: number; // bugün TL cinsinden değişim
 }
 
 function qtyDecimals(assetClass: string | undefined, symbol: string | undefined): number {
@@ -36,6 +37,8 @@ interface Group {
   mv: number;
   pnl: number;
   pnl_pct: number | null;
+  day_change: number;
+  day_change_pct: number | null;
 }
 
 export default async function YatirimlarPage() {
@@ -66,7 +69,12 @@ export default async function YatirimlarPage() {
     const mv = quote ? qty * quote.price : cost;
     const pnl = mv - cost;
     const pnl_pct = cost > 0 ? (pnl / cost) * 100 : null;
-    return { ...h, asset, quote, market_value: mv, pnl, pnl_pct };
+    // Günlük TL değişim = qty * (price - previous_close)
+    const day_change_try =
+      quote && quote.previous_close
+        ? qty * (quote.price - quote.previous_close)
+        : 0;
+    return { ...h, asset, quote, market_value: mv, pnl, pnl_pct, day_change_try };
   });
 
   // Portföy bazında grupla, maliyet azalan
@@ -79,7 +87,10 @@ export default async function YatirimlarPage() {
       const mv = rows.reduce((s, h) => s + h.market_value, 0);
       const pnl = mv - cost;
       const pnl_pct = cost > 0 ? (pnl / cost) * 100 : null;
-      return { portfolio: p, rows, cost, mv, pnl, pnl_pct };
+      const day_change = rows.reduce((s, h) => s + h.day_change_try, 0);
+      const day_open = mv - day_change;
+      const day_change_pct = day_open > 0 ? (day_change / day_open) * 100 : null;
+      return { portfolio: p, rows, cost, mv, pnl, pnl_pct, day_change, day_change_pct };
     })
     .filter((g) => g.rows.length > 0)
     .sort((a, b) => b.mv - a.mv);
@@ -88,6 +99,9 @@ export default async function YatirimlarPage() {
   const totalMv = groups.reduce((s, g) => s + g.mv, 0);
   const totalPnl = totalMv - totalCost;
   const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : null;
+  const totalDayChange = groups.reduce((s, g) => s + g.day_change, 0);
+  const totalDayOpen = totalMv - totalDayChange;
+  const totalDayChangePct = totalDayOpen > 0 ? (totalDayChange / totalDayOpen) * 100 : null;
   const positionCount = groups.reduce((s, g) => s + g.rows.length, 0);
 
   const quotedCount = enriched.filter((h) => h.quote).length;
@@ -114,10 +128,10 @@ export default async function YatirimlarPage() {
         </div>
       ) : (
         <>
-          <div className="grid-base grid-4" style={{ marginBottom: 18, gap: 16 }}>
+          <div className="grid-base" style={{ marginBottom: 18, gap: 16, gridTemplateColumns: "repeat(5, 1fr)" }}>
             <div className="card" style={{ padding: 16 }}>
               <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>POZİSYON</div>
-              <div className="tabular" style={{ fontSize: 22, fontWeight: 700 }}>
+              <div className="tabular" style={{ fontSize: 20, fontWeight: 700 }}>
                 {positionCount}
                 <span className="hint" style={{ fontSize: 11, fontWeight: 400, marginLeft: 6 }}>
                   · {groups.length} portföy
@@ -125,23 +139,49 @@ export default async function YatirimlarPage() {
               </div>
             </div>
             <div className="card" style={{ padding: 16 }}>
-              <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>TOPLAM MALİYET</div>
-              <div className="tabular" style={{ fontSize: 22, fontWeight: 700 }}>
+              <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>MALİYET</div>
+              <div className="tabular" style={{ fontSize: 20, fontWeight: 700 }}>
                 {fmt.trydp(totalCost)}
               </div>
             </div>
             <div className="card" style={{ padding: 16 }}>
               <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>ANLIK DEĞER</div>
-              <div className="tabular" style={{ fontSize: 22, fontWeight: 700 }}>
+              <div className="tabular" style={{ fontSize: 20, fontWeight: 700 }}>
                 {fmt.trydp(totalMv)}
               </div>
             </div>
             <div className="card" style={{ padding: 16 }}>
-              <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>K/Z</div>
+              <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>BUGÜN K/Z</div>
               <div
                 className="tabular"
                 style={{
-                  fontSize: 22,
+                  fontSize: 20,
+                  fontWeight: 700,
+                  color: totalDayChange >= 0 ? "var(--positive)" : "var(--negative)",
+                }}
+              >
+                {totalDayChange >= 0 ? "+" : ""}
+                {fmt.tr(totalDayChange, 0)} ₺
+              </div>
+              {totalDayChangePct != null && (
+                <div
+                  className="hint tabular"
+                  style={{
+                    fontSize: 11,
+                    color: totalDayChange >= 0 ? "var(--positive)" : "var(--negative)",
+                  }}
+                >
+                  {totalDayChange >= 0 ? "+" : ""}
+                  {totalDayChangePct.toFixed(2)}%
+                </div>
+              )}
+            </div>
+            <div className="card" style={{ padding: 16 }}>
+              <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>TOPLAM K/Z</div>
+              <div
+                className="tabular"
+                style={{
+                  fontSize: 20,
                   fontWeight: 700,
                   color: totalPnl >= 0 ? "var(--positive)" : "var(--negative)",
                 }}
@@ -178,6 +218,18 @@ export default async function YatirimlarPage() {
                       <div className="tabular" style={{ fontWeight: 700, fontSize: 16 }}>
                         {fmt.trydp(g.mv)}
                       </div>
+                      <div
+                        className="tabular hint"
+                        style={{
+                          fontSize: 11,
+                          color: g.day_change >= 0 ? "var(--positive)" : "var(--negative)",
+                        }}
+                      >
+                        Bugün {g.day_change >= 0 ? "+" : ""}{fmt.tr(g.day_change, 0)} ₺
+                        {g.day_change_pct != null && (
+                          <> · {g.day_change >= 0 ? "+" : ""}{g.day_change_pct.toFixed(2)}%</>
+                        )}
+                      </div>
                       {g.pnl_pct != null && (
                         <div
                           className="tabular hint"
@@ -186,9 +238,7 @@ export default async function YatirimlarPage() {
                             color: g.pnl >= 0 ? "var(--positive)" : "var(--negative)",
                           }}
                         >
-                          {g.pnl >= 0 ? "+" : ""}
-                          {fmt.tr(g.pnl, 0)} ₺ · {g.pnl >= 0 ? "+" : ""}
-                          {g.pnl_pct.toFixed(2)}%
+                          Top. {g.pnl >= 0 ? "+" : ""}{fmt.tr(g.pnl, 0)} ₺ · {g.pnl >= 0 ? "+" : ""}{g.pnl_pct.toFixed(2)}%
                         </div>
                       )}
                     </div>

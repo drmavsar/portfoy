@@ -1,8 +1,59 @@
-import { listAssets } from "@/app/(app)/_lib/wealth-actions";
+import { listAssets, type AssetRow } from "@/app/(app)/_lib/wealth-actions";
 import { getBistIndices } from "@/app/(app)/_lib/market-indices";
-import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
+import { getStockPricesExtended, type StockQuoteExt } from "@/app/(app)/_lib/stock-prices";
 import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
+
+type Mover = { asset: AssetRow; quote: StockQuoteExt };
+
+function MoversCard({
+  title,
+  rows,
+  getter,
+  pos,
+}: {
+  title: string;
+  rows: Mover[];
+  getter: (q: StockQuoteExt) => number | null;
+  pos: boolean;
+}) {
+  const filtered = rows.filter((r) => {
+    const v = getter(r.quote);
+    return v != null && (pos ? v > 0 : v < 0);
+  });
+  return (
+    <div className="card">
+      <div className="card-head">
+        <div className="card-title" style={{ fontSize: 13 }}>{title}</div>
+      </div>
+      {filtered.length === 0 ? (
+        <div className="empty" style={{ padding: "16px 14px" }}><div>—</div></div>
+      ) : (
+        <table className="dg">
+          <tbody>
+            {filtered.map((r) => {
+              const v = getter(r.quote) ?? 0;
+              const color = v >= 0 ? "var(--positive)" : "var(--negative)";
+              return (
+                <tr key={r.asset.symbol}>
+                  <td style={{ fontWeight: 600, fontSize: 12, padding: "6px 12px" }}>
+                    {r.asset.symbol}
+                  </td>
+                  <td style={{ fontSize: 11, color: "var(--muted)", padding: "6px 8px" }}>
+                    {r.asset.name}
+                  </td>
+                  <td className="num tabular" style={{ color, fontWeight: 600, fontSize: 12, padding: "6px 12px" }}>
+                    {v >= 0 ? "+" : ""}{v.toFixed(2)}%
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +63,7 @@ export default async function RadarPage() {
   const bistSymbols = assets
     .filter((a) => a.asset_class === "equity_tr")
     .map((a) => a.symbol);
-  const quotes = await getStockPrices(bistSymbols);
+  const quotes = await getStockPricesExtended(bistSymbols);
 
   const stockRows = assets
     .filter((a) => a.asset_class === "equity_tr" && quotes[a.symbol])
@@ -21,6 +72,14 @@ export default async function RadarPage() {
       quote: quotes[a.symbol],
     }))
     .sort((a, b) => (b.quote.change_pct ?? 0) - (a.quote.change_pct ?? 0));
+
+  // Günlük en çok artan/azalan (top 5)
+  const dayGainers = [...stockRows].sort((a, b) => (b.quote.change_pct ?? 0) - (a.quote.change_pct ?? 0)).slice(0, 5);
+  const dayLosers = [...stockRows].sort((a, b) => (a.quote.change_pct ?? 0) - (b.quote.change_pct ?? 0)).slice(0, 5);
+  const weekGainers = [...stockRows].sort((a, b) => (b.quote.week_change_pct ?? 0) - (a.quote.week_change_pct ?? 0)).slice(0, 5);
+  const weekLosers = [...stockRows].sort((a, b) => (a.quote.week_change_pct ?? 0) - (b.quote.week_change_pct ?? 0)).slice(0, 5);
+  const monthGainers = [...stockRows].sort((a, b) => (b.quote.month_change_pct ?? 0) - (a.quote.month_change_pct ?? 0)).slice(0, 5);
+  const monthLosers = [...stockRows].sort((a, b) => (a.quote.month_change_pct ?? 0) - (b.quote.month_change_pct ?? 0)).slice(0, 5);
 
   const xu100 = indices.main.find((m) => m.symbol === "XU100");
   const xu030 = indices.main.find((m) => m.symbol === "XU030");
@@ -130,21 +189,30 @@ export default async function RadarPage() {
         )}
       </div>
 
-      {/* Hisse listesi */}
+      {/* Top Movers — günlük / haftalık / aylık ikilileri */}
+      {stockRows.length > 0 && (
+        <div className="grid-base grid-3" style={{ gap: 16, marginBottom: 18 }}>
+          <MoversCard title="Günlük En Çok Artan"  rows={dayGainers}  getter={(q) => q.change_pct} pos />
+          <MoversCard title="Haftalık En Çok Artan" rows={weekGainers} getter={(q) => q.week_change_pct} pos />
+          <MoversCard title="Aylık En Çok Artan"   rows={monthGainers} getter={(q) => q.month_change_pct} pos />
+          <MoversCard title="Günlük En Çok Azalan" rows={dayLosers}    getter={(q) => q.change_pct} pos={false} />
+          <MoversCard title="Haftalık En Çok Azalan" rows={weekLosers} getter={(q) => q.week_change_pct} pos={false} />
+          <MoversCard title="Aylık En Çok Azalan"  rows={monthLosers}  getter={(q) => q.month_change_pct} pos={false} />
+        </div>
+      )}
+
+      {/* Tüm hisseler */}
       <div className="card">
         <div className="card-head">
-          <div className="card-title">Hisse Listesi</div>
+          <div className="card-title">Hisse Listesi (Tüm)</div>
           <div className="card-sub">
-            {stockRows.length} sembol · {assets.filter((a) => a.asset_class === "equity_tr").length}{" "}
-            takipte
+            {stockRows.length} sembol · günlük değişim azalan sıralı
           </div>
         </div>
         {stockRows.length === 0 ? (
           <div className="empty">
             <div className="title">Hisse fiyatı çekilemedi</div>
-            <div>
-              Yahoo Finance servisi yanıt vermiyor veya BIST sembollerin asset listesinde yok.
-            </div>
+            <div>Yahoo Finance servisi yanıt vermiyor.</div>
           </div>
         ) : (
           <table className="dg">
@@ -154,28 +222,29 @@ export default async function RadarPage() {
                 <th>Ad</th>
                 <th className="num">Son</th>
                 <th className="num">Günlük</th>
+                <th className="num">Haftalık</th>
+                <th className="num">Aylık</th>
                 <th>Sektör</th>
               </tr>
             </thead>
             <tbody>
               {stockRows.map((r) => {
-                const chg = r.quote.change_pct ?? 0;
-                const pos = chg >= 0;
-                const color = pos ? "var(--positive)" : "var(--negative)";
+                const d = r.quote.change_pct ?? 0;
+                const w = r.quote.week_change_pct;
+                const m = r.quote.month_change_pct;
+                const pctColor = (v: number | null) =>
+                  v == null ? "var(--muted)" : v >= 0 ? "var(--positive)" : "var(--negative)";
+                const pctText = (v: number | null) =>
+                  v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
                 return (
                   <tr key={r.asset.symbol}>
-                    <td>
-                      <span style={{ fontWeight: 600 }}>{r.asset.symbol}</span>
-                    </td>
+                    <td><span style={{ fontWeight: 600 }}>{r.asset.symbol}</span></td>
                     <td style={{ fontSize: 13 }}>{r.asset.name}</td>
                     <td className="num tabular">{fmt.tr(r.quote.price, 2)} ₺</td>
-                    <td className="num tabular" style={{ color, fontWeight: 600 }}>
-                      {pos ? "+" : ""}
-                      {chg.toFixed(2)}%
-                    </td>
-                    <td style={{ fontSize: 11, color: "var(--muted)" }}>
-                      {r.asset.sector ?? "—"}
-                    </td>
+                    <td className="num tabular" style={{ color: pctColor(d), fontWeight: 600 }}>{pctText(d)}</td>
+                    <td className="num tabular" style={{ color: pctColor(w) }}>{pctText(w)}</td>
+                    <td className="num tabular" style={{ color: pctColor(m) }}>{pctText(m)}</td>
+                    <td style={{ fontSize: 11, color: "var(--muted)" }}>{r.asset.sector ?? "—"}</td>
                   </tr>
                 );
               })}
