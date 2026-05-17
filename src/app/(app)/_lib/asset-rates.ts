@@ -55,17 +55,14 @@ const TRUNCGIL_ALIASES: Record<string, string[]> = {
   SEK: ["sek"],
   NOK: ["nok"],
   DKK: ["dkk"],
-  XAU: [
-    "gramaltin",
-    "gramaltn",
-    "altin",
-    "altn",
-    "gramalt",
-    "onlinegramaltin",
-    "onlinegram",
-    "gram",
-    "saataltini",
-  ],
+  RUB: ["rub"],
+  AED: ["aed"],
+  SAR: ["sar"],
+  KWD: ["kwd"],
+  GEL: ["gel"],
+  TND: ["tnd"],
+  BGN: ["bgn"],
+  XAU: ["gra", "has", "gramaltin", "onlinegramaltin"],
   XAU_OZ: ["ons", "onsaltin"],
   XAG: ["gumus", "gramgumus", "xag"],
   CEYREK: ["ceyrekaltin", "ceyrekyenialtin", "ceyrekyeni", "ceyrekeskialtin"],
@@ -102,7 +99,6 @@ async function fetchTruncgil(): Promise<Record<string, number>> {
     }
 
     const out: Record<string, number> = {};
-    const unmatched: string[] = [];
 
     for (const [key, val] of Object.entries(json)) {
       if (typeof val !== "object" || val === null) continue;
@@ -112,11 +108,6 @@ async function fetchTruncgil(): Promise<Record<string, number>> {
 
       const code = lookup.get(normalizeKey(key));
       if (code) out[code] = selling;
-      else unmatched.push(key);
-    }
-
-    if (unmatched.length > 0) {
-      console.log("[truncgil] eşleşmeyen key'ler (tüm):", unmatched.join(", "));
     }
 
     if (Object.keys(out).length === 0) throw new Error("Truncgil boş yanıt");
