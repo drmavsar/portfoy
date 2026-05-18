@@ -47,6 +47,7 @@ export function AppShell({
 
   // route değişince mobil drawer'ı kapat
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDrawerOpen(false);
   }, [pathname]);
 
