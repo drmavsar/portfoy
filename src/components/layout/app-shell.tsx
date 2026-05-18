@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { FxStrip } from "@/components/layout/fx-strip";
+import { PrivacyToggle } from "@/components/layout/privacy-toggle";
 import { Icon, type IconName } from "@/components/ui/icon";
 import type { FxTicker } from "@/app/(app)/_lib/asset-rates";
 
@@ -20,7 +21,7 @@ const NAV: NavEntry[] = [
   { href: "/ozet", label: "Özet", icon: "dashboard", section: "Genel" },
   { href: "/gelirler", label: "Gelirler", icon: "arrowInc", section: "Genel" },
   { href: "/giderler", label: "Giderler", icon: "arrowExp", section: "Genel" },
-  { href: "/yatirimlar", label: "Yatırımlar", icon: "wealth", section: "Genel" },
+  { href: "/yatirimlar", label: "Portföy", icon: "wealth", section: "Genel" },
   { href: "/islemler", label: "İşlemler", icon: "swap", section: "Genel" },
   { href: "/hesaplar", label: "Hesaplar", icon: "bank", section: "Genel" },
   { href: "/raporlar", label: "Raporlar", icon: "report", section: "Genel" },
@@ -133,6 +134,7 @@ export function AppShell({
         </div>
 
         <FxStrip tickers={fxTickers} />
+        <PrivacyToggle />
       </header>
 
       <main className="main">{children}</main>
