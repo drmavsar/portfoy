@@ -25,6 +25,8 @@ export interface ScreeningRow {
   sma200_dist: number | null;
   rsi14: number | null;
   vol_20d: number | null;    // ortalama hacim son 20 gün
+  rs_20: number | null;      // 20 gün symbol/XU100 oran değişimi (% outperformance)
+  rs_60: number | null;      // 60 gün
   score: number | null;      // composite 0-100
 }
 
@@ -86,7 +88,48 @@ function pctChange(cur: number, ref: number | null | undefined): number | null {
   return ((cur - ref) / ref) * 100;
 }
 
-async function fetchOne(symbol: string): Promise<ScreeningRow | null> {
+/** RS (relative strength) vs index: lookback gün önce ile şimdi arasında
+ *  symbol/index oranındaki değişim. Pozitif → outperform. */
+function computeRS(
+  symbolCloses: number[],
+  indexCloses: number[],
+  lookback: number,
+): number | null {
+  if (symbolCloses.length < lookback + 1) return null;
+  if (indexCloses.length < lookback + 1) return null;
+  const sNow = symbolCloses[symbolCloses.length - 1];
+  const sBack = symbolCloses[symbolCloses.length - 1 - lookback];
+  const iNow = indexCloses[indexCloses.length - 1];
+  const iBack = indexCloses[indexCloses.length - 1 - lookback];
+  if (!sBack || !iBack || sBack <= 0 || iBack <= 0) return null;
+  const ratioNow = sNow / iNow;
+  const ratioBack = sBack / iBack;
+  if (ratioBack <= 0) return null;
+  return (ratioNow / ratioBack - 1) * 100;
+}
+
+async function fetchIndexCloses(symbol: string): Promise<number[]> {
+  try {
+    const res = await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.IS?interval=1d&range=1y`,
+      {
+        next: { revalidate: 1800 },
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)" },
+      },
+    );
+    if (!res.ok) return [];
+    const json = (await res.json()) as YahooResponse;
+    const arr = json.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
+    return arr.filter((x): x is number => typeof x === "number" && Number.isFinite(x));
+  } catch {
+    return [];
+  }
+}
+
+async function fetchOne(
+  symbol: string,
+  indexCloses: number[] = [],
+): Promise<ScreeningRow | null> {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.IS?interval=1d&range=1y`;
   try {
     const res = await fetch(url, {
@@ -160,6 +203,8 @@ async function fetchOne(symbol: string): Promise<ScreeningRow | null> {
       sma200_dist: pctChange(price, s200),
       rsi14: r14,
       vol_20d: vol20,
+      rs_20: indexCloses.length > 0 ? computeRS(closes, indexCloses, 20) : null,
+      rs_60: indexCloses.length > 0 ? computeRS(closes, indexCloses, 60) : null,
       score: null, // composite skor sonradan hesaplanır
     };
   } catch (err) {
@@ -208,13 +253,74 @@ function computeScore(r: ScreeningRow): number {
 export async function getScreeningData(symbols: string[]): Promise<ScreeningRow[]> {
   if (symbols.length === 0) return [];
   const uniq = Array.from(new Set(symbols));
-  // 5'erli batch'lerle paralel (Yahoo rate limit'i için)
+  // XU100 endeks closes'unu bir kez çek → her sembol için RS hesabında kullan
+  const indexCloses = await fetchIndexCloses("XU100");
+  // 10'arlı batch'lerle paralel (Yahoo rate limit)
   const out: ScreeningRow[] = [];
   for (let i = 0; i < uniq.length; i += 10) {
     const batch = uniq.slice(i, i + 10);
-    const results = await Promise.all(batch.map(fetchOne));
+    const results = await Promise.all(batch.map((s) => fetchOne(s, indexCloses)));
     for (const r of results) if (r) out.push(r);
   }
   for (const r of out) r.score = computeScore(r);
   return out;
+}
+
+// ============================================================
+// Sector momentum — sector bazlı ortalama skor ve sıralama
+// ============================================================
+
+export interface SectorMomentumInfo {
+  sector_rank: number;          // 1 = en iyi
+  sector_momentum_score: number; // 0-100
+  sector_avg_score: number;
+  sector_size: number;
+}
+
+/** Sektör bazlı momentum: avg(score) %70 + avg(month_pct clamp ±30) %30.
+ *  Sembol sayısı 3'ten az olan sektörler "UNDERSAMPLED" olarak işaretlenir
+ *  (sector_rank = 999), ranking dışı kalır. */
+export function computeSectorMomentum(
+  rows: Array<{ symbol: string; sector: string | null; score: number | null; month_pct: number | null }>,
+): Map<string, SectorMomentumInfo> {
+  const bySector = new Map<string, Array<{ score: number; month: number | null }>>();
+  for (const r of rows) {
+    if (!r.sector || r.score == null) continue;
+    const arr = bySector.get(r.sector) ?? [];
+    arr.push({ score: r.score, month: r.month_pct });
+    bySector.set(r.sector, arr);
+  }
+
+  const sectorScores = new Map<string, number>();
+  const sectorSize = new Map<string, number>();
+  for (const [sector, items] of bySector) {
+    if (items.length < 3) continue;
+    const avgScore = items.reduce((s, x) => s + x.score, 0) / items.length;
+    const avgMonth =
+      items.reduce((s, x) => s + clamp(x.month ?? 0, -30, 30), 0) / items.length;
+    // Normalize avgMonth (-30..30) → 0..1
+    const monthNorm = (avgMonth + 30) / 60;
+    const momentum = 0.7 * (avgScore / 100) + 0.3 * monthNorm;
+    sectorScores.set(sector, Math.round(momentum * 100 * 10) / 10);
+    sectorSize.set(sector, items.length);
+  }
+
+  const ranked = Array.from(sectorScores.entries()).sort((a, b) => b[1] - a[1]);
+  const out = new Map<string, SectorMomentumInfo>();
+  ranked.forEach(([sector, momScore], i) => {
+    const items = bySector.get(sector) ?? [];
+    const avgScore =
+      items.reduce((s, x) => s + x.score, 0) / Math.max(1, items.length);
+    out.set(sector, {
+      sector_rank: i + 1,
+      sector_momentum_score: momScore,
+      sector_avg_score: Math.round(avgScore * 10) / 10,
+      sector_size: sectorSize.get(sector) ?? 0,
+    });
+  });
+  return out;
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
 }
