@@ -183,3 +183,98 @@ export async function getStockPricesExtended(
   for (const r of results) if (r) out[r.symbol] = r;
   return out;
 }
+
+// ============================================================
+// Teknik göstergeler — pozisyon planı için ATR14, 52W high, MA20/50
+// ============================================================
+
+export interface StockTechnicals {
+  symbol: string;
+  price: number;
+  atr14: number | null;
+  high_52w: number | null;
+  low_52w: number | null;
+  ma20: number | null;
+  ma50: number | null;
+}
+
+function computeATR14(highs: number[], lows: number[], closes: number[]): number | null {
+  if (highs.length < 15 || lows.length < 15 || closes.length < 15) return null;
+  const trs: number[] = [];
+  for (let i = 1; i < closes.length; i++) {
+    const h = highs[i];
+    const l = lows[i];
+    const prevC = closes[i - 1];
+    const tr = Math.max(h - l, Math.abs(h - prevC), Math.abs(l - prevC));
+    trs.push(tr);
+  }
+  if (trs.length < 14) return null;
+  // Wilder smoothing: ATR_t = (ATR_{t-1} * 13 + TR_t) / 14
+  let atr = trs.slice(0, 14).reduce((s, v) => s + v, 0) / 14;
+  for (let i = 14; i < trs.length; i++) {
+    atr = (atr * 13 + trs[i]) / 14;
+  }
+  return Number.isFinite(atr) && atr > 0 ? atr : null;
+}
+
+function lastSMA(values: number[], period: number): number | null {
+  if (values.length < period) return null;
+  const slice = values.slice(-period);
+  const sum = slice.reduce((s, v) => s + v, 0);
+  return sum / period;
+}
+
+async function fetchTechnicals(symbol: string): Promise<StockTechnicals | null> {
+  // range=1y → 52W high + ATR + MA hesabı için yeterli
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${asYahooSymbol(symbol)}?interval=1d&range=1y`;
+  try {
+    const res = await fetch(url, {
+      next: { revalidate: 900 },
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)" },
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      chart?: {
+        result?: Array<{
+          meta?: { regularMarketPrice?: number };
+          indicators?: {
+            quote?: Array<{
+              high?: Array<number | null>;
+              low?: Array<number | null>;
+              close?: Array<number | null>;
+            }>;
+          };
+        }>;
+      };
+    };
+    const r = json.chart?.result?.[0];
+    const price = r?.meta?.regularMarketPrice;
+    if (!price) return null;
+    const q = r?.indicators?.quote?.[0];
+    if (!q) return null;
+    const filter = (a: Array<number | null> | undefined) =>
+      (a ?? []).filter((x): x is number => typeof x === "number" && Number.isFinite(x));
+    const highs = filter(q.high);
+    const lows = filter(q.low);
+    const closes = filter(q.close);
+    const atr14 = computeATR14(highs, lows, closes);
+    const high_52w = highs.length > 0 ? Math.max(...highs) : null;
+    const low_52w = lows.length > 0 ? Math.min(...lows) : null;
+    const ma20 = lastSMA(closes, 20);
+    const ma50 = lastSMA(closes, 50);
+    return { symbol, price, atr14, high_52w, low_52w, ma20, ma50 };
+  } catch {
+    return null;
+  }
+}
+
+export async function getStockTechnicals(
+  symbols: string[],
+): Promise<Record<string, StockTechnicals>> {
+  if (symbols.length === 0) return {};
+  const unique = Array.from(new Set(symbols));
+  const results = await Promise.all(unique.map(fetchTechnicals));
+  const out: Record<string, StockTechnicals> = {};
+  for (const r of results) if (r) out[r.symbol] = r;
+  return out;
+}

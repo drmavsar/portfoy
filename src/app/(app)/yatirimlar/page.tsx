@@ -9,7 +9,8 @@ import {
   type HoldingRow,
   type PortfolioRow,
 } from "@/app/(app)/_lib/wealth-actions";
-import { getStockPrices, type StockQuote } from "@/app/(app)/_lib/stock-prices";
+import { getStockPrices, getStockTechnicals, type StockQuote, type StockTechnicals } from "@/app/(app)/_lib/stock-prices";
+import { buildTradePlan, type TradePlan } from "@/app/(app)/_lib/trade-plan";
 import { listBeneficiariesLite } from "@/app/(app)/hesaplar/actions";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,8 @@ export const dynamic = "force-dynamic";
 interface EnrichedHolding extends HoldingRow {
   asset: AssetRow | undefined;
   quote: StockQuote | undefined;
+  tech: StockTechnicals | undefined;
+  plan: TradePlan | undefined;
   market_value: number;
   pnl: number;
   pnl_pct: number | null;
@@ -75,11 +78,15 @@ export default async function YatirimlarPage() {
     .map((h) => assetMap[h.asset_id])
     .filter((a): a is AssetRow => !!a && a.asset_class === "equity_tr")
     .map((a) => a.symbol);
-  const quotes = await getStockPrices(bistSymbols);
+  const [quotes, technicals] = await Promise.all([
+    getStockPrices(bistSymbols),
+    getStockTechnicals(bistSymbols),
+  ]);
 
   const enriched: EnrichedHolding[] = holdings.map((h) => {
     const asset = assetMap[h.asset_id];
     const quote = asset ? quotes[asset.symbol] : undefined;
+    const tech = asset ? technicals[asset.symbol] : undefined;
     const qty = Number(h.quantity);
     const cost = Number(h.cost_basis_try);
     const mv = quote ? qty * quote.price : cost;
@@ -91,10 +98,17 @@ export default async function YatirimlarPage() {
         : 0;
     const day_open = mv - day_change_try;
     const day_pnl_pct = day_open > 0 ? (day_change_try / day_open) * 100 : null;
+    const wac = Number(h.wac_try);
+    const plan =
+      quote && tech && tech.atr14 && wac > 0
+        ? buildTradePlan(wac, quote.price, tech.atr14, tech.high_52w, tech.ma20)
+        : undefined;
     return {
       ...h,
       asset,
       quote,
+      tech,
+      plan,
       market_value: mv,
       pnl,
       pnl_pct,
@@ -291,6 +305,7 @@ export default async function YatirimlarPage() {
                         <th className="num">WAC</th>
                         <th className="num">Değer</th>
                         <th className="num">Top. K/Z</th>
+                        <th className="num">Plan</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -359,6 +374,13 @@ export default async function YatirimlarPage() {
                                 </div>
                               )}
                             </td>
+                            <td className="num">
+                              {h.plan ? (
+                                <PlanCell plan={h.plan} />
+                              ) : (
+                                <span className="hint" style={{ fontSize: 11 }}>—</span>
+                              )}
+                            </td>
                           </tr>
                         );
                       })}
@@ -381,6 +403,7 @@ export default async function YatirimlarPage() {
                           {g.pnl >= 0 ? "+" : ""}
                           {fmt.tr(g.pnl, 0)}
                         </td>
+                        <td />
                       </tr>
                     </tfoot>
                   </table>
@@ -391,12 +414,55 @@ export default async function YatirimlarPage() {
 
           <div
             className="hint"
-            style={{ marginTop: 18, padding: 12, background: "var(--surface-2)", borderRadius: 8 }}
+            style={{ marginTop: 18, padding: 12, background: "var(--surface-2)", borderRadius: 8, lineHeight: 1.6 }}
           >
-            Fiyat kaynağı: Yahoo Finance (BIST · 15 dk gecikmeli) · 5 dk cache.
+            Fiyat kaynağı: Yahoo Finance (BIST · 15 dk gecikmeli) · 5 dk cache.<br />
+            <b>Plan kolonu</b>: T1 = current + 2 × ATR14, T2 = current + 4 × ATR14, S1 = current − 1.5 × ATR14,
+            S2 = max(WAC × 0.95, current − 2.5 × ATR14). Sağlık rozeti: Stop Altı / Maliyet Altı / Stop Yakın
+            / Hedef Yakın / Extended (MA20 +%10 üstü) / Sağlıklı. Tooltip için kolon üstüne hover.
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function PlanCell({ plan }: { plan: TradePlan }) {
+  // Tooltip mesajı tüm detayı içerir; hücre kompakt rozet + T1/S1 mesafesi
+  const tooltip = [
+    `Sağlık: ${plan.health_label}`,
+    `T1: ${fmt.tr(plan.t1, 2)} (+${plan.delta_t1_pct.toFixed(1)}%) · RR ${plan.rr1.toFixed(2)}`,
+    `T2: ${fmt.tr(plan.t2, 2)} (+${plan.delta_t2_pct.toFixed(1)}%) · RR ${plan.rr2.toFixed(2)}`,
+    `S1: ${fmt.tr(plan.s1, 2)} (${plan.delta_s1_pct.toFixed(1)}%)`,
+    `S2: ${fmt.tr(plan.s2, 2)} (${plan.delta_s2_pct.toFixed(1)}%)`,
+    plan.high_52w_distance_pct != null
+      ? `52W high'a uzaklık: ${plan.high_52w_distance_pct.toFixed(1)}%`
+      : null,
+    plan.ma20_extension_pct != null
+      ? `MA20 extension: ${plan.ma20_extension_pct >= 0 ? "+" : ""}${plan.ma20_extension_pct.toFixed(1)}%`
+      : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return (
+    <div title={tooltip} style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          color: plan.health_color,
+          background: `color-mix(in srgb, ${plan.health_color} 12%, transparent)`,
+          padding: "2px 7px",
+          borderRadius: 100,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {plan.health_label}
+      </span>
+      <div className="tabular hint" style={{ fontSize: 10, lineHeight: 1.3 }}>
+        T1 +{plan.delta_t1_pct.toFixed(1)}% · S1 {plan.delta_s1_pct.toFixed(1)}%
+      </div>
     </div>
   );
 }
