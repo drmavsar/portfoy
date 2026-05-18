@@ -11,6 +11,12 @@ import {
 } from "@/app/(app)/_lib/wealth-actions";
 import { getStockPrices, getStockTechnicals, type StockQuote, type StockTechnicals } from "@/app/(app)/_lib/stock-prices";
 import { buildTradePlan, type TradePlan } from "@/app/(app)/_lib/trade-plan";
+import {
+  auditPortfolio,
+  sectorBreakdown,
+  topPositionsBreakdown,
+  type PortfolioWarning,
+} from "@/app/(app)/_lib/portfolio-risk";
 import { listBeneficiariesLite } from "@/app/(app)/hesaplar/actions";
 
 export const dynamic = "force-dynamic";
@@ -191,6 +197,24 @@ export default async function YatirimlarPage() {
   const totalDayChangePct = totalDayOpen > 0 ? (totalDayChange / totalDayOpen) * 100 : null;
   const quotedCount = enriched.filter((h) => h.quote).length;
 
+  // Risk audit — pozisyon başına sektör + benim
+  const assetSectorMap = Object.fromEntries(assets.map((a) => [a.id, a.sector ?? null]));
+  const riskInputs = enriched.map((h) => {
+    const group = groups.find((g) => g.portfolio.id === h.portfolio_id);
+    const benId = group?.beneficiary_id ?? null;
+    return {
+      symbol: h.asset?.symbol ?? "?",
+      sector: assetSectorMap[h.asset_id] ?? null,
+      beneficiary_id: benId,
+      beneficiary_name: benId ? benMap[benId]?.name ?? null : null,
+      mv: h.market_value,
+      plan: h.plan,
+    };
+  });
+  const warnings: PortfolioWarning[] = auditPortfolio(riskInputs, totalMv);
+  const topPositions = topPositionsBreakdown(riskInputs, totalMv, 5);
+  const sectorStats = sectorBreakdown(riskInputs, totalMv);
+
   return (
     <div>
       <div className="page-head">
@@ -244,6 +268,13 @@ export default async function YatirimlarPage() {
               highlight
             />
           </div>
+
+          {/* Risk overlay — uyarılar + konsantrasyon özetleri */}
+          <RiskOverlay
+            warnings={warnings}
+            topPositions={topPositions}
+            sectorStats={sectorStats}
+          />
 
           <div style={{ display: "grid", gap: 18 }}>
             {groups.map((g) => {
@@ -423,6 +454,204 @@ export default async function YatirimlarPage() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function RiskOverlay({
+  warnings,
+  topPositions,
+  sectorStats,
+}: {
+  warnings: PortfolioWarning[];
+  topPositions: ReturnType<typeof topPositionsBreakdown>;
+  sectorStats: ReturnType<typeof sectorBreakdown>;
+}) {
+  if (warnings.length === 0 && topPositions.length === 0 && sectorStats.length === 0) {
+    return null;
+  }
+  return (
+    <div
+      className="grid-base"
+      style={{
+        gap: 16,
+        marginBottom: 18,
+        gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+      }}
+    >
+      {/* Uyarılar */}
+      <div className="card" style={{ padding: 16 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 10,
+          }}
+        >
+          <Icon name="bolt" size={14} />
+          <div className="hint" style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.3 }}>
+            RİSK UYARILARI
+          </div>
+          <span
+            className="hint"
+            style={{ marginLeft: "auto", fontSize: 11 }}
+          >
+            {warnings.length}
+          </span>
+        </div>
+        {warnings.length === 0 ? (
+          <div className="hint" style={{ fontSize: 12, padding: "8px 0" }}>
+            Aktif uyarı yok. Portföy sağlık göstergeleri normal.
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {warnings.slice(0, 8).map((w, i) => (
+              <WarningRow key={i} w={w} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* En büyük 5 pozisyon */}
+      <div className="card" style={{ padding: 16 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 10,
+          }}
+        >
+          <Icon name="wealth" size={14} />
+          <div className="hint" style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.3 }}>
+            EN BÜYÜK 5 POZİSYON
+          </div>
+        </div>
+        {topPositions.length === 0 ? (
+          <div className="hint" style={{ fontSize: 12 }}>Veri yok</div>
+        ) : (
+          <div style={{ display: "grid", gap: 6 }}>
+            {topPositions.map((p) => (
+              <ConcentrationRow key={p.label} stat={p} warnThreshold={25} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Sektör dağılımı (top 5) */}
+      <div className="card" style={{ padding: 16 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 10,
+          }}
+        >
+          <Icon name="screener" size={14} />
+          <div className="hint" style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.3 }}>
+            SEKTÖR DAĞILIMI
+          </div>
+        </div>
+        {sectorStats.length === 0 ? (
+          <div className="hint" style={{ fontSize: 12 }}>Sektör verisi yok</div>
+        ) : (
+          <div style={{ display: "grid", gap: 6 }}>
+            {sectorStats.slice(0, 5).map((s) => (
+              <ConcentrationRow key={s.label} stat={s} warnThreshold={40} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WarningRow({ w }: { w: PortfolioWarning }) {
+  const color =
+    w.severity === "critical"
+      ? "var(--negative)"
+      : w.severity === "warn"
+        ? "var(--warning)"
+        : "var(--muted)";
+  const bg =
+    w.severity === "critical"
+      ? "var(--negative-soft)"
+      : w.severity === "warn"
+        ? "var(--warning-soft)"
+        : "transparent";
+  return (
+    <div
+      style={{
+        background: bg,
+        padding: "8px 10px",
+        borderRadius: 6,
+        borderLeft: `3px solid ${color}`,
+        fontSize: 12,
+        lineHeight: 1.4,
+      }}
+    >
+      <div style={{ fontWeight: 600, color, marginBottom: 2 }}>{w.title}</div>
+      <div style={{ color: "var(--fg-soft)" }}>{w.message}</div>
+      {w.symbols && w.symbols.length > 0 && (
+        <div className="hint" style={{ fontSize: 11, marginTop: 4 }}>
+          {w.symbols.slice(0, 8).join(" · ")}
+          {w.symbols.length > 8 ? ` +${w.symbols.length - 8}` : ""}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConcentrationRow({
+  stat,
+  warnThreshold,
+}: {
+  stat: { label: string; value: number; pct: number };
+  warnThreshold: number;
+}) {
+  const over = stat.pct > warnThreshold;
+  const barColor = over ? "var(--warning)" : "var(--accent)";
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 60px", gap: 8, alignItems: "center" }}>
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3, fontSize: 12 }}>
+          <span style={{ fontWeight: over ? 600 : 400, color: over ? "var(--warning)" : "var(--fg)" }}>
+            {stat.label}
+          </span>
+          <span className="tabular hint" style={{ fontSize: 11 }}>
+            {fmt.tr(stat.value, 0)} ₺
+          </span>
+        </div>
+        <div
+          style={{
+            height: 5,
+            background: "var(--surface-2)",
+            borderRadius: 3,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              height: "100%",
+              width: `${Math.min(100, stat.pct)}%`,
+              background: barColor,
+            }}
+          />
+        </div>
+      </div>
+      <div
+        className="tabular"
+        style={{
+          fontSize: 12,
+          fontWeight: 600,
+          color: over ? "var(--warning)" : "var(--muted)",
+          textAlign: "right",
+        }}
+      >
+        %{stat.pct.toFixed(1)}
+      </div>
     </div>
   );
 }
