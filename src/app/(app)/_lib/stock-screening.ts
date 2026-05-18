@@ -280,9 +280,9 @@ export interface SectorMomentumInfo {
 /** Sektör bazlı momentum: avg(score) %70 + avg(month_pct clamp ±30) %30.
  *  Sembol sayısı 3'ten az olan sektörler "UNDERSAMPLED" olarak işaretlenir
  *  (sector_rank = 999), ranking dışı kalır. */
-export function computeSectorMomentum(
+export async function computeSectorMomentum(
   rows: Array<{ symbol: string; sector: string | null; score: number | null; month_pct: number | null }>,
-): Map<string, SectorMomentumInfo> {
+): Promise<Map<string, SectorMomentumInfo>> {
   const bySector = new Map<string, Array<{ score: number; month: number | null }>>();
   for (const r of rows) {
     if (!r.sector || r.score == null) continue;

@@ -19,7 +19,7 @@ export default async function TaramaPage() {
   }));
 
   // Sector momentum ranking
-  const sectorMom = computeSectorMomentum(withSector);
+  const sectorMom = await computeSectorMomentum(withSector);
   const enriched = withSector.map((r) => {
     const info = r.sector ? sectorMom.get(r.sector) : undefined;
     return {
