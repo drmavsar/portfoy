@@ -6,6 +6,7 @@ import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
 
 import type { ScreeningRow } from "@/app/(app)/_lib/stock-screening";
+import type { PatternSignal } from "@/app/(app)/_lib/pattern-detection";
 
 interface EnrichedRow extends ScreeningRow {
   name: string;
@@ -28,7 +29,8 @@ type SortKey =
   | "rsi"
   | "rs_20"
   | "rs_60"
-  | "sector_rank";
+  | "sector_rank"
+  | "pattern";
 type SortDir = "asc" | "desc";
 
 interface Props {
@@ -83,6 +85,11 @@ export function TaramaClient({ rows, symbolCount }: Props) {
         case "rs_20": return r.rs_20 ?? -999;
         case "rs_60": return r.rs_60 ?? -999;
         case "sector_rank": return r.sector_rank ?? 9999;
+        case "pattern":
+          // En iyi pattern kalitesi × RR — yoksa 0
+          return r.patterns.length > 0
+            ? r.patterns[0].pattern_quality * r.patterns[0].rr
+            : 0;
       }
     };
     const sorted = [...out].sort((a, b) => {
@@ -210,6 +217,7 @@ export function TaramaClient({ rows, symbolCount }: Props) {
               <SortHead k="high_dist"   label="52h Mes." sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
               <SortHead k="rsi"         label="RSI"      sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
               <th>MA Trend</th>
+              <SortHead k="pattern"     label="Pattern"  sortKey={sortKey} dir={sortDir} onToggle={toggleSort} />
             </tr>
           </thead>
           <tbody>
@@ -369,6 +377,13 @@ export function TaramaClient({ rows, symbolCount }: Props) {
                       </span>
                     </span>
                   </td>
+                  <td>
+                    {r.patterns.length > 0 ? (
+                      <PatternCell pattern={r.patterns[0]} extraCount={r.patterns.length - 1} />
+                    ) : (
+                      <span className="hint" style={{ fontSize: 11 }}>—</span>
+                    )}
+                  </td>
                 </tr>
               );
             })}
@@ -402,6 +417,67 @@ export function TaramaClient({ rows, symbolCount }: Props) {
           Bu bir alım/satım tavsiyesi değildir. Karar destek skoru sadece teknik göstergelere dayanır;
           temel veri (P/E, ROE, bilanço) henüz yok.
         </div>
+      </div>
+    </div>
+  );
+}
+
+function PatternCell({ pattern, extraCount }: { pattern: PatternSignal; extraCount: number }) {
+  // Setup tipine göre renk
+  const setupColor =
+    pattern.setup_type === "breakout"
+      ? "var(--positive)"
+      : pattern.setup_type === "near_breakout"
+        ? "var(--warning)"
+        : "var(--muted)";
+  const setupBg =
+    pattern.setup_type === "breakout"
+      ? "var(--positive-soft)"
+      : pattern.setup_type === "near_breakout"
+        ? "var(--warning-soft)"
+        : "var(--surface-2)";
+  const setupLabel =
+    pattern.setup_type === "breakout"
+      ? "Teyit"
+      : pattern.setup_type === "near_breakout"
+        ? "Yakın"
+        : "İzle";
+  // Tooltip detayı
+  const tooltip = [
+    pattern.pattern_label,
+    `Setup: ${pattern.setup_type}`,
+    `Entry: ${pattern.entry}`,
+    `Stop: ${pattern.stop}`,
+    `Target: ${pattern.target}`,
+    `RR: ${pattern.rr.toFixed(2)}`,
+    `Kalite: ${(pattern.pattern_quality * 100).toFixed(0)}%`,
+    pattern.comment,
+  ].join("\n");
+  return (
+    <div title={tooltip} style={{ display: "flex", flexDirection: "column", gap: 2, alignItems: "flex-start" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        <span style={{ fontSize: 11, fontWeight: 600 }}>{pattern.pattern_label}</span>
+        <span
+          style={{
+            fontSize: 9,
+            fontWeight: 700,
+            padding: "2px 5px",
+            borderRadius: 3,
+            background: setupBg,
+            color: setupColor,
+            textTransform: "uppercase",
+          }}
+        >
+          {setupLabel}
+        </span>
+        {extraCount > 0 && (
+          <span className="hint" style={{ fontSize: 9 }}>
+            +{extraCount}
+          </span>
+        )}
+      </div>
+      <div className="hint tabular" style={{ fontSize: 9 }}>
+        RR {pattern.rr.toFixed(1)} · {(pattern.pattern_quality * 100).toFixed(0)}%
       </div>
     </div>
   );

@@ -3,6 +3,13 @@
 // BIST hisse taraması — Yahoo Finance 1 yıllık günlük close array'i üzerinden
 // teknik indikatörler hesaplar (SMA20/50/200, RSI14, momentum, 52h mesafe).
 // Tek bir Composite Score ile sıralanabilir hâle getirir.
+// Ayrıca her sembol için pattern detection çalışır (ATH/Cup/DoubleBottom).
+
+import {
+  computeATR14,
+  scanAllPatterns,
+  type PatternSignal,
+} from "./pattern-detection";
 
 export interface ScreeningRow {
   symbol: string;
@@ -27,6 +34,8 @@ export interface ScreeningRow {
   vol_20d: number | null;    // ortalama hacim son 20 gün
   rs_20: number | null;      // 20 gün symbol/XU100 oran değişimi (% outperformance)
   rs_60: number | null;      // 60 gün
+  atr14: number | null;      // ATR (volatilite)
+  patterns: PatternSignal[]; // tespit edilen pattern'lar (kalite × RR'ye göre sıralı)
   score: number | null;      // composite 0-100
 }
 
@@ -42,6 +51,9 @@ interface YahooResponse {
       timestamp?: number[];
       indicators?: {
         quote?: Array<{
+          open?: Array<number | null>;
+          high?: Array<number | null>;
+          low?: Array<number | null>;
           close?: Array<number | null>;
           volume?: Array<number | null>;
         }>;
@@ -141,15 +153,27 @@ async function fetchOne(
     const r = json.chart?.result?.[0];
     const meta = r?.meta;
     const closesRaw = r?.indicators?.quote?.[0]?.close ?? [];
+    const highsRaw = r?.indicators?.quote?.[0]?.high ?? [];
+    const lowsRaw = r?.indicators?.quote?.[0]?.low ?? [];
     const volumesRaw = r?.indicators?.quote?.[0]?.volume ?? [];
     const timestamps = r?.timestamp ?? [];
     const closes: number[] = [];
+    const highs: number[] = [];
+    const lows: number[] = [];
     const vols: number[] = [];
     const ts: number[] = [];
     for (let i = 0; i < closesRaw.length; i++) {
       const c = closesRaw[i];
-      if (typeof c === "number" && Number.isFinite(c)) {
+      const h = highsRaw[i];
+      const l = lowsRaw[i];
+      if (
+        typeof c === "number" && Number.isFinite(c) &&
+        typeof h === "number" && Number.isFinite(h) &&
+        typeof l === "number" && Number.isFinite(l)
+      ) {
         closes.push(c);
+        highs.push(h);
+        lows.push(l);
         vols.push(typeof volumesRaw[i] === "number" ? (volumesRaw[i] as number) : 0);
         if (timestamps[i]) ts.push(timestamps[i]);
       }
@@ -182,6 +206,12 @@ async function fetchOne(
       ? vols.slice(-20).reduce((a, b) => a + b, 0) / 20
       : null;
 
+    const atr14 = computeATR14(highs, lows, closes);
+    const patterns: PatternSignal[] =
+      atr14 != null
+        ? scanAllPatterns({ high: highs, low: lows, close: closes }, atr14, s20)
+        : [];
+
     return {
       symbol,
       price,
@@ -205,6 +235,8 @@ async function fetchOne(
       vol_20d: vol20,
       rs_20: indexCloses.length > 0 ? computeRS(closes, indexCloses, 20) : null,
       rs_60: indexCloses.length > 0 ? computeRS(closes, indexCloses, 60) : null,
+      atr14,
+      patterns,
       score: null, // composite skor sonradan hesaplanır
     };
   } catch (err) {
