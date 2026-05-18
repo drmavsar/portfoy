@@ -82,6 +82,15 @@ html, body, #__next {
 .mono, .tabular { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .tabular { font-family: var(--font-sans); font-variant-numeric: tabular-nums; }
 
+/* Privacy modu — topbar göz butonu açıkken sayısal değerleri blur */
+body[data-private="true"] .tabular {
+  filter: blur(7px);
+  transition: filter 0.18s ease;
+}
+body[data-private="true"] .tabular:hover {
+  filter: blur(0);
+}
+
 button { font-family: inherit; cursor: pointer; }
 input, select, textarea { font-family: inherit; }
 

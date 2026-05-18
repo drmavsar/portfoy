@@ -4,11 +4,13 @@ import {
   listAssets,
   listHoldings,
   listPortfolios,
+  listTrades,
   type AssetRow,
   type HoldingRow,
   type PortfolioRow,
 } from "@/app/(app)/_lib/wealth-actions";
 import { getStockPrices, type StockQuote } from "@/app/(app)/_lib/stock-prices";
+import { listBeneficiariesLite } from "@/app/(app)/hesaplar/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +20,8 @@ interface EnrichedHolding extends HoldingRow {
   market_value: number;
   pnl: number;
   pnl_pct: number | null;
-  day_change_try: number; // bugün TL cinsinden değişim
+  day_change_try: number;
+  day_pnl_pct: number | null;
 }
 
 function qtyDecimals(assetClass: string | undefined, symbol: string | undefined): number {
@@ -27,7 +30,7 @@ function qtyDecimals(assetClass: string | undefined, symbol: string | undefined)
     return 4;
   }
   if (assetClass === "metal") return 2;
-  return 0; // equity_tr / equity_us / fx → adet (tam sayı)
+  return 0;
 }
 
 interface Group {
@@ -39,28 +42,41 @@ interface Group {
   pnl_pct: number | null;
   day_change: number;
   day_change_pct: number | null;
+  beneficiary_id: string | null;
+}
+
+interface PersonSummary {
+  id: string;
+  name: string;
+  color: string;
+  mv: number;
+  cost: number;
+  pnl: number;
+  pnl_pct: number | null;
+  day_change: number;
+  day_change_pct: number | null;
 }
 
 export default async function YatirimlarPage() {
-  const [holdings, assets, portfolios] = await Promise.all([
+  const [holdings, assets, portfolios, trades, beneficiaries] = await Promise.all([
     listHoldings(),
     listAssets(),
     listPortfolios(),
+    listTrades(),
+    listBeneficiariesLite(),
   ]);
 
   const assetMap: Record<string, AssetRow> = Object.fromEntries(
     assets.map((a) => [a.id, a]),
   );
+  const benMap = Object.fromEntries(beneficiaries.map((b) => [b.id, b]));
 
-  // BIST hisseleri için anlık fiyat çek
   const bistSymbols = holdings
     .map((h) => assetMap[h.asset_id])
     .filter((a): a is AssetRow => !!a && a.asset_class === "equity_tr")
     .map((a) => a.symbol);
-
   const quotes = await getStockPrices(bistSymbols);
 
-  // Holding'leri zenginleştir
   const enriched: EnrichedHolding[] = holdings.map((h) => {
     const asset = assetMap[h.asset_id];
     const quote = asset ? quotes[asset.symbol] : undefined;
@@ -69,15 +85,32 @@ export default async function YatirimlarPage() {
     const mv = quote ? qty * quote.price : cost;
     const pnl = mv - cost;
     const pnl_pct = cost > 0 ? (pnl / cost) * 100 : null;
-    // Günlük TL değişim = qty * (price - previous_close)
     const day_change_try =
       quote && quote.previous_close
         ? qty * (quote.price - quote.previous_close)
         : 0;
-    return { ...h, asset, quote, market_value: mv, pnl, pnl_pct, day_change_try };
+    const day_open = mv - day_change_try;
+    const day_pnl_pct = day_open > 0 ? (day_change_try / day_open) * 100 : null;
+    return {
+      ...h,
+      asset,
+      quote,
+      market_value: mv,
+      pnl,
+      pnl_pct,
+      day_change_try,
+      day_pnl_pct,
+    };
   });
 
-  // Portföy bazında grupla, maliyet azalan
+  // Portfolio → dominant beneficiary (ilk trade)
+  const portfolioBeneficiary = new Map<string, string>();
+  for (const t of trades) {
+    if (t.beneficiary_id && !portfolioBeneficiary.has(t.portfolio_id)) {
+      portfolioBeneficiary.set(t.portfolio_id, t.beneficiary_id);
+    }
+  }
+
   const groups: Group[] = portfolios
     .map((p) => {
       const rows = enriched
@@ -90,10 +123,50 @@ export default async function YatirimlarPage() {
       const day_change = rows.reduce((s, h) => s + h.day_change_try, 0);
       const day_open = mv - day_change;
       const day_change_pct = day_open > 0 ? (day_change / day_open) * 100 : null;
-      return { portfolio: p, rows, cost, mv, pnl, pnl_pct, day_change, day_change_pct };
+      return {
+        portfolio: p,
+        rows,
+        cost,
+        mv,
+        pnl,
+        pnl_pct,
+        day_change,
+        day_change_pct,
+        beneficiary_id: portfolioBeneficiary.get(p.id) ?? null,
+      };
     })
     .filter((g) => g.rows.length > 0)
     .sort((a, b) => b.mv - a.mv);
+
+  // Kişi bazlı özet
+  const personMap = new Map<string, PersonSummary>();
+  for (const g of groups) {
+    if (!g.beneficiary_id) continue;
+    const ben = benMap[g.beneficiary_id];
+    if (!ben) continue;
+    const cur = personMap.get(g.beneficiary_id) ?? {
+      id: g.beneficiary_id,
+      name: ben.name,
+      color: ben.color ?? "#7d8699",
+      mv: 0,
+      cost: 0,
+      pnl: 0,
+      pnl_pct: null,
+      day_change: 0,
+      day_change_pct: null,
+    };
+    cur.mv += g.mv;
+    cur.cost += g.cost;
+    cur.pnl += g.pnl;
+    cur.day_change += g.day_change;
+    personMap.set(g.beneficiary_id, cur);
+  }
+  for (const p of personMap.values()) {
+    p.pnl_pct = p.cost > 0 ? (p.pnl / p.cost) * 100 : null;
+    const dayOpen = p.mv - p.day_change;
+    p.day_change_pct = dayOpen > 0 ? (p.day_change / dayOpen) * 100 : null;
+  }
+  const personCards = Array.from(personMap.values()).sort((a, b) => b.mv - a.mv);
 
   const totalCost = groups.reduce((s, g) => s + g.cost, 0);
   const totalMv = groups.reduce((s, g) => s + g.mv, 0);
@@ -102,17 +175,15 @@ export default async function YatirimlarPage() {
   const totalDayChange = groups.reduce((s, g) => s + g.day_change, 0);
   const totalDayOpen = totalMv - totalDayChange;
   const totalDayChangePct = totalDayOpen > 0 ? (totalDayChange / totalDayOpen) * 100 : null;
-  const positionCount = groups.reduce((s, g) => s + g.rows.length, 0);
-
   const quotedCount = enriched.filter((h) => h.quote).length;
 
   return (
     <div>
       <div className="page-head">
         <div>
-          <div className="page-title">Yatırımlar</div>
+          <div className="page-title">Portföy</div>
           <div className="page-sub">
-            Anlık fiyat + WAC + gerçekleşmemiş K/Z · {quotedCount}/{enriched.length} sembol Yahoo Finance'tan
+            Kişi bazlı pozisyon · WAC + anlık fiyat + K/Z · {quotedCount}/{enriched.length} sembol Yahoo Finance&apos;tan
           </div>
         </div>
       </div>
@@ -128,89 +199,55 @@ export default async function YatirimlarPage() {
         </div>
       ) : (
         <>
-          <div className="grid-base" style={{ marginBottom: 18, gap: 16, gridTemplateColumns: "repeat(5, 1fr)" }}>
-            <div className="card" style={{ padding: 16 }}>
-              <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>POZİSYON</div>
-              <div className="tabular" style={{ fontSize: 20, fontWeight: 700 }}>
-                {positionCount}
-                <span className="hint" style={{ fontSize: 11, fontWeight: 400, marginLeft: 6 }}>
-                  · {groups.length} portföy
-                </span>
-              </div>
-            </div>
-            <div className="card" style={{ padding: 16 }}>
-              <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>MALİYET</div>
-              <div className="tabular" style={{ fontSize: 20, fontWeight: 700 }}>
-                {fmt.trydp(totalCost)}
-              </div>
-            </div>
-            <div className="card" style={{ padding: 16 }}>
-              <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>ANLIK DEĞER</div>
-              <div className="tabular" style={{ fontSize: 20, fontWeight: 700 }}>
-                {fmt.trydp(totalMv)}
-              </div>
-            </div>
-            <div className="card" style={{ padding: 16 }}>
-              <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>BUGÜN K/Z</div>
-              <div
-                className="tabular"
-                style={{
-                  fontSize: 20,
-                  fontWeight: 700,
-                  color: totalDayChange >= 0 ? "var(--positive)" : "var(--negative)",
-                }}
-              >
-                {totalDayChange >= 0 ? "+" : ""}
-                {fmt.tr(totalDayChange, 0)} ₺
-              </div>
-              {totalDayChangePct != null && (
-                <div
-                  className="hint tabular"
-                  style={{
-                    fontSize: 11,
-                    color: totalDayChange >= 0 ? "var(--positive)" : "var(--negative)",
-                  }}
-                >
-                  {totalDayChange >= 0 ? "+" : ""}
-                  {totalDayChangePct.toFixed(2)}%
-                </div>
-              )}
-            </div>
-            <div className="card" style={{ padding: 16 }}>
-              <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>TOPLAM K/Z</div>
-              <div
-                className="tabular"
-                style={{
-                  fontSize: 20,
-                  fontWeight: 700,
-                  color: totalPnl >= 0 ? "var(--positive)" : "var(--negative)",
-                }}
-              >
-                {totalPnl >= 0 ? "+" : ""}
-                {fmt.trydp(totalPnl)}
-              </div>
-              {totalPnlPct != null && (
-                <div
-                  className="hint tabular"
-                  style={{
-                    fontSize: 11,
-                    color: totalPnl >= 0 ? "var(--positive)" : "var(--negative)",
-                  }}
-                >
-                  {totalPnl >= 0 ? "+" : ""}
-                  {totalPnlPct.toFixed(2)}%
-                </div>
-              )}
-            </div>
+          <div
+            className="grid-base"
+            style={{
+              marginBottom: 18,
+              gap: 16,
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            }}
+          >
+            {personCards.map((p) => (
+              <PortfolioStatCard
+                key={p.id}
+                title={`${p.name}'in Portföyü`}
+                accentColor={p.color}
+                mv={p.mv}
+                pnl={p.pnl}
+                pnl_pct={p.pnl_pct}
+                day_change={p.day_change}
+                day_change_pct={p.day_change_pct}
+              />
+            ))}
+            <PortfolioStatCard
+              title="Toplam Portföy"
+              accentColor="var(--accent)"
+              mv={totalMv}
+              pnl={totalPnl}
+              pnl_pct={totalPnlPct}
+              day_change={totalDayChange}
+              day_change_pct={totalDayChangePct}
+              highlight
+            />
           </div>
 
           <div style={{ display: "grid", gap: 18 }}>
             {groups.map((g) => {
               const share = totalMv > 0 ? (g.mv / totalMv) * 100 : 0;
+              const ownerName = g.beneficiary_id
+                ? benMap[g.beneficiary_id]?.name ?? null
+                : null;
               return (
                 <div key={g.portfolio.id} className="card">
                   <div className="card-head">
-                    <div className="card-title">{g.portfolio.name}</div>
+                    <div className="card-title">
+                      {g.portfolio.name}
+                      {ownerName && (
+                        <span className="hint" style={{ marginLeft: 8, fontSize: 12, fontWeight: 400 }}>
+                          · {ownerName}
+                        </span>
+                      )}
+                    </div>
                     <div className="card-sub">
                       {g.rows.length} pozisyon · %{share.toFixed(1)} pay
                     </div>
@@ -247,24 +284,27 @@ export default async function YatirimlarPage() {
                     <thead>
                       <tr>
                         <th>Sembol</th>
+                        <th className="num">Son</th>
+                        <th className="num">Günlük %</th>
+                        <th className="num">Günlük K/Z</th>
                         <th className="num">Adet</th>
                         <th className="num">WAC</th>
-                        <th className="num">Son</th>
-                        <th className="num">Günlük</th>
-                        <th className="num">Maliyet</th>
                         <th className="num">Değer</th>
-                        <th className="num">K/Z</th>
+                        <th className="num">Top. K/Z</th>
                       </tr>
                     </thead>
                     <tbody>
                       {g.rows.map((h) => {
                         const sign = h.pnl >= 0 ? "+" : "";
                         const color = h.pnl >= 0 ? "var(--positive)" : "var(--negative)";
-                        const dailyColor = h.quote?.change_pct == null
-                          ? "var(--muted)"
-                          : h.quote.change_pct >= 0
-                            ? "var(--positive)"
-                            : "var(--negative)";
+                        const dailyPctColor =
+                          h.quote?.change_pct == null
+                            ? "var(--muted)"
+                            : h.quote.change_pct >= 0
+                              ? "var(--positive)"
+                              : "var(--negative)";
+                        const dailyTryColor =
+                          h.day_change_try >= 0 ? "var(--positive)" : "var(--negative)";
                         return (
                           <tr key={`${h.portfolio_id}-${h.asset_id}`}>
                             <td>
@@ -285,18 +325,27 @@ export default async function YatirimlarPage() {
                               {h.asset && <div className="hint">{h.asset.name}</div>}
                             </td>
                             <td className="num tabular">
-                              {fmt.tr(Number(h.quantity), qtyDecimals(h.asset?.asset_class, h.asset?.symbol))}
+                              {h.quote ? fmt.tr(h.quote.price, 2) : "—"}
                             </td>
-                            <td className="num tabular">{fmt.tr(Number(h.wac_try), 2)}</td>
-                            <td className="num tabular">
-                              {h.quote ? `${fmt.tr(h.quote.price, 2)}` : "—"}
-                            </td>
-                            <td className="num tabular" style={{ color: dailyColor }}>
+                            <td className="num tabular" style={{ color: dailyPctColor }}>
                               {h.quote?.change_pct != null
                                 ? `${h.quote.change_pct >= 0 ? "+" : ""}${h.quote.change_pct.toFixed(2)}%`
                                 : "—"}
                             </td>
-                            <td className="num tabular">{fmt.tr(Number(h.cost_basis_try), 0)}</td>
+                            <td className="num tabular" style={{ color: dailyTryColor }}>
+                              {h.day_change_try !== 0
+                                ? `${h.day_change_try >= 0 ? "+" : ""}${fmt.tr(h.day_change_try, 0)}`
+                                : "—"}
+                              {h.day_pnl_pct != null && h.day_change_try !== 0 && (
+                                <div className="hint" style={{ fontSize: 10, color: dailyTryColor }}>
+                                  {h.day_pnl_pct >= 0 ? "+" : ""}{h.day_pnl_pct.toFixed(2)}%
+                                </div>
+                              )}
+                            </td>
+                            <td className="num tabular">
+                              {fmt.tr(Number(h.quantity), qtyDecimals(h.asset?.asset_class, h.asset?.symbol))}
+                            </td>
+                            <td className="num tabular">{fmt.tr(Number(h.wac_try), 2)}</td>
                             <td className="num tabular" style={{ fontWeight: 600 }}>
                               {fmt.tr(h.market_value, 0)}
                             </td>
@@ -316,10 +365,9 @@ export default async function YatirimlarPage() {
                     </tbody>
                     <tfoot>
                       <tr style={{ borderTop: "2px solid var(--border)" }}>
-                        <td colSpan={5} className="hint" style={{ textAlign: "right", fontWeight: 600 }}>
+                        <td colSpan={6} className="hint" style={{ textAlign: "right", fontWeight: 600 }}>
                           {g.portfolio.name} Toplam
                         </td>
-                        <td className="num tabular">{fmt.tr(g.cost, 0)}</td>
                         <td className="num tabular" style={{ fontWeight: 700 }}>
                           {fmt.tr(g.mv, 0)}
                         </td>
@@ -345,10 +393,93 @@ export default async function YatirimlarPage() {
             className="hint"
             style={{ marginTop: 18, padding: 12, background: "var(--surface-2)", borderRadius: 8 }}
           >
-            Fiyat kaynağı: Yahoo Finance (BIST · 15 dk gecikmeli) · 5 dk cache. Altın/kripto
-            sonraki adımda eklenecek.
+            Fiyat kaynağı: Yahoo Finance (BIST · 15 dk gecikmeli) · 5 dk cache.
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+function PortfolioStatCard({
+  title,
+  accentColor,
+  mv,
+  pnl,
+  pnl_pct,
+  day_change,
+  day_change_pct,
+  highlight,
+}: {
+  title: string;
+  accentColor: string;
+  mv: number;
+  pnl: number;
+  pnl_pct: number | null;
+  day_change: number;
+  day_change_pct: number | null;
+  highlight?: boolean;
+}) {
+  const dayColor = day_change >= 0 ? "var(--positive)" : "var(--negative)";
+  const pnlColor = pnl >= 0 ? "var(--positive)" : "var(--negative)";
+  return (
+    <div
+      className="card"
+      style={{
+        padding: 16,
+        border: highlight ? `1px solid ${accentColor}` : undefined,
+        position: "relative",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 10,
+        }}
+      >
+        <span
+          style={{
+            width: 10,
+            height: 10,
+            borderRadius: 50,
+            background: accentColor,
+            flexShrink: 0,
+          }}
+        />
+        <div className="hint" style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.3 }}>
+          {title.toUpperCase()}
+        </div>
+      </div>
+      <div className="tabular" style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>
+        {fmt.trydp(mv)}
+      </div>
+      <div
+        className="tabular"
+        style={{ fontSize: 12, fontWeight: 600, color: dayColor, marginBottom: 2 }}
+      >
+        Bugün {day_change >= 0 ? "+" : ""}
+        {fmt.tr(day_change, 0)} ₺
+        {day_change_pct != null && (
+          <>
+            {" · "}
+            {day_change >= 0 ? "+" : ""}
+            {day_change_pct.toFixed(2)}%
+          </>
+        )}
+      </div>
+      {pnl_pct != null && (
+        <div
+          className="tabular"
+          style={{ fontSize: 12, fontWeight: 600, color: pnlColor }}
+        >
+          Top. {pnl >= 0 ? "+" : ""}
+          {fmt.tr(pnl, 0)} ₺
+          {" · "}
+          {pnl >= 0 ? "+" : ""}
+          {pnl_pct.toFixed(2)}%
+        </div>
       )}
     </div>
   );
