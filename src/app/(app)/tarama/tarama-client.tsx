@@ -11,6 +11,8 @@ interface EnrichedRow extends ScreeningRow {
   name: string;
   sector: string | null;
   external_url: string | null;
+  sector_rank: number | null;
+  sector_momentum_score: number | null;
 }
 
 type SortKey =
@@ -23,7 +25,10 @@ type SortKey =
   | "quarter"
   | "ytd"
   | "high_dist"
-  | "rsi";
+  | "rsi"
+  | "rs_20"
+  | "rs_60"
+  | "sector_rank";
 type SortDir = "asc" | "desc";
 
 interface Props {
@@ -75,6 +80,9 @@ export function TaramaClient({ rows, symbolCount }: Props) {
         case "ytd": return r.ytd_pct ?? -999;
         case "high_dist": return r.high_distance_pct ?? -999;
         case "rsi": return r.rsi14 ?? -1;
+        case "rs_20": return r.rs_20 ?? -999;
+        case "rs_60": return r.rs_60 ?? -999;
+        case "sector_rank": return r.sector_rank ?? 9999;
       }
     };
     const sorted = [...out].sort((a, b) => {
@@ -188,17 +196,19 @@ export function TaramaClient({ rows, symbolCount }: Props) {
         <table className="dg">
           <thead>
             <tr>
-              <SortHead k="score"     label="Skor"     sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num style={{ width: 80 }} />
-              <SortHead k="symbol"    label="Sembol"   sortKey={sortKey} dir={sortDir} onToggle={toggleSort} />
-              <th>Sektör</th>
-              <SortHead k="price"     label="Son"      sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
-              <SortHead k="daily"     label="Günlük"   sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
-              <SortHead k="week"      label="Hafta"    sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
-              <SortHead k="month"     label="Ay"       sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
-              <SortHead k="quarter"   label="3 Ay"     sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
-              <SortHead k="ytd"       label="YTD"      sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
-              <SortHead k="high_dist" label="52h Mes." sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
-              <SortHead k="rsi"       label="RSI"      sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
+              <SortHead k="score"       label="Skor"     sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num style={{ width: 80 }} />
+              <SortHead k="symbol"      label="Sembol"   sortKey={sortKey} dir={sortDir} onToggle={toggleSort} />
+              <SortHead k="sector_rank" label="Sektör"   sortKey={sortKey} dir={sortDir} onToggle={toggleSort} />
+              <SortHead k="price"       label="Son"      sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
+              <SortHead k="daily"       label="Günlük"   sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
+              <SortHead k="week"        label="Hafta"    sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
+              <SortHead k="month"       label="Ay"       sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
+              <SortHead k="quarter"     label="3 Ay"     sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
+              <SortHead k="ytd"         label="YTD"      sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
+              <SortHead k="rs_20"       label="RS 20d"   sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
+              <SortHead k="rs_60"       label="RS 60d"   sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
+              <SortHead k="high_dist"   label="52h Mes." sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
+              <SortHead k="rsi"         label="RSI"      sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
               <th>MA Trend</th>
             </tr>
           </thead>
@@ -248,7 +258,40 @@ export function TaramaClient({ rows, symbolCount }: Props) {
                     )}
                     <div className="hint" style={{ fontSize: 10 }}>{r.name}</div>
                   </td>
-                  <td className="hint" style={{ fontSize: 11 }}>{r.sector ?? "—"}</td>
+                  <td style={{ fontSize: 11 }}>
+                    {r.sector ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {r.sector_rank != null && (
+                          <span
+                            title={`Sektör momentum sıralaması: ${r.sector_rank}. (${r.sector_momentum_score?.toFixed(1)})`}
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: "2px 5px",
+                              borderRadius: 4,
+                              color: r.sector_rank <= 3
+                                ? "var(--positive)"
+                                : r.sector_rank <= 6
+                                  ? "var(--warning)"
+                                  : "var(--muted)",
+                              background: r.sector_rank <= 3
+                                ? "var(--positive-soft)"
+                                : r.sector_rank <= 6
+                                  ? "var(--warning-soft)"
+                                  : "transparent",
+                              minWidth: 18,
+                              textAlign: "center",
+                            }}
+                          >
+                            #{r.sector_rank}
+                          </span>
+                        )}
+                        <span className="hint">{r.sector}</span>
+                      </div>
+                    ) : (
+                      <span className="hint">—</span>
+                    )}
+                  </td>
                   <td className="num tabular">{fmt.tr(r.price, 2)}</td>
                   <td className="num tabular" style={{ color: pctColor(r.daily_pct), fontWeight: 600 }}>
                     {pctText(r.daily_pct)}
@@ -264,6 +307,12 @@ export function TaramaClient({ rows, symbolCount }: Props) {
                   </td>
                   <td className="num tabular" style={{ color: pctColor(r.ytd_pct) }}>
                     {pctText(r.ytd_pct)}
+                  </td>
+                  <td className="num tabular" style={{ color: pctColor(r.rs_20), fontWeight: 600 }}>
+                    {pctText(r.rs_20)}
+                  </td>
+                  <td className="num tabular" style={{ color: pctColor(r.rs_60) }}>
+                    {pctText(r.rs_60)}
                   </td>
                   <td className="num tabular hint">{pctText(r.high_distance_pct)}</td>
                   <td className="num tabular">
