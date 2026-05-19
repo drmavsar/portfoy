@@ -29,6 +29,48 @@ export function parseTurkishAmount(input: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** US format: 1,234.56 — binlik virgül, ondalık nokta */
+export function parseAmountUS(input: unknown): number | null {
+  if (typeof input === "number") return Number.isFinite(input) ? input : null;
+  const s = String(input ?? "").trim().replace(/\s/g, "");
+  if (!s) return null;
+  const norm = s.replace(/,/g, "");
+  const n = Number(norm);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Otomatik format tespiti: son virgül son noktadan sonraysa TR, yoksa US.
+ *  Tek ayraç (sadece . veya sadece ,) varsa son karakteri ondalık varsay. */
+export function parseAmountAuto(input: unknown): number | null {
+  if (typeof input === "number") return Number.isFinite(input) ? input : null;
+  const s = String(input ?? "").trim();
+  if (!s) return null;
+  const lastDot = s.lastIndexOf(".");
+  const lastComma = s.lastIndexOf(",");
+  // Hiç ayraç yok
+  if (lastDot === -1 && lastComma === -1) {
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  }
+  // İkisi de var → son geleni ondalık say
+  if (lastDot !== -1 && lastComma !== -1) {
+    if (lastComma > lastDot) return parseTurkishAmount(input);
+    return parseAmountUS(input);
+  }
+  // Sadece biri var: konuma bak. 3 hane'lik gruplar varsa muhtemelen binlik ayraç.
+  // Basit kural: son ayraçtan sonra tam 2 (veya 1) hane varsa ondalık, 3 hane varsa binlik
+  const sep = lastDot !== -1 ? "." : ",";
+  const tail = s.length - 1 - (lastDot !== -1 ? lastDot : lastComma);
+  if (tail === 2 || tail === 1) {
+    // ondalık
+    if (sep === ",") return parseTurkishAmount(input);
+    return parseAmountUS(input);
+  }
+  // 3 hane → binlik ayraç, ondalık yok → tam sayı
+  if (sep === ".") return parseTurkishAmount(input);
+  return parseAmountUS(input);
+}
+
 export function categorySlugCandidates(etiket: string): string[] {
   const e = etiket
     .toLowerCase()

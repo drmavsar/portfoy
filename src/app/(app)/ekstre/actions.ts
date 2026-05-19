@@ -9,6 +9,7 @@ import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
 import {
   applyRule,
   categorySlugCandidates,
+  parseAmountAuto,
   parseTurkishAmount,
   parseTurkishDate,
   type ClassificationRule,
@@ -28,15 +29,37 @@ export interface StatementPreviewRow {
   raw_amount_str: string;
 }
 
+export type StatementSource = "garanti_card" | "garanti_account";
+
 export interface StatementParseResult {
   ok: boolean;
   error?: string;
+  source?: StatementSource;
   card_last4?: string;
+  account_label?: string; // hesap ekstresi için "1202 - 6676930 TL"
   period_start?: string;
   period_end?: string;
   rows?: StatementPreviewRow[];
   skipped_count?: number;
 }
+
+// Hesap ekstresinde transfer/cash-flow rolündeki etiketler — default seçili
+// gelmezler (gider/gelir değil).
+const BANK_TRANSFER_ETIKETS = new Set([
+  "Kart Ödemesi",
+  "Para Transferi",
+  "Para Çekme",
+  "Döviz Al / Sat",
+  "Vadeli Hesaba Transfer",
+  "Vadeli Hesaptan Transfer",
+]);
+
+// Hesap ekstresinde inflow (gelir) rolünde — pozitif tutar gelir kabul edilir
+const BANK_INFLOW_ETIKETS = new Set([
+  "Maaş",
+  "Emekli Maaşı",
+  "İkramiye",
+]);
 
 function sha256(s: string): string {
   return crypto.createHash("sha256").update(s).digest("hex");
@@ -110,12 +133,21 @@ export async function parseStatementXls(
     }) as unknown[][];
 
     let card_last4: string | undefined;
+    let account_label: string | undefined;
     for (let r = 0; r < Math.min(grid.length, 15); r++) {
-      const cell = String(grid[r]?.[0] ?? "");
-      const m = cell.match(/(\d{4})\s*\*+[\s*]*\*+\s*(\d{4})/);
+      const cell0 = String(grid[r]?.[0] ?? "").trim();
+      const cell1 = String(grid[r]?.[1] ?? "").trim();
+      // Kart ekstresi başlık formatı: "5549 **** **** 1023 Numaralı Kart"
+      const m = cell0.match(/(\d{4})\s*\*+[\s*]*\*+\s*(\d{4})/);
       if (m) {
         card_last4 = m[2];
-        break;
+      }
+      // Hesap ekstresi formatı: "Hesap" / "1202 - 6676930 TL"
+      if (cell0 === "Hesap" && cell1) {
+        account_label = cell1;
+        // IBAN'dan son 4'ü çıkar (genelde "1202 - 6676930 TL" → 6930)
+        const ibanLast4Match = cell1.match(/(\d{4})\s*TL\s*$/);
+        if (ibanLast4Match) card_last4 = ibanLast4Match[1];
       }
     }
 
@@ -131,17 +163,31 @@ export async function parseStatementXls(
       return { ok: false, error: "Tarih kolonu bulunamadı. Beklenen Garanti ekstre formatı değil." };
 
     const header = (grid[headerRow] ?? []).map((c) => String(c).trim());
+
+    // Format tespit: hesap ekstresi "Açıklama+Bakiye"; kart ekstresi "İşlem"
+    const isBank = header.includes("Açıklama") && header.includes("Bakiye");
+    const source: StatementSource = isBank ? "garanti_account" : "garanti_card";
+
     const idxTarih = header.findIndex((h) => h === "Tarih");
-    const idxIslem = header.findIndex((h) => h === "İşlem" || h === "Islem");
+    const idxIslem = isBank
+      ? header.findIndex((h) => h === "Açıklama")
+      : header.findIndex((h) => h === "İşlem" || h === "Islem");
     const idxEtiket = header.findIndex((h) => h === "Etiket");
-    const idxTutar = header.findIndex((h) => h.startsWith("Tutar"));
+    const idxTutar = isBank
+      ? header.findIndex((h) => h === "Tutar")
+      : header.findIndex((h) => h.startsWith("Tutar"));
 
     if (idxTarih < 0 || idxIslem < 0 || idxTutar < 0) {
       return {
         ok: false,
-        error: "Beklenen kolonlar bulunamadı (Tarih, İşlem, Tutar).",
+        error: isBank
+          ? "Beklenen kolonlar bulunamadı (Tarih, Açıklama, Tutar)."
+          : "Beklenen kolonlar bulunamadı (Tarih, İşlem, Tutar).",
       };
     }
+
+    // Format'a göre tutar parser'ı: hesap US (1,234.56), kart TR (1.234,56)
+    const parseAmount = isBank ? parseAmountAuto : parseTurkishAmount;
 
     const rows: StatementPreviewRow[] = [];
     let skipped = 0;
@@ -160,7 +206,7 @@ export async function parseStatementXls(
       if (!tarihCell && !islemCell && !tutarCell) continue;
 
       const date = parseTurkishDate(tarihCell);
-      const rawAmount = parseTurkishAmount(tutarRaw);
+      const rawAmount = parseAmount(tutarRaw);
       if (!date || rawAmount === null) {
         if (tarihCell || tutarCell) skipped++;
         continue;
@@ -176,14 +222,21 @@ export async function parseStatementXls(
 
       // Önce DB'deki classification_rules; eşleşmezse etiket-bazlı slug eşlemesi
       const ruleMatch = applyRule(rules, merchant, etiketCell);
-      const is_transfer = ruleMatch.is_transfer ?? rawAmount > 0;
+      // Default transfer mantığı format'a göre değişir:
+      // - Kart ekstresi: pozitif tutar = kart ödemesi = transfer
+      // - Hesap ekstresi: etiket bazlı (Kart Ödemesi, Para Transferi, vs.)
+      //   Maaş etiketi → inflow (transfer değil)
+      const defaultTransfer = isBank
+        ? BANK_TRANSFER_ETIKETS.has(etiketCell) && !BANK_INFLOW_ETIKETS.has(etiketCell)
+        : rawAmount > 0;
+      const is_transfer = ruleMatch.is_transfer ?? defaultTransfer;
       const suggested = is_transfer
         ? null
         : (ruleMatch.category_id ?? findCatIdForEtiket(etiketCell));
       const suggestedBen = is_transfer ? null : ruleMatch.beneficiary_id;
 
       const hash = sha256(
-        `garanti|${card_last4 ?? "????"}|${date}|${rawAmount.toFixed(2)}|${merchant}`,
+        `${source}|${card_last4 ?? "????"}|${date}|${rawAmount.toFixed(2)}|${merchant}`,
       );
       if (seenHashes.has(hash)) continue;
       seenHashes.add(hash);
@@ -206,7 +259,9 @@ export async function parseStatementXls(
 
     return {
       ok: true,
+      source,
       card_last4,
+      account_label,
       period_start: periodStart,
       period_end: periodEnd,
       rows,

@@ -27,7 +27,9 @@ interface EditableRow extends StatementPreviewRow {
 }
 
 interface ParsedResult {
+  source?: "garanti_card" | "garanti_account";
   card_last4?: string;
+  account_label?: string;
   period_start?: string;
   period_end?: string;
   rows: EditableRow[];
@@ -135,7 +137,9 @@ export function EkstreClient({
           : (row.suggested_beneficiary_id ?? defaultBen),
       }));
       setResult({
+        source: r.source,
         card_last4: r.card_last4,
+        account_label: r.account_label,
         period_start: r.period_start,
         period_end: r.period_end,
         rows,
@@ -332,7 +336,7 @@ export function EkstreClient({
         <div className="card">
           <div className="card-head">
             <div className="card-title">Dosya Seç</div>
-            <div className="card-sub">Garanti BBVA · Ekstre İşlemleri TL</div>
+            <div className="card-sub">Garanti BBVA · Kart Ekstresi / Hesap Hareketleri (otomatik tespit)</div>
           </div>
           <div className="card-pad" style={{ display: "grid", gap: 10 }}>
             <input
@@ -378,8 +382,15 @@ export function EkstreClient({
                 borderTop: "1px solid var(--border-soft)",
               }}
             >
-              Pozitif tutarlar (Cep Şube Ödeme, kart ödemesi vb.) transfer kabul edilir
-              ve varsayılan olarak <b>seçili gelmez</b>. Negatif tutarlar gider olarak işaretlenir.
+              <b>Kart ekstresinde</b>: pozitif tutarlar (Cep Şube Ödeme, kart ödemesi vb.)
+              transfer kabul edilir ve varsayılan olarak <b>seçili gelmez</b>. Negatif tutarlar
+              gider olarak işaretlenir.
+              <br />
+              <b>Hesap ekstresinde</b>: &ldquo;Kart Ödemesi&rdquo;, &ldquo;Para Transferi&rdquo;, &ldquo;Para Çekme&rdquo;,
+              &ldquo;Döviz Al/Sat&rdquo; transfer kabul edilir. &ldquo;Maaş&rdquo;, &ldquo;Telekomünikasyon&rdquo;,
+              &ldquo;Kurum Ödemesi&rdquo;, &ldquo;Diğer&rdquo; gider/gelir olarak işaretlenir.
+              Otomatik ödenmiş faturalar (su, doğalgaz, telefon, vergi) buradan eklenir.
+              <br />
               Aynı işlem tekrar yüklenirse hash ile mükerrer engellenir.
             </div>
             {error && (
@@ -408,8 +419,13 @@ export function EkstreClient({
               }}
             >
               <Stat
-                label="Kart"
-                value={result.card_last4 ? `**** ${result.card_last4}` : "—"}
+                label={result.source === "garanti_account" ? "Hesap" : "Kart"}
+                value={
+                  result.source === "garanti_account"
+                    ? (result.account_label
+                      ?? (result.card_last4 ? `**** ${result.card_last4}` : "—"))
+                    : (result.card_last4 ? `**** ${result.card_last4}` : "—")
+                }
               />
               <Stat
                 label="Dönem"

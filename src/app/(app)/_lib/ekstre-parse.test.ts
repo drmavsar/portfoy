@@ -4,6 +4,8 @@ import {
   applyRule,
   categorySlugCandidates,
   ilikeToRegExp,
+  parseAmountAuto,
+  parseAmountUS,
   parseTurkishAmount,
   parseTurkishDate,
   type ClassificationRule,
@@ -59,6 +61,46 @@ describe("parseTurkishAmount", () => {
   it("NaN değil sonsuz değil → null", () => {
     expect(parseTurkishAmount(Number.NaN)).toBeNull();
     expect(parseTurkishAmount(Number.POSITIVE_INFINITY)).toBeNull();
+  });
+});
+
+describe("parseAmountUS", () => {
+  it("1,234.56 → 1234.56", () => {
+    expect(parseAmountUS("1,234.56")).toBe(1234.56);
+  });
+  it("-442.00 → -442", () => {
+    expect(parseAmountUS("-442.00")).toBe(-442);
+  });
+  it("4,000.00 → 4000", () => {
+    expect(parseAmountUS("4,000.00")).toBe(4000);
+  });
+  it("177,511.71 → 177511.71", () => {
+    expect(parseAmountUS("177,511.71")).toBe(177511.71);
+  });
+});
+
+describe("parseAmountAuto", () => {
+  it("TR format'ı doğru parse eder", () => {
+    expect(parseAmountAuto("1.234,56")).toBe(1234.56);
+    expect(parseAmountAuto("-626,50")).toBe(-626.5);
+  });
+  it("US format'ı doğru parse eder", () => {
+    expect(parseAmountAuto("1,234.56")).toBe(1234.56);
+    expect(parseAmountAuto("-442.00")).toBe(-442);
+    expect(parseAmountAuto("177,511.71")).toBe(177511.71);
+  });
+  it("tek ayraçlı ondalık (TR)", () => {
+    expect(parseAmountAuto("626,50")).toBe(626.5);
+  });
+  it("tek ayraçlı ondalık (US)", () => {
+    expect(parseAmountAuto("442.00")).toBe(442);
+  });
+  it("tek ayraçlı binlik (US)", () => {
+    // 1,234 → 1234 (3 hane → binlik)
+    expect(parseAmountAuto("1,234")).toBe(1234);
+  });
+  it("hiç ayraçsız tam sayı", () => {
+    expect(parseAmountAuto("12345")).toBe(12345);
   });
 });
 
