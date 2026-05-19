@@ -196,7 +196,13 @@ export async function getFxTickers(): Promise<FxTicker[]> {
     const out: FxTicker[] = [];
     const usd = extract("USD", "USD/TRY"); if (usd) out.push(usd);
     const eur = extract("EUR", "EUR/TRY"); if (eur) out.push(eur);
-    const xau = extract("gram-altin", "GRAM ALTIN"); if (xau) out.push(xau);
+    // Truncgil v4 gram altın key'i: önce GRA, sonra HAS, sonra eski gram-altin
+    const xau =
+      extract("GRA", "GRAM ALTIN") ||
+      extract("HAS", "GRAM ALTIN") ||
+      extract("gram-altin", "GRAM ALTIN") ||
+      extract("gramaltin", "GRAM ALTIN");
+    if (xau) out.push(xau);
 
     // BIST100 — Yahoo Finance XU100.IS
     const bist = await fetchBist100();
