@@ -596,7 +596,7 @@ export default async function OzetPage() {
             </div>
           </div>
 
-          <div className="grid-base grid-2" style={{ gap: 16, alignItems: "start" }}>
+          <div>
             {groupedAccounts.length > 0 && (
               <div className="card">
                 <div className="card-head">
