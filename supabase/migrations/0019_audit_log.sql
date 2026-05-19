@@ -1,9 +1,13 @@
 -- ========================================================================
--- 0019 — Audit log (transactions, trades, holdings)
+-- 0019 — Audit log (transactions, trades)
 --
 -- "Kim, ne zaman, hangi kaydı nasıl değiştirdi" sorusunu cevaplar.
 -- /ayarlar Aktivite Geçmişi tab'ı son 100 değişikliği gösterir.
 -- before/after JSONB ile tam diff (RLS user_id ile sahiplenir).
+--
+-- NOT: holdings bir VIEW'dur (v_holdings_wac, trades üzerinden türetilir).
+-- View'lara trigger takılamaz; pozisyon değişikliklerini trades'in
+-- audit'inden takip ediyoruz (source of truth zaten trades).
 -- ========================================================================
 
 create table if not exists public.audit_log (
@@ -92,7 +96,4 @@ create trigger tg_audit_trades
   after insert or update or delete on public.trades
   for each row execute function public.tg_audit_log();
 
-drop trigger if exists tg_audit_holdings on public.holdings;
-create trigger tg_audit_holdings
-  after insert or update or delete on public.holdings
-  for each row execute function public.tg_audit_log();
+-- (holdings VIEW olduğu için trigger eklenemez — trades audit'i yeterli)
