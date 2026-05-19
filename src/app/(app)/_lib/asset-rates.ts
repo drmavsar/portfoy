@@ -314,8 +314,39 @@ async function loadFallbackRates(): Promise<Record<string, number>> {
   return {};
 }
 
+/** Sanity check: dönen rate'ler "rezonable" aralıkta mı?
+ *  Truncgil bir kez veri kirletirse rate_snapshots'a yanlış değer yazılmasın.
+ *  Eşikler 2026 piyasa şartlarına göre kabaca konuldu. */
+function ratesLookSane(rates: Record<string, number>): boolean {
+  const checks: Array<[string, number, number]> = [
+    ["USD", 10, 200],
+    ["EUR", 10, 250],
+    ["XAU", 1000, 50_000],     // gram altın TL
+    ["CEYREK", 3000, 200_000], // çeyrek altın TL
+    ["BTC", 100_000, 50_000_000],
+  ];
+  for (const [k, lo, hi] of checks) {
+    const v = rates[k];
+    if (v == null) continue; // değer yoksa kontrol atla (partial OK)
+    if (!Number.isFinite(v) || v < lo || v > hi) {
+      console.warn(`[asset-rates] sanity failed for ${k}: ${v} (range ${lo}-${hi})`);
+      return false;
+    }
+  }
+  // EUR > USD invariant (genelde)
+  if (rates.EUR && rates.USD && rates.EUR < rates.USD * 0.9) {
+    console.warn(`[asset-rates] EUR(${rates.EUR}) < USD(${rates.USD}) — şüpheli`);
+    return false;
+  }
+  return true;
+}
+
 /** Başarılı fetch sonrası DB'ye snapshot yaz — bir sonraki failde fallback kaynak. */
 async function persistRates(rates: Record<string, number>): Promise<void> {
+  if (!ratesLookSane(rates)) {
+    console.warn("[asset-rates] sanity check failed, snapshot persist atlandı");
+    return;
+  }
   try {
     const { createClient } = await import("@/lib/supabase/server");
     const supabase = await createClient();

@@ -2,12 +2,24 @@ import { NextResponse, type NextRequest } from "next/server";
 import { revalidateTag } from "next/cache";
 
 import { getAssetRates } from "@/app/(app)/_lib/asset-rates";
+import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
 const TRUNCGIL_URL = "https://finans.truncgil.com/v4/today.json";
 
 export async function GET(req: NextRequest) {
+  // Auth check — login olmayan kullanıcı debug endpoint'ini göremez
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+  } catch {
+    return NextResponse.json({ error: "Auth check failed" }, { status: 500 });
+  }
+
   const out: Record<string, unknown> = {};
   const bust = req.nextUrl.searchParams.get("bust") === "1";
   if (bust) {
