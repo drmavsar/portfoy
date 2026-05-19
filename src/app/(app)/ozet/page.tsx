@@ -162,6 +162,78 @@ export default async function OzetPage() {
     .filter((r) => r.total > 0)
     .sort((a, b) => b.total - a.total);
 
+  // Sınıf × kişi kırılımı — KPI altında dağılımı göstermek için
+  interface PersonClassEntry {
+    id: string;
+    name: string;
+    color: string;
+    value: number;
+    dayChange: number;
+  }
+  const classBreakdown = new Map<string, Map<string, PersonClassEntry>>();
+  const bumpClassPerson = (
+    classKey: string,
+    benId: string | null | undefined,
+    value: number,
+    dayChange: number,
+  ) => {
+    const inner = classBreakdown.get(classKey) ?? new Map<string, PersonClassEntry>();
+    const id = benId ?? "__unassigned__";
+    const ben = benId ? benMap[benId] : null;
+    const name = ben?.name ?? "Atanmamış";
+    const color = ben?.color ?? "#7d8699";
+    const cur = inner.get(id) ?? { id, name, color, value: 0, dayChange: 0 };
+    cur.value += value;
+    cur.dayChange += dayChange;
+    inner.set(id, cur);
+    classBreakdown.set(classKey, inner);
+  };
+  // Bugün TR günü mü kontrolü (üst tarafta hesapladık, tekrar)
+  const todayIso2 = new Date().toISOString().slice(0, 10);
+  const isTodayUnix = (s: number | null | undefined) =>
+    s ? new Date(s * 1000).toISOString().slice(0, 10) === todayIso2 : false;
+  // Hesaplar
+  for (const a of accounts) {
+    const c = classifyAccountClass(a.currency);
+    const v = tryValueOf(a, fxRates);
+    let dayDelta = 0;
+    if (a.currency !== "TRY") {
+      const native = a.balance_native;
+      const rate = fxRates[a.currency];
+      const chgPct = fxChanges[a.currency];
+      if (native != null && rate != null && chgPct != null) {
+        dayDelta = Number(native) * rate * (chgPct / 100);
+      }
+    }
+    bumpClassPerson(c.key, a.beneficiary_id, v, dayDelta);
+  }
+  // Yatırım pozisyonları
+  for (const h of enriched) {
+    const asset = assetMap[h.asset_id];
+    if (!asset) continue;
+    const benId = portfolioBeneficiary.get(h.portfolio_id) ?? null;
+    const quote = h.quote;
+    const qty = Number(h.quantity);
+    const dayDelta =
+      quote && quote.previous_close && isTodayUnix(quote.market_time)
+        ? qty * (quote.price - quote.previous_close)
+        : 0;
+    let classKey = "equity";
+    if (asset.asset_class === "metal") classKey = "metal";
+    else if (asset.asset_class === "fx") classKey = "fx";
+    else if (asset.asset_class === "crypto") classKey = "crypto";
+    bumpClassPerson(classKey, benId, h.mv, dayDelta);
+  }
+
+  // Sınıf bazında person rows — sıralı, sadece value > 0
+  const personRowsByClass = (classKey: string): PersonClassEntry[] => {
+    const m = classBreakdown.get(classKey);
+    if (!m) return [];
+    return Array.from(m.values())
+      .filter((e) => e.value > 0)
+      .sort((a, b) => b.value - a.value);
+  };
+
   // Portföy bazında yatırım dağılımı
   const portfolioGroups = portfolios
     .map((p) => {
@@ -452,9 +524,11 @@ export default async function OzetPage() {
                   change: number,
                   iconName: IconKey,
                   iconColor: string,
+                  classKey: string,
                 ) => {
                   const color = change >= 0 ? "var(--positive)" : "var(--negative)";
                   const pct = dayPct(change, value);
+                  const breakdown = personRowsByClass(classKey);
                   return (
                     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
                       <div
@@ -472,7 +546,7 @@ export default async function OzetPage() {
                       >
                         <Icon name={iconName} size={16} />
                       </div>
-                      <div style={{ minWidth: 0 }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
                         <div className="hint" style={{ fontSize: 11, marginBottom: 4 }}>{label}</div>
                         <div className="tabular" style={{ fontSize: 18, fontWeight: 600 }}>
                           {fmt.trydp(value)}
@@ -483,6 +557,42 @@ export default async function OzetPage() {
                             <> · {change >= 0 ? "+" : ""}{pct.toFixed(2)}%</>
                           )}
                         </div>
+                        {breakdown.length > 1 && (
+                          <div style={{ marginTop: 8, display: "grid", gap: 3 }}>
+                            {breakdown.map((p) => {
+                              const pColor = p.dayChange >= 0 ? "var(--positive)" : "var(--negative)";
+                              const pPct = p.value > 0 ? (p.dayChange / (p.value - p.dayChange || p.value)) * 100 : 0;
+                              return (
+                                <div
+                                  key={p.id}
+                                  style={{
+                                    display: "grid",
+                                    gridTemplateColumns: "1fr auto",
+                                    gap: 6,
+                                    fontSize: 10,
+                                    alignItems: "center",
+                                  }}
+                                >
+                                  <span style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+                                    <span style={{ width: 5, height: 5, borderRadius: 50, background: p.color, flexShrink: 0 }} />
+                                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                      {p.name}
+                                    </span>
+                                  </span>
+                                  <span className="tabular" style={{ textAlign: "right" }}>
+                                    {fmt.tr(p.value, 0)}
+                                    {p.dayChange !== 0 && (
+                                      <span style={{ color: pColor, marginLeft: 4 }}>
+                                        {" "}
+                                        {p.dayChange >= 0 ? "+" : ""}{pPct.toFixed(1)}%
+                                      </span>
+                                    )}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -491,80 +601,22 @@ export default async function OzetPage() {
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
                       gap: 16,
                       marginTop: 20,
                       paddingTop: 18,
                       borderTop: "1px solid var(--border-soft)",
                     }}
                   >
-                    {renderCell("YATIRIMLAR", investmentMv, equityDay, "wealth", "#e26a8f")}
-                    {renderCell("ALTIN", metalTotal, metalDay, "diamond", "#d4a056")}
-                    {renderCell("DÖVİZ", fxTotal, fxDay, "swap", "#6ea8fe")}
-                    {renderCell("NAKİT", cashTotal, cashDay, "wallet", "#4cc9b0")}
+                    {renderCell("PORTFÖY", investmentMv, equityDay, "wealth", "#e26a8f", "equity")}
+                    {renderCell("ALTIN", metalTotal, metalDay, "diamond", "#d4a056", "metal")}
+                    {renderCell("DÖVİZ", fxTotal, fxDay, "swap", "#6ea8fe", "fx")}
+                    {renderCell("NAKİT", cashTotal, cashDay, "wallet", "#4cc9b0", "cash_try")}
                   </div>
                 );
               })()}
             </div>
           </div>
-
-          {/* Bugünkü Servet Değişimi — Toplam Servet hemen altında */}
-          {dayChangeRows.length > 0 && (
-            <div className="card" style={{ marginBottom: 18 }}>
-              <div className="card-head">
-                <div className="card-title">Bugünkü Servet Değişimi</div>
-                <div
-                  className="tabular"
-                  style={{
-                    marginLeft: "auto",
-                    fontSize: 22,
-                    fontWeight: 700,
-                    color: totalDayChange >= 0 ? "var(--positive)" : "var(--negative)",
-                  }}
-                >
-                  {totalDayChange >= 0 ? "+" : ""}
-                  {fmt.tr(totalDayChange, 0)} ₺
-                </div>
-              </div>
-              <table className="dg">
-                <thead>
-                  <tr>
-                    <th>Varlık Sınıfı</th>
-                    <th className="num">Değer</th>
-                    <th className="num">₺</th>
-                    <th className="num">%</th>
-                    <th>Kaynak</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dayChangeRows.map((r) => {
-                    const color = r.change >= 0 ? "var(--positive)" : "var(--negative)";
-                    return (
-                      <tr key={r.label}>
-                        <td>
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                            <span style={{ width: 10, height: 10, borderRadius: 50, background: r.color }} />
-                            {r.label}
-                          </span>
-                        </td>
-                        <td className="num tabular hint">{fmt.trydp(r.value)}</td>
-                        <td className="num tabular" style={{ color, fontWeight: 600 }}>
-                          {r.change >= 0 ? "+" : ""}{fmt.tr(r.change, 0)} ₺
-                        </td>
-                        <td className="num tabular" style={{ color }}>
-                          {r.pct >= 0 ? "+" : ""}{r.pct.toFixed(2)}%
-                        </td>
-                        <td style={{ fontSize: 11, color: "var(--muted)" }}>
-                          <div>{r.source}</div>
-                          {r.lastUpdate && <div className="mono" style={{ fontSize: 10 }}>{r.lastUpdate}</div>}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
 
           <div className="grid-base grid-2" style={{ gap: 16, alignItems: "start" }}>
             {groupedAccounts.length > 0 && (
@@ -649,41 +701,6 @@ export default async function OzetPage() {
               </div>
             )}
 
-            {portfolioGroups.length > 0 && (
-              <div className="card">
-                <div className="card-head">
-                  <div className="card-title">Yatırım Portföy Dağılımı</div>
-                </div>
-                <div style={{ padding: "12px 0" }}>
-                  {portfolioGroups.map((g) => {
-                    const pct = investmentMv > 0 ? (g.mv / investmentMv) * 100 : 0;
-                    return (
-                      <div
-                        key={g.name}
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "1fr auto 60px",
-                          gap: 12,
-                          padding: "8px 20px",
-                          alignItems: "center",
-                        }}
-                      >
-                        <div style={{ fontSize: 13 }}>
-                          {g.name}
-                          <span className="hint" style={{ marginLeft: 8 }}>· ({g.count})</span>
-                        </div>
-                        <div className="tabular" style={{ fontWeight: 500, fontSize: 13 }}>
-                          {fmt.trydp(g.mv)}
-                        </div>
-                        <div className="hint tabular" style={{ textAlign: "right" }}>
-                          %{pct.toFixed(1)}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
           </div>
 
           {personRows.length > 0 && (
@@ -696,14 +713,24 @@ export default async function OzetPage() {
                   <tr>
                     <th>Kişi</th>
                     <th className="num">Hesaplar</th>
-                    <th className="num">Yatırımlar</th>
+                    <th className="num">Portföy</th>
                     <th className="num">Toplam</th>
+                    <th className="num">Bugün</th>
                     <th className="num" style={{ width: 80 }}>Pay</th>
                   </tr>
                 </thead>
                 <tbody>
                   {personRows.map((p) => {
                     const grandPct = grandTotal > 0 ? (p.total / grandTotal) * 100 : 0;
+                    // Kişinin günlük değişimi = tüm sınıflarda toplanan dayChange
+                    let pDayChange = 0;
+                    for (const [, inner] of classBreakdown) {
+                      const e = inner.get(p.id);
+                      if (e) pDayChange += e.dayChange;
+                    }
+                    const dayOpen = p.total - pDayChange;
+                    const pDayPct = dayOpen > 0 ? (pDayChange / dayOpen) * 100 : 0;
+                    const dColor = pDayChange >= 0 ? "var(--positive)" : "var(--negative)";
                     return (
                       <tr key={p.id}>
                         <td>
@@ -716,6 +743,16 @@ export default async function OzetPage() {
                         <td className="num tabular">{fmt.tr(p.investment, 0)} ₺</td>
                         <td className="num tabular" style={{ fontWeight: 600 }}>
                           {fmt.tr(p.total, 0)} ₺
+                        </td>
+                        <td className="num tabular" style={{ color: pDayChange !== 0 ? dColor : "var(--muted)", fontWeight: 600 }}>
+                          {pDayChange === 0
+                            ? "—"
+                            : `${pDayChange >= 0 ? "+" : ""}${fmt.tr(pDayChange, 0)} ₺`}
+                          {pDayChange !== 0 && (
+                            <div className="hint" style={{ fontSize: 10, color: dColor }}>
+                              {pDayChange >= 0 ? "+" : ""}{pDayPct.toFixed(2)}%
+                            </div>
+                          )}
                         </td>
                         <td className="num tabular hint">%{grandPct.toFixed(1)}</td>
                       </tr>
@@ -846,14 +883,24 @@ export default async function OzetPage() {
                 <tbody>
                   {wealthSnapshots.map((s, i) => {
                     const prev = i > 0 ? Number(wealthSnapshots[i - 1].total_try) : null;
-                    const cur = Number(s.total_try);
+                    // Aktif yıl için snapshot eski olabilir — anlık grandTotal kullan
+                    const snapYear = String(s.period).slice(0, 4);
+                    const isCurrentYear = snapYear === String(currentYear);
+                    const cur = isCurrentYear ? grandTotal : Number(s.total_try);
                     const diff = prev != null ? cur - prev : null;
                     const yoy = prev && prev > 0 ? (diff! / prev) * 100 : null;
                     const pos = (yoy ?? 0) >= 0;
                     const color = pos ? "var(--positive)" : "var(--negative)";
                     return (
                       <tr key={s.id}>
-                        <td style={{ fontWeight: 600 }}>{s.period}</td>
+                        <td style={{ fontWeight: 600 }}>
+                          {s.period}
+                          {isCurrentYear && (
+                            <span className="hint" style={{ marginLeft: 6, fontSize: 10, fontWeight: 400 }}>
+                              · anlık
+                            </span>
+                          )}
+                        </td>
                         <td className="num tabular" style={{ fontWeight: 600 }}>
                           {fmt.trydp(cur)}
                         </td>
