@@ -33,6 +33,7 @@ export async function listTransactions(
     )
     .eq("direction", direction)
     .eq("status", "committed")
+    .is("deleted_at", null)
     .order("occurred_on", { ascending: false })
     .limit(500);
   if (error) {
@@ -143,9 +144,54 @@ export async function deleteTransaction(
     return { ok: false, error: "Supabase yapılandırılmamış." };
   }
   const supabase = await createClient();
-  const { error } = await supabase.from("transactions").delete().eq("id", id);
+  // Soft delete — deleted_at = now() set. /ayarlar arşivinden geri alınabilir,
+  // ya da hemen ardından undoDeleteTransaction çağrılabilir (30 sn toast).
+  const { error } = await supabase
+    .from("transactions")
+    .update({ deleted_at: new Date().toISOString() } as never)
+    .eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath(direction === "inflow" ? "/gelirler" : "/giderler");
   revalidatePath("/ozet");
   return { ok: true };
+}
+
+/** 30 sn'lik undo penceresi için: deleted_at'i null'a çevirir. */
+export async function undoDeleteTransaction(
+  id: string,
+  direction: TxnDirection,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!(await isSupabaseConfigured())) {
+    return { ok: false, error: "Supabase yapılandırılmamış." };
+  }
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("transactions")
+    .update({ deleted_at: null } as never)
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(direction === "inflow" ? "/gelirler" : "/giderler");
+  revalidatePath("/ozet");
+  return { ok: true };
+}
+
+/** /ayarlar Aktivite Geçmişi: son N silinmiş kayıt */
+export async function listDeletedTransactions(
+  limit = 50,
+): Promise<TransactionRow[]> {
+  if (!(await isSupabaseConfigured())) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("transactions")
+    .select(
+      "id, account_id, occurred_on, direction, amount, currency, description, category_id, beneficiary_id, is_transfer, notes",
+    )
+    .not("deleted_at", "is", null)
+    .order("deleted_at", { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.error("listDeletedTransactions error", error);
+    return [];
+  }
+  return (data ?? []) as unknown as TransactionRow[];
 }
