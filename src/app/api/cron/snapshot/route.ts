@@ -92,7 +92,7 @@ async function computeUserSnapshot(
     .is("archived_at", null);
 
   const { data: holdings = [] } = await supabase
-    .from("holdings")
+    .from("v_holdings_wac")
     .select("user_id, portfolio_id, asset_id, quantity, cost_basis_try")
     .eq("user_id", userId);
 
