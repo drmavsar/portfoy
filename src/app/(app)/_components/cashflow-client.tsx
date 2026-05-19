@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 import type { AccountRow, BeneficiaryLite, CustodyRow } from "@/app/(app)/hesaplar/actions";
 import type { CategoryRow } from "@/app/(app)/ayarlar/actions";
@@ -10,6 +10,7 @@ import {
   type TxnDirection,
   createTransaction,
   deleteTransaction,
+  undoDeleteTransaction,
   updateTransaction,
 } from "@/app/(app)/_lib/cashflow-actions";
 import { Icon } from "@/components/ui/icon";
@@ -107,6 +108,7 @@ export function CashflowClient({
   const [editing, setEditing] = useState<TransactionRow | null>(null);
   const [busy, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [undoToast, setUndoToast] = useState<{ row: TransactionRow; expiresAt: number } | null>(null);
 
   // Filtre
   const [range, setRange] = useState<RangeKey>("month");
@@ -217,10 +219,35 @@ export function CashflowClient({
 
   const remove = (id: string) => {
     setError(null);
+    const target = rows.find((r) => r.id === id);
     setRows((prev) => prev.filter((r) => r.id !== id));
     startTransition(async () => {
       const r = await deleteTransaction(id, direction);
-      if (!r.ok) setError(r.error ?? "Silinemedi.");
+      if (!r.ok) {
+        setError(r.error ?? "Silinemedi.");
+        // Geri ekle (DB hatası varsa UI değişikliği geri al)
+        if (target) setRows((prev) => [target, ...prev]);
+        return;
+      }
+      // Toast: 30 sn'lik undo penceresi
+      if (target) {
+        setUndoToast({ row: target, expiresAt: Date.now() + 30_000 });
+      }
+    });
+  };
+
+  const undoDelete = () => {
+    const t = undoToast;
+    if (!t) return;
+    setUndoToast(null);
+    setRows((prev) => [t.row, ...prev]);
+    startTransition(async () => {
+      const r = await undoDeleteTransaction(t.row.id, direction);
+      if (!r.ok) {
+        setError(r.error ?? "Geri alınamadı.");
+        // UI'den çıkar
+        setRows((prev) => prev.filter((x) => x.id !== t.row.id));
+      }
     });
   };
 
@@ -437,6 +464,84 @@ export function CashflowClient({
           onSaved={onUpdated}
         />
       )}
+
+      {undoToast && (
+        <UndoToast
+          row={undoToast.row}
+          expiresAt={undoToast.expiresAt}
+          onUndo={undoDelete}
+          onDismiss={() => setUndoToast(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function UndoToast({
+  row,
+  expiresAt,
+  onUndo,
+  onDismiss,
+}: {
+  row: TransactionRow;
+  expiresAt: number;
+  onUndo: () => void;
+  onDismiss: () => void;
+}) {
+  const [remaining, setRemaining] = useState(30_000);
+  useEffect(() => {
+    const tick = () => {
+      const r = Math.max(0, expiresAt - Date.now());
+      setRemaining(r);
+      return r;
+    };
+    tick();
+    const t = setInterval(() => {
+      if (tick() <= 0) {
+        clearInterval(t);
+        onDismiss();
+      }
+    }, 200);
+    return () => clearInterval(t);
+  }, [expiresAt, onDismiss]);
+
+  return (
+    <div
+      role="status"
+      style={{
+        position: "fixed",
+        bottom: 24,
+        right: 24,
+        zIndex: 1000,
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        padding: "10px 14px",
+        boxShadow: "0 6px 24px rgba(0,0,0,0.35)",
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
+        minWidth: 280,
+        fontSize: 13,
+      }}
+    >
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 600, marginBottom: 2 }}>İşlem silindi</div>
+        <div className="hint" style={{ fontSize: 11 }}>
+          {row.description ?? row.occurred_on} · {Math.ceil(remaining / 1000)} sn
+        </div>
+      </div>
+      <button className="btn btn-sm btn-prim" onClick={onUndo}>
+        Geri al
+      </button>
+      <button
+        className="icon-btn"
+        onClick={onDismiss}
+        aria-label="Kapat"
+        title="Kapat"
+      >
+        <Icon name="x" size={12} />
+      </button>
     </div>
   );
 }
