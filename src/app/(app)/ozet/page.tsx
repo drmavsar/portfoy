@@ -101,9 +101,6 @@ export default async function OzetPage() {
     const benKey = a.beneficiary_id ?? "__unassigned__";
     g.byBen.set(benKey, (g.byBen.get(benKey) ?? 0) + v);
   }
-  const groupedAccounts = Array.from(byCustody.values())
-    .filter((g) => g.total > 0)
-    .sort((a, b) => b.total - a.total);
 
   // Yatırım MV (BIST anlık fiyat ile)
   const assetMap = Object.fromEntries(assets.map((a) => [a.id, a]));
@@ -131,6 +128,42 @@ export default async function OzetPage() {
       portfolioBeneficiary.set(t.portfolio_id, t.beneficiary_id);
     }
   }
+
+  // Portfolio → dominant custody (en çok trade olan)
+  const portfolioCustodyVotes = new Map<string, Map<string, number>>();
+  for (const t of trades) {
+    if (!t.custody_id) continue;
+    const votes = portfolioCustodyVotes.get(t.portfolio_id) ?? new Map<string, number>();
+    votes.set(t.custody_id, (votes.get(t.custody_id) ?? 0) + 1);
+    portfolioCustodyVotes.set(t.portfolio_id, votes);
+  }
+  const portfolioCustody = new Map<string, string>();
+  for (const [pid, votes] of portfolioCustodyVotes) {
+    let top = "";
+    let topCount = 0;
+    for (const [cid, cnt] of votes) {
+      if (cnt > topCount) {
+        top = cid;
+        topCount = cnt;
+      }
+    }
+    if (top) portfolioCustody.set(pid, top);
+  }
+
+  // byCustody'ye portföy MV'lerini ekle (hesap dağılımı + portföy birleşik gösterim)
+  for (const h of enriched) {
+    const cid = portfolioCustody.get(h.portfolio_id);
+    if (!cid) continue;
+    const g = byCustody.get(cid);
+    if (!g) continue;
+    g.total += h.mv;
+    const benId = portfolioBeneficiary.get(h.portfolio_id) ?? "__unassigned__";
+    g.byBen.set(benId, (g.byBen.get(benId) ?? 0) + h.mv);
+  }
+
+  const groupedAccounts = Array.from(byCustody.values())
+    .filter((g) => g.total > 0)
+    .sort((a, b) => b.total - a.total);
 
   // Kişi bazlı: hesap + yatırım toplamı
   const personTotals = new Map<string, { account: number; investment: number }>();
@@ -600,11 +633,12 @@ export default async function OzetPage() {
             {groupedAccounts.length > 0 && (
               <div className="card">
                 <div className="card-head">
-                  <div className="card-title">Kurum Bazlı Hesap Dağılımı</div>
+                  <div className="card-title">Kurum Bazlı Servet Dağılımı</div>
+                  <div className="card-sub">Hesaplar + Portföy</div>
                 </div>
                 <div style={{ padding: "12px 0" }}>
                   {groupedAccounts.map((g) => {
-                    const pct = accountTotal > 0 ? (g.total / accountTotal) * 100 : 0;
+                    const pct = grandTotal > 0 ? (g.total / grandTotal) * 100 : 0;
                     const benRows = Array.from(g.byBen.entries())
                       .map(([id, v]) => ({
                         id,
