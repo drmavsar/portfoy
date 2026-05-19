@@ -330,7 +330,17 @@ export function CashflowClient({
       <div className="card">
         <div className="card-head" style={{ flexWrap: "wrap", gap: 10 }}>
           <div className="card-title">{isInflow ? "Gelir Kayıtları" : "Gider Kayıtları"}</div>
-          <div className="card-sub">{filteredRows.length} / {rows.length}</div>
+          <div className="card-sub">
+            {filteredRows.length} / {rows.length}
+            {rows.length >= 5000 && (
+              <span
+                title="Sunucu limiti dolu — eski kayıtlar gözükmüyor olabilir. Tarih filtresi kullan."
+                style={{ marginLeft: 6, color: "var(--warning)", fontWeight: 600 }}
+              >
+                · limit
+              </span>
+            )}
+          </div>
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
             {rangePresets.map(([k, label]) => (
               <button

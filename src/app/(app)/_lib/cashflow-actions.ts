@@ -21,6 +21,8 @@ export interface TransactionRow {
   notes: string | null;
 }
 
+const TRANSACTIONS_QUERY_LIMIT = 5000;
+
 export async function listTransactions(
   direction: TxnDirection,
 ): Promise<TransactionRow[]> {
@@ -37,7 +39,7 @@ export async function listTransactions(
     .eq("status", "committed")
     .is("deleted_at", null)
     .order("occurred_on", { ascending: false })
-    .limit(500);
+    .limit(TRANSACTIONS_QUERY_LIMIT);
 
   // 0018 migration henüz çalışmadıysa "deleted_at" kolonu yok → filter
   // hata verir. Bu durumda filter'sız bir kez daha dene (defensive fallback).
@@ -53,17 +55,29 @@ export async function listTransactions(
         .eq("direction", direction)
         .eq("status", "committed")
         .order("occurred_on", { ascending: false })
-        .limit(500);
+        .limit(TRANSACTIONS_QUERY_LIMIT);
       if (fallback.error) {
         console.error("listTransactions fallback error", fallback.error);
         return [];
       }
-      return (fallback.data ?? []) as unknown as TransactionRow[];
+      const data = (fallback.data ?? []) as unknown as TransactionRow[];
+      if (data.length >= TRANSACTIONS_QUERY_LIMIT) {
+        console.warn(
+          `listTransactions: ${TRANSACTIONS_QUERY_LIMIT} satır limitine ulaşıldı, eski kayıtlar görünmüyor olabilir.`,
+        );
+      }
+      return data;
     }
     console.error("listTransactions error", first.error);
     return [];
   }
-  return (first.data ?? []) as unknown as TransactionRow[];
+  const data = (first.data ?? []) as unknown as TransactionRow[];
+  if (data.length >= TRANSACTIONS_QUERY_LIMIT) {
+    console.warn(
+      `listTransactions: ${TRANSACTIONS_QUERY_LIMIT} satır limitine ulaşıldı, eski kayıtlar görünmüyor olabilir.`,
+    );
+  }
+  return data;
 }
 
 export async function createTransaction(input: {
