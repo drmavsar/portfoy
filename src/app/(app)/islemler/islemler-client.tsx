@@ -232,7 +232,7 @@ export function IslemlerClient({
       )}
       {portfolios.length === 0 && configured && (
         <div style={{ padding: 12, marginBottom: 12, background: "var(--warning-soft)", color: "var(--warning)", borderRadius: 6, fontSize: 12 }}>
-          <b>Default portföy yok.</b> SQL Editor'da bir kez{" "}
+          <b>Default portföy yok.</b> SQL Editor&apos;da bir kez{" "}
           <code style={{ background: "var(--surface)", padding: "1px 4px", borderRadius: 3 }}>
             select public.bootstrap_user_defaults();
           </code>{" "}
@@ -241,7 +241,7 @@ export function IslemlerClient({
       )}
       {assets.length === 0 && configured && (
         <div style={{ padding: 12, marginBottom: 12, background: "var(--warning-soft)", color: "var(--warning)", borderRadius: 6, fontSize: 12 }}>
-          <b>Asset master tablosu boş.</b> setup-all.sql'in seed/0002 bölümünü çalıştır.
+          <b>Asset master tablosu boş.</b> setup-all.sql&apos;in seed/0002 bölümünü çalıştır.
         </div>
       )}
       {error && (
@@ -497,8 +497,8 @@ function TradeModal({
         <div style={{ padding: 20, display: "grid", gap: 14 }}>
           {(portfolios.length === 0 || assets.length === 0) && !isEdit && (
             <div style={{ padding: 10, background: "var(--warning-soft)", color: "var(--warning)", borderRadius: 6, fontSize: 12 }}>
-              {portfolios.length === 0 && <div><b>Portföy yok.</b> SQL'de: <code>select public.bootstrap_user_defaults();</code></div>}
-              {assets.length === 0 && <div><b>Sembol listesi boş.</b> setup-all.sql'in seed bölümünü çalıştır.</div>}
+              {portfolios.length === 0 && <div><b>Portföy yok.</b> SQL&apos;de: <code>select public.bootstrap_user_defaults();</code></div>}
+              {assets.length === 0 && <div><b>Sembol listesi boş.</b> setup-all.sql&apos;in seed bölümünü çalıştır.</div>}
             </div>
           )}
 

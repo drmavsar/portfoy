@@ -24,8 +24,17 @@ export function Donut({
   const cy = size / 2;
   const r = size / 2 - 4;
   const ri = r - thickness;
-  let a0 = -Math.PI / 2;
-  const arcs = data.map((d) => {
+  // Her dilim için başlangıç açısını önceden hesapla (immutable .map için)
+  const startAngles: number[] = [];
+  {
+    let acc = -Math.PI / 2;
+    for (const d of data) {
+      startAngles.push(acc);
+      acc += (d.value / total) * Math.PI * 2;
+    }
+  }
+  const arcs = data.map((d, idx) => {
+    const a0 = startAngles[idx];
     const angle = (d.value / total) * Math.PI * 2;
     const a1 = a0 + angle;
     const large = angle > Math.PI ? 1 : 0;
@@ -38,7 +47,6 @@ export function Donut({
     const xi1 = cx + ri * Math.cos(a0);
     const yi1 = cy + ri * Math.sin(a0);
     const path = `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1} L ${xi0} ${yi0} A ${ri} ${ri} 0 ${large} 0 ${xi1} ${yi1} Z`;
-    a0 = a1;
     return { path, color: d.color, label: d.label, value: d.value, pct: (d.value / total) * 100 };
   });
 

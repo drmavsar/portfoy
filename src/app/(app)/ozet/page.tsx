@@ -106,7 +106,6 @@ export default async function OzetPage() {
 
   // Yatırım MV (BIST anlık fiyat ile)
   const assetMap = Object.fromEntries(assets.map((a) => [a.id, a]));
-  const portfolioMap = Object.fromEntries(portfolios.map((p) => [p.id, p]));
   const bistSymbols = holdings
     .map((h) => assetMap[h.asset_id])
     .filter((a) => !!a && a.asset_class === "equity_tr")
@@ -123,8 +122,6 @@ export default async function OzetPage() {
   });
 
   const investmentMv = enriched.reduce((s, h) => s + h.mv, 0);
-  const investmentCost = enriched.reduce((s, h) => s + h.cost, 0);
-  const investmentPnl = investmentMv - investmentCost;
 
   // Portföy → dominant beneficiary (trade'lerin ilki)
   const portfolioBeneficiary = new Map<string, string>();
