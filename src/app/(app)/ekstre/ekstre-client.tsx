@@ -47,6 +47,55 @@ const inp: React.CSSProperties = {
   width: "100%",
 };
 
+function TypeSegmented({
+  row,
+  onChange,
+}: {
+  row: EditableRow;
+  onChange: (type: "outflow" | "inflow" | "transfer") => void;
+}) {
+  const current: "outflow" | "inflow" | "transfer" = row.is_transfer
+    ? "transfer"
+    : row.direction;
+  const opts: Array<{ key: "outflow" | "inflow" | "transfer"; label: string; color: string }> = [
+    { key: "outflow",  label: "Gider", color: "var(--negative)" },
+    { key: "inflow",   label: "Gelir", color: "var(--positive)" },
+    { key: "transfer", label: "Tx",    color: "var(--muted)" },
+  ];
+  return (
+    <div style={{ display: "inline-flex", border: "1px solid var(--border-soft)", borderRadius: 4, overflow: "hidden" }}>
+      {opts.map((o) => {
+        const active = current === o.key;
+        return (
+          <button
+            key={o.key}
+            type="button"
+            onClick={() => onChange(o.key)}
+            title={
+              o.key === "transfer"
+                ? "Transfer (DB'ye is_transfer=true ile gider)"
+                : o.key === "outflow"
+                  ? "Gider olarak işaretle"
+                  : "Gelir olarak işaretle"
+            }
+            style={{
+              fontSize: 10,
+              padding: "3px 7px",
+              border: "none",
+              background: active ? o.color : "transparent",
+              color: active ? "var(--accent-fg)" : "var(--muted)",
+              cursor: "pointer",
+              fontWeight: active ? 700 : 400,
+            }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -80,6 +129,10 @@ export function EkstreClient({
 
   const expenseCats = useMemo(
     () => categories.filter((c) => c.kind === "expense"),
+    [categories],
+  );
+  const incomeCats = useMemo(
+    () => categories.filter((c) => c.kind === "income"),
     [categories],
   );
 
@@ -211,6 +264,31 @@ export function EkstreClient({
     );
   };
 
+  /** 3-state tip değiştirici: Gider (outflow) / Gelir (inflow) / Transfer. */
+  const setRowType = (i: number, type: "outflow" | "inflow" | "transfer") => {
+    setResult((prev) =>
+      prev
+        ? {
+            ...prev,
+            rows: prev.rows.map((r, idx) =>
+              idx === i
+                ? {
+                    ...r,
+                    is_transfer: type === "transfer",
+                    direction: type === "transfer" ? r.direction : type,
+                    category_id: type === "transfer" ? null : r.category_id,
+                    beneficiary_id:
+                      type === "transfer"
+                        ? null
+                        : (r.beneficiary_id ?? beneficiaryId ?? null),
+                  }
+                : r,
+            ),
+          }
+        : prev,
+    );
+  };
+
   /** Üst Kişi dropdown'unda seçili olan kişiyi tüm transfer-olmayan satırlara
    *  uygula. Rule eşleşmelerini ve kart sahibi otomasyonunu ezer. */
   const assignAllToGlobal = () => {
@@ -287,7 +365,10 @@ export function EkstreClient({
   const selectedRows = result?.rows.filter((r) => r.selected) ?? [];
   const selectedCount = selectedRows.length;
   const selectedExpenseTotal = selectedRows
-    .filter((r) => !r.is_transfer)
+    .filter((r) => !r.is_transfer && r.direction === "outflow")
+    .reduce((s, r) => s + r.amount, 0);
+  const selectedIncomeTotal = selectedRows
+    .filter((r) => !r.is_transfer && r.direction === "inflow")
     .reduce((s, r) => s + r.amount, 0);
   const selectedTransferTotal = selectedRows
     .filter((r) => r.is_transfer)
@@ -435,7 +516,12 @@ export function EkstreClient({
                     : "—"
                 }
               />
-              <Stat label="Seçili" value={`${selectedCount} / ${result.rows.length}`} />
+              <Stat
+                label="Seçili"
+                value={`${selectedCount} / ${result.rows.length}${
+                  selectedIncomeTotal > 0 ? ` · gelir ${formatTl(selectedIncomeTotal)}` : ""
+                }`}
+              />
               <Stat
                 label="Gider toplamı"
                 value={formatTl(selectedExpenseTotal)}
@@ -628,26 +714,25 @@ export function EkstreClient({
                         {r.etiket || "—"}
                       </td>
                       <td style={{ padding: "6px 10px" }}>
-                        {r.is_transfer ? (
-                          <span style={{ color: "var(--muted)", fontSize: 11 }}>
-                            transfer (kart ödemesi)
-                          </span>
-                        ) : (
-                          <select
-                            style={inp}
-                            value={r.category_id ?? ""}
-                            onChange={(e) =>
-                              setCat(i, e.target.value || null)
-                            }
-                          >
-                            <option value="">— kategori yok —</option>
-                            {expenseCats.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {c.icon ?? "·"} {c.name}
-                              </option>
-                            ))}
-                          </select>
-                        )}
+                        <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+                          <TypeSegmented row={r} onChange={(t) => setRowType(i, t)} />
+                          {!r.is_transfer && (
+                            <select
+                              style={{ ...inp, flex: 1, minWidth: 100 }}
+                              value={r.category_id ?? ""}
+                              onChange={(e) =>
+                                setCat(i, e.target.value || null)
+                              }
+                            >
+                              <option value="">— kategori yok —</option>
+                              {(r.direction === "inflow" ? incomeCats : expenseCats).map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.icon ?? "·"} {c.name}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
                       </td>
                       <td style={{ padding: "6px 10px" }}>
                         {r.is_transfer ? (
@@ -674,12 +759,14 @@ export function EkstreClient({
                           textAlign: "right",
                           whiteSpace: "nowrap",
                           color: r.is_transfer
-                            ? "var(--positive)"
-                            : "var(--fg)",
+                            ? "var(--muted)"
+                            : r.direction === "inflow"
+                              ? "var(--positive)"
+                              : "var(--negative)",
                           fontWeight: 600,
                         }}
                       >
-                        {r.is_transfer ? "+" : "−"}
+                        {r.direction === "inflow" ? "+" : "−"}
                         {formatTl(r.amount)}
                       </td>
                     </tr>
