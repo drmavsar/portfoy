@@ -26,21 +26,44 @@ export async function listTransactions(
 ): Promise<TransactionRow[]> {
   if (!(await isSupabaseConfigured())) return [];
   const supabase = await createClient();
-  const { data, error } = await supabase
+  const SELECT_COLS =
+    "id, account_id, occurred_on, direction, amount, currency, description, category_id, beneficiary_id, is_transfer, notes";
+
+  // İdeal sorgu: soft-deleted'leri ele
+  const first = await supabase
     .from("transactions")
-    .select(
-      "id, account_id, occurred_on, direction, amount, currency, description, category_id, beneficiary_id, is_transfer, notes",
-    )
+    .select(SELECT_COLS)
     .eq("direction", direction)
     .eq("status", "committed")
     .is("deleted_at", null)
     .order("occurred_on", { ascending: false })
     .limit(500);
-  if (error) {
-    console.error("listTransactions error", error);
+
+  // 0018 migration henüz çalışmadıysa "deleted_at" kolonu yok → filter
+  // hata verir. Bu durumda filter'sız bir kez daha dene (defensive fallback).
+  if (first.error) {
+    const msg = String(first.error.message ?? "").toLowerCase();
+    if (msg.includes("deleted_at") || first.error.code === "42703") {
+      console.warn(
+        "listTransactions: deleted_at kolonu yok — 0018 migration çalıştırılmamış. Filter düşürüldü.",
+      );
+      const fallback = await supabase
+        .from("transactions")
+        .select(SELECT_COLS)
+        .eq("direction", direction)
+        .eq("status", "committed")
+        .order("occurred_on", { ascending: false })
+        .limit(500);
+      if (fallback.error) {
+        console.error("listTransactions fallback error", fallback.error);
+        return [];
+      }
+      return (fallback.data ?? []) as unknown as TransactionRow[];
+    }
+    console.error("listTransactions error", first.error);
     return [];
   }
-  return (data ?? []) as unknown as TransactionRow[];
+  return (first.data ?? []) as unknown as TransactionRow[];
 }
 
 export async function createTransaction(input: {
@@ -146,11 +169,23 @@ export async function deleteTransaction(
   const supabase = await createClient();
   // Soft delete — deleted_at = now() set. /ayarlar arşivinden geri alınabilir,
   // ya da hemen ardından undoDeleteTransaction çağrılabilir (30 sn toast).
-  const { error } = await supabase
+  const soft = await supabase
     .from("transactions")
     .update({ deleted_at: new Date().toISOString() } as never)
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (soft.error) {
+    const msg = String(soft.error.message ?? "").toLowerCase();
+    if (msg.includes("deleted_at") || soft.error.code === "42703") {
+      // 0018 yok — hard delete'e geri dön
+      console.warn("deleteTransaction: 0018 migration yok, hard delete'e düşüyor");
+      const hard = await supabase.from("transactions").delete().eq("id", id);
+      if (hard.error) return { ok: false, error: hard.error.message };
+      revalidatePath(direction === "inflow" ? "/gelirler" : "/giderler");
+      revalidatePath("/ozet");
+      return { ok: true };
+    }
+    return { ok: false, error: soft.error.message };
+  }
   revalidatePath(direction === "inflow" ? "/gelirler" : "/giderler");
   revalidatePath("/ozet");
   return { ok: true };
