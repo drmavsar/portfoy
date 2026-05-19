@@ -269,6 +269,16 @@ export default async function OzetPage() {
     bumpDay(cls.key, cls.label, cls.color, dayDelta, valueTry, truncgilSource, truncgilUpdate);
   }
 
+  // Yahoo'nun "regularMarketTime"ı bugün değilse borsa kapalı sayılır
+  // (resmi tatil / hafta sonu) — günlük değişim 0 gösterilir, yoksa
+  // dünkü kapanış vs. dün-evvelki kapanış farkı (Yahoo'nun verdiği son
+  // değişim) yanlışlıkla "bugün" gibi görünür.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const isToday = (unixSec: number | null | undefined): boolean => {
+    if (!unixSec) return false;
+    return new Date(unixSec * 1000).toISOString().slice(0, 10) === todayIso;
+  };
+
   // Hisse meta için Yahoo'nun en geç regularMarketTime'ını al
   let yahooLatestUnix: number | null = null;
   for (const h of enriched) {
@@ -276,7 +286,9 @@ export default async function OzetPage() {
     const quote = h.quote;
     if (!asset || !quote || !quote.previous_close) continue;
     const qty = Number(h.quantity);
-    const dayDelta = qty * (quote.price - quote.previous_close);
+    // Borsa bugün açık değilse günlük katkı 0
+    const marketOpen = isToday(quote.market_time);
+    const dayDelta = marketOpen ? qty * (quote.price - quote.previous_close) : 0;
     if (quote.market_time && (!yahooLatestUnix || quote.market_time > yahooLatestUnix)) {
       yahooLatestUnix = quote.market_time;
     }
@@ -295,6 +307,19 @@ export default async function OzetPage() {
   // Hisse satırına yahoo zamanını yaz (yukarıda null geçtim; burada doldur)
   const hisseEntry = dayChangeMap.get("equity");
   if (hisseEntry && yahooLastUpdate) hisseEntry.lastUpdate = yahooLastUpdate;
+
+  // Nakit (TRY hesapları) günlük değişimini daily_snapshots tablosundan hesapla.
+  // En son snapshot bugününki (bu sayfa açıldığında upsert oldu). Bir önceki
+  // snapshot dünün (veya en son ziyaret edilen günün) kayıttır. Fark = bugünkü
+  // nakit değişimi (gelir geldi / gider çıktı / vs).
+  const cashEntry = dayChangeMap.get("cash_try");
+  if (cashEntry && dailySnapshots.length >= 2) {
+    const prev = dailySnapshots[dailySnapshots.length - 2];
+    const prevCash = Number(prev.cash_try ?? 0);
+    cashEntry.change = cashTotal - prevCash;
+    cashEntry.source = `daily_snapshots · ${prev.snapshot_date}'den beri`;
+    cashEntry.lastUpdate = prev.snapshot_date;
+  }
 
   const dayChangeRows = Array.from(dayChangeMap.values())
     .filter((r) => r.value > 0)
@@ -417,7 +442,7 @@ export default async function OzetPage() {
                 const equityDay = dayChangeMap.get("equity")?.change ?? 0;
                 const metalDay = dayChangeMap.get("metal")?.change ?? 0;
                 const fxDay = dayChangeMap.get("fx")?.change ?? 0;
-                const cashDay = 0;
+                const cashDay = dayChangeMap.get("cash_try")?.change ?? 0;
                 const dayPct = (change: number, value: number) =>
                   value > 0 ? (change / (value - change || value)) * 100 : 0;
                 type IconKey = "wealth" | "diamond" | "swap" | "wallet";
