@@ -441,8 +441,9 @@ export default async function OzetPage() {
           <div className="card" style={{ marginBottom: 18 }}>
             <div className="card-head">
               <div className="card-title">Toplam Servet</div>
-              <div className="card-sub">
-                {accounts.length} hesap · {portfolioGroups.length} yatırım portföyü
+              <div className="card-sub" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                <span>{accounts.length} hesap · {portfolioGroups.length} yatırım portföyü</span>
+                <DataFreshness yahooLastUnix={yahooLatestUnix} truncgilDate={truncgilUpdate} />
               </div>
             </div>
             <div style={{ padding: "20px 24px" }}>
@@ -1009,5 +1010,58 @@ export default async function OzetPage() {
         </>
       )}
     </div>
+  );
+}
+
+/** Veri kaynaklarının son güncelleme zamanlarını "X dk önce" şeklinde gösterir. */
+function DataFreshness({
+  yahooLastUnix,
+  truncgilDate,
+}: {
+  yahooLastUnix: number | null;
+  truncgilDate: string | null | undefined;
+}) {
+  // Server component bir kez çalışır; Date.now() server-side deterministic
+  // eslint-disable-next-line react-hooks/purity
+  const now = Date.now();
+  const yahooDate = yahooLastUnix ? new Date(yahooLastUnix * 1000) : null;
+  const truncDate = truncgilDate ? new Date(truncgilDate) : null;
+  const fmtRel = (d: Date | null) => {
+    if (!d) return null;
+    const ms = now - d.getTime();
+    if (ms < 0) return "az önce";
+    const min = Math.floor(ms / 60000);
+    if (min < 1) return "az önce";
+    if (min < 60) return `${min} dk önce`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr} sa önce`;
+    const day = Math.floor(hr / 24);
+    return `${day} gün önce`;
+  };
+  const fmtTime = (d: Date | null) =>
+    d
+      ? d.toLocaleString("tr-TR", {
+          hour: "2-digit",
+          minute: "2-digit",
+          day: "2-digit",
+          month: "2-digit",
+        })
+      : null;
+  const items: Array<{ label: string; time: string; rel: string }> = [];
+  const yt = fmtTime(yahooDate);
+  const yr = fmtRel(yahooDate);
+  if (yt && yr) items.push({ label: "Yahoo", time: yt, rel: yr });
+  const tt = fmtTime(truncDate);
+  const tr = fmtRel(truncDate);
+  if (tt && tr) items.push({ label: "Truncgil", time: tt, rel: tr });
+  if (items.length === 0) return null;
+  return (
+    <span style={{ display: "inline-flex", gap: 10, fontSize: 11, color: "var(--muted)" }}>
+      {items.map((i) => (
+        <span key={i.label} title={i.time}>
+          {i.label} · {i.rel}
+        </span>
+      ))}
+    </span>
   );
 }
