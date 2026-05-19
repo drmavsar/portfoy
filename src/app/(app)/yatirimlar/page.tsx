@@ -197,6 +197,20 @@ export default async function YatirimlarPage() {
   const totalDayChangePct = totalDayOpen > 0 ? (totalDayChange / totalDayOpen) * 100 : null;
   const quotedCount = enriched.filter((h) => h.quote).length;
 
+  // Yahoo'nun en son trade time'ı (data freshness için)
+  let yahooLatestUnix: number | null = null;
+  for (const h of enriched) {
+    if (h.quote?.market_time && (!yahooLatestUnix || h.quote.market_time > yahooLatestUnix)) {
+      yahooLatestUnix = h.quote.market_time;
+    }
+  }
+  const yahooLastUpdate = yahooLatestUnix
+    ? new Date(yahooLatestUnix * 1000)
+    : null;
+  // Server component bir kez çalışır; Date.now() server-side deterministic
+  // eslint-disable-next-line react-hooks/purity
+  const renderNowMs = Date.now();
+
   // Risk audit — pozisyon başına sektör + benim
   const assetSectorMap = Object.fromEntries(assets.map((a) => [a.id, a.sector ?? null]));
   const riskInputs = enriched.map((h) => {
@@ -222,6 +236,9 @@ export default async function YatirimlarPage() {
           <div className="page-title">Portföy</div>
           <div className="page-sub">
             Kişi bazlı pozisyon · WAC + anlık fiyat + K/Z · {quotedCount}/{enriched.length} sembol Yahoo Finance&apos;tan
+            {yahooLastUpdate && (
+              <YahooFreshness date={yahooLastUpdate} nowMs={renderNowMs} />
+            )}
           </div>
         </div>
       </div>
@@ -457,6 +474,30 @@ export default async function YatirimlarPage() {
         </>
       )}
     </div>
+  );
+}
+
+function YahooFreshness({ date, nowMs }: { date: Date; nowMs: number }) {
+  const ms = nowMs - date.getTime();
+  const min = Math.max(0, Math.floor(ms / 60000));
+  const rel =
+    min < 1
+      ? "az önce"
+      : min < 60
+        ? `${min} dk önce`
+        : min < 1440
+          ? `${Math.floor(min / 60)} sa önce`
+          : `${Math.floor(min / 1440)} gün önce`;
+  const time = date.toLocaleString("tr-TR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    day: "2-digit",
+    month: "2-digit",
+  });
+  return (
+    <span title={time} style={{ marginLeft: 8, fontSize: 11, color: "var(--muted)" }}>
+      · Yahoo {rel}
+    </span>
   );
 }
 
