@@ -269,13 +269,6 @@ export default async function YatirimlarPage() {
             />
           </div>
 
-          {/* Risk overlay — uyarılar + konsantrasyon özetleri */}
-          <RiskOverlay
-            warnings={warnings}
-            topPositions={topPositions}
-            sectorStats={sectorStats}
-          />
-
           <div style={{ display: "grid", gap: 18 }}>
             {groups.map((g) => {
               const share = totalMv > 0 ? (g.mv / totalMv) * 100 : 0;
@@ -441,6 +434,15 @@ export default async function YatirimlarPage() {
                 </div>
               );
             })}
+          </div>
+
+          {/* Risk overlay — uyarılar + konsantrasyon özetleri (sayfanın altında) */}
+          <div style={{ marginTop: 18 }}>
+            <RiskOverlay
+              warnings={warnings}
+              topPositions={topPositions}
+              sectorStats={sectorStats}
+            />
           </div>
 
           <div

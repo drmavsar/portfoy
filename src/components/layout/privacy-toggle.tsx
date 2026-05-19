@@ -14,10 +14,11 @@ export function PrivacyToggle() {
   const [ready, setReady] = useState(false);
 
   // Hydration için sessionStorage'ı effect içinde oku; SSR'da window yok.
+  // Default: GÖRÜNÜR (false). Kullanıcı isterse göz butonuna basıp gizler.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const saved = sessionStorage.getItem(STORAGE_KEY);
-    const initial = saved === null ? true : saved === "1";
+    const initial = saved === "1";
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setHidden(initial);
     setReady(true);
