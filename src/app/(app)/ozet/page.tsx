@@ -17,6 +17,7 @@ import { listTransactionsForReports } from "@/app/(app)/_lib/reports-actions";
 import { listBenchmarkPoints, listWealthSnapshots } from "@/app/(app)/_lib/wealth-snapshots-actions";
 import { captureDailySnapshot, listDailySnapshots } from "@/app/(app)/_lib/daily-snapshots-actions";
 import { AssetCompositionChart } from "@/app/(app)/_components/asset-composition-chart";
+import { TotalWealthDisplay } from "@/app/(app)/_components/total-wealth-display";
 import { CashflowCard } from "@/app/(app)/_components/cashflow-card";
 import { PersonEquityChart } from "@/app/(app)/_components/person-equity-chart";
 import { Icon } from "@/components/ui/icon";
@@ -448,36 +449,12 @@ export default async function OzetPage() {
             </div>
             <div style={{ padding: "20px 24px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
-                <div style={{ flex: "0 0 auto" }}>
-                  <div
-                    className="tabular"
-                    style={{ fontSize: 36, fontWeight: 700, color: "var(--fg)" }}
-                  >
-                    {fmt.trydp(grandTotal)}
-                  </div>
-                  <div
-                    className="tabular"
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 600,
-                      marginTop: 6,
-                      color: totalDayChange >= 0 ? "var(--positive)" : "var(--negative)",
-                    }}
-                  >
-                    {totalDayChange >= 0 ? "+" : ""}
-                    {fmt.tr(totalDayChange, 0)} ₺
-                    {grandTotal > 0 && (
-                      <>
-                        {" · "}
-                        {totalDayChange >= 0 ? "+" : ""}
-                        {((totalDayChange / (grandTotal - totalDayChange || grandTotal)) * 100).toFixed(2)}%
-                      </>
-                    )}
-                  </div>
-                  <div className="hint" style={{ fontSize: 11, marginTop: 4 }}>
-                    Bugünkü değişim
-                  </div>
-                </div>
+                <TotalWealthDisplay
+                  totalTry={grandTotal}
+                  dayChangeTry={totalDayChange}
+                  usdRate={fxRates.USD ?? null}
+                  eurRate={fxRates.EUR ?? null}
+                />
                 {dailySnapshots.length >= 2 && (() => {
                   const values = dailySnapshots.map((s) => Number(s.total_wealth));
                   const min = Math.min(...values);
@@ -581,7 +558,7 @@ export default async function OzetPage() {
                                     </span>
                                   </span>
                                   <span className="tabular" style={{ textAlign: "right" }}>
-                                    {fmt.tr(p.value, 0)}
+                                    {fmt.tr(p.value, 0)} ₺
                                     {p.dayChange !== 0 && (
                                       <span style={{ color: pColor, marginLeft: 4 }}>
                                         {" "}
