@@ -43,15 +43,28 @@ export function AssetCompositionChart({ rows }: Props) {
     );
   }
 
-  const data = rows.map((r) => ({
-    date: r.snapshot_date,
-    label: fmtDate(r.snapshot_date),
-    "Nakit (₺)": Number(r.cash_try),
-    Döviz: Number(r.fx_try),
-    Altın: Number(r.metal_try),
-    Hisse: Number(r.equity_mv),
-    total: Number(r.total_wealth),
-  }));
+  const data = rows.map((r) => {
+    const total = Number(r.total_wealth) || 1;
+    const cash = Number(r.cash_try);
+    const fx = Number(r.fx_try);
+    const metal = Number(r.metal_try);
+    const equity = Number(r.equity_mv);
+    return {
+      date: r.snapshot_date,
+      label: fmtDate(r.snapshot_date),
+      total,
+      // Mutlak değerler (tooltip için)
+      _cash: cash,
+      _fx: fx,
+      _metal: metal,
+      _equity: equity,
+      // % oranlar (stacked area için, hep toplamı 100 olur)
+      "Nakit (₺)": (cash / total) * 100,
+      Döviz: (fx / total) * 100,
+      Altın: (metal / total) * 100,
+      Hisse: (equity / total) * 100,
+    };
+  });
 
   // Toplam servet için min/max — line chart Y-axis zoom için
   const totals = data.map((d) => d.total).filter((n) => Number.isFinite(n));
@@ -133,17 +146,24 @@ export function AssetCompositionChart({ rows }: Props) {
         </div>
       </div>
 
-      {/* Stacked area — kompozisyon (Y 0'dan başlar) */}
+      {/* Stacked area — % normalize kompozisyon (her gün toplam = %100) */}
       <div>
         <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4, fontWeight: 600 }}>
-          VARLIK KOMPOZİSYONU
+          VARLIK KOMPOZİSYONU (% pay)
         </div>
         <div style={{ width: "100%", height: 280 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 8, right: 12, left: 12, bottom: 8 }}>
+            <AreaChart data={data} margin={{ top: 8, right: 12, left: 12, bottom: 8 }} stackOffset="expand">
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border-soft)" />
               <XAxis dataKey="label" stroke="var(--muted)" fontSize={10} tickLine={false} />
-              <YAxis stroke="var(--muted)" fontSize={10} tickFormatter={fmtAxis} tickLine={false} />
+              <YAxis
+                stroke="var(--muted)"
+                fontSize={10}
+                tickFormatter={(v: number) => `${v.toFixed(0)}%`}
+                tickLine={false}
+                domain={[0, 100]}
+                width={40}
+              />
               <Tooltip
                 contentStyle={{
                   background: "var(--bg-elev)",
@@ -152,9 +172,17 @@ export function AssetCompositionChart({ rows }: Props) {
                   fontSize: 11,
                 }}
                 labelStyle={{ color: "var(--fg)" }}
-                formatter={(value: unknown) => {
-                  const n = typeof value === "number" ? value : Number(value) || 0;
-                  return n.toLocaleString("tr-TR", { maximumFractionDigits: 0 }) + " ₺";
+                formatter={(value: unknown, name: unknown, item: unknown) => {
+                  const pct = typeof value === "number" ? value : Number(value) || 0;
+                  const payload = (item as { payload?: Record<string, number> })?.payload ?? {};
+                  const absMap: Record<string, number> = {
+                    "Nakit (₺)": payload._cash ?? 0,
+                    Döviz: payload._fx ?? 0,
+                    Altın: payload._metal ?? 0,
+                    Hisse: payload._equity ?? 0,
+                  };
+                  const abs = absMap[String(name)] ?? 0;
+                  return `%${pct.toFixed(1)} · ${abs.toLocaleString("tr-TR", { maximumFractionDigits: 0 })} ₺`;
                 }}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} />
