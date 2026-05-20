@@ -10,6 +10,7 @@ import {
   type PortfolioRow,
 } from "@/app/(app)/_lib/wealth-actions";
 import { getStockPrices, getStockTechnicals, type StockQuote, type StockTechnicals } from "@/app/(app)/_lib/stock-prices";
+import { RefreshButton } from "@/app/(app)/_components/refresh-button";
 import { buildTradePlan, type TradePlan } from "@/app/(app)/_lib/trade-plan";
 import {
   auditPortfolio,
@@ -240,6 +241,9 @@ export default async function YatirimlarPage() {
               <YahooFreshness date={yahooLastUpdate} nowMs={renderNowMs} />
             )}
           </div>
+        </div>
+        <div className="page-actions">
+          <RefreshButton />
         </div>
       </div>
 

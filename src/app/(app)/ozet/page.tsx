@@ -17,6 +17,7 @@ import { listTransactionsForReports } from "@/app/(app)/_lib/reports-actions";
 import { listBenchmarkPoints, listWealthSnapshots } from "@/app/(app)/_lib/wealth-snapshots-actions";
 import { captureDailySnapshot, listDailySnapshots } from "@/app/(app)/_lib/daily-snapshots-actions";
 import { AssetCompositionChart } from "@/app/(app)/_components/asset-composition-chart";
+import { RefreshButton } from "@/app/(app)/_components/refresh-button";
 import { TotalWealthDisplay } from "@/app/(app)/_components/total-wealth-display";
 import { CashflowCard } from "@/app/(app)/_components/cashflow-card";
 import { PersonEquityChart } from "@/app/(app)/_components/person-equity-chart";
@@ -458,6 +459,9 @@ export default async function OzetPage() {
         <div>
           <div className="page-title">Özet</div>
           <div className="page-sub">Tüm varlıklarınızın genel görünümü</div>
+        </div>
+        <div className="page-actions">
+          <RefreshButton />
         </div>
       </div>
 
