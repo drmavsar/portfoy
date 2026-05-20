@@ -5,7 +5,7 @@
    ============================================================ */
 
 :root {
-  --font-sans: var(--font-plex-sans, 'IBM Plex Sans'), system-ui, -apple-system, Segoe UI, sans-serif;
+  --font-sans: var(--font-inter, 'Inter'), 'Atkinson Hyperlegible', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: var(--font-plex-mono, 'IBM Plex Mono'), ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Dark (default) */
@@ -47,25 +47,44 @@
   --shadow-card: 0 1px 0 rgba(255,255,255,0.02) inset, 0 1px 2px rgba(0,0,0,0.4);
 }
 
+/* Light tema — yakın görme erişilebilirliği için yüksek kontrast palet.
+   Normal metin ≥ 4.5:1, kritik sayılar ≥ 7:1 hedeflenir. */
 [data-theme="light"] {
-  --bg:          #f6f7f9;
+  --bg:          #fafbfc;
   --bg-elev:     #ffffff;
   --surface:     #ffffff;
-  --surface-2:   #f1f3f7;
-  --surface-3:   #e6eaf1;
-  --border:      #d8dce6;
-  --border-soft: #e6e9f0;
-  --fg:          #0d1220;
-  --fg-soft:     #2a3045;
-  --muted:       #6b7388;
-  --muted-2:     #98a0b3;
-  --accent-soft: #e2ecff;
-  --accent-fg:   #ffffff;
-  --positive-soft:#e3f5e8;
-  --negative-soft:#fde8e8;
-  --warning-soft:#fbf2dc;
-  --shadow-card: 0 1px 0 rgba(255,255,255,0.6) inset, 0 1px 2px rgba(8,15,30,0.06);
+  --surface-2:   #f3f6fa;
+  --surface-3:   #e9edf3;
+  --border:      #d1d5db;
+  --border-soft: #e5e8ee;
+  --fg:          #111827;   /* birincil metin — 16:1 */
+  --fg-soft:     #374151;   /* ikincil metin — 9:1 */
+  --muted:       #6b7280;   /* pasif — 4.8:1 */
+  --muted-2:     #9aa1ad;
+
+  --accent:        #1e40af;   /* birincil aksiyon — koyu mavi */
+  --accent-soft:   #dbeafe;
+  --accent-fg:     #ffffff;
+
+  --positive:      #166534;   /* başarı yeşili — 6:1 */
+  --positive-soft: #dcfce7;
+  --negative:      #991b1b;   /* hata kırmızısı — 7:1 */
+  --negative-soft: #fee2e2;
+  --negative-mute: #b91c1c;
+  --warning:       #92400e;   /* uyarı — 6:1 */
+  --warning-soft:  #fef3c7;
+  --info:          #1e3a8a;
+
+  --shadow-card: 0 1px 0 rgba(255,255,255,0.6) inset, 0 1px 3px rgba(17,24,39,0.08);
 }
+
+/* ============================================================
+   Font ölçeği — yakın görme için. .shell'e zoom uygulanır,
+   tüm iç içerik (px tabanlı inline style'lar dahil) orantılı büyür.
+   ============================================================ */
+[data-fontscale="normal"] .shell { zoom: 1; }
+[data-fontscale="buyuk"] .shell  { zoom: 1.15; }
+[data-fontscale="cokbuyuk"] .shell { zoom: 1.32; }
 
 * { box-sizing: border-box; }
 html, body, #__next {

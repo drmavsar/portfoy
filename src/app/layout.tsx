@@ -1,12 +1,12 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+import { IBM_Plex_Mono, Inter } from "next/font/google";
 
 import "./globals.css";
 
-const plexSans = IBM_Plex_Sans({
+const inter = Inter({
   weight: ["400", "500", "600", "700"],
   subsets: ["latin", "latin-ext"],
-  variable: "--font-plex-sans",
+  variable: "--font-inter",
   display: "swap",
 });
 
@@ -29,6 +29,22 @@ export const viewport: Viewport = {
   maximumScale: 5,
 };
 
+// Hydration öncesi tema + font ölçeğini uygula (flash önleme).
+// Varsayılan: light tema, "buyuk" font ölçeği.
+const themeInitScript = `
+(function() {
+  try {
+    var t = localStorage.getItem('ma-theme') || 'light';
+    var f = localStorage.getItem('ma-fontscale') || 'buyuk';
+    document.documentElement.dataset.theme = t;
+    document.documentElement.dataset.fontscale = f;
+  } catch (e) {
+    document.documentElement.dataset.theme = 'light';
+    document.documentElement.dataset.fontscale = 'buyuk';
+  }
+})();
+`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -37,9 +53,13 @@ export default function RootLayout({
   return (
     <html
       lang="tr"
-      data-theme="dark"
-      className={`${plexSans.variable} ${plexMono.variable}`}
+      data-theme="light"
+      data-fontscale="buyuk"
+      className={`${inter.variable} ${plexMono.variable}`}
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body>{children}</body>
     </html>
   );

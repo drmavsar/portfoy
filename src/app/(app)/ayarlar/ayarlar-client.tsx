@@ -12,6 +12,7 @@ import type {
   ClassificationRuleRow,
 } from "./actions";
 import { AktiviteTab } from "./aktivite-tab";
+import { ErisilebilirlikTab } from "./erisilebilirlik-tab";
 import { KategorilerTab } from "./kategoriler-tab";
 import { HesaplarSettingsTab } from "./hesaplar-tab";
 import { KisilerTab } from "./kisiler-tab";
@@ -173,7 +174,7 @@ export function AyarlarClient({
   beneficiariesLite,
   supabaseConfigured,
 }: AyarlarClientProps) {
-  const [tab, setTab] = useState<"kisiler" | "kategoriler" | "hesaplar" | "kurallar" | "entegrasyon" | "aktivite">("kisiler");
+  const [tab, setTab] = useState<"kisiler" | "kategoriler" | "hesaplar" | "kurallar" | "entegrasyon" | "aktivite" | "erisilebilirlik">("kisiler");
 
   return (
     <div>
@@ -193,6 +194,7 @@ export function AyarlarClient({
             ["kurallar", "Kurallar"],
             ["entegrasyon", "Entegrasyonlar"],
             ["aktivite", "Aktivite Geçmişi"],
+            ["erisilebilirlik", "Erişilebilirlik"],
           ] as const
         ).map(([k, l]) => (
           <button key={k} className={`tab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>
@@ -225,6 +227,7 @@ export function AyarlarClient({
       )}
       {tab === "entegrasyon" && <IntegrationsTab />}
       {tab === "aktivite" && <AktiviteTab configured={supabaseConfigured} />}
+      {tab === "erisilebilirlik" && <ErisilebilirlikTab />}
     </div>
   );
 }

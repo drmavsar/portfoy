@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { FxStrip } from "@/components/layout/fx-strip";
 import { PrivacyToggle } from "@/components/layout/privacy-toggle";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Icon, type IconName } from "@/components/ui/icon";
 import type { FxTicker } from "@/app/(app)/_lib/asset-rates";
 
@@ -135,6 +136,7 @@ export function AppShell({
         </div>
 
         <FxStrip tickers={fxTickers} />
+        <ThemeToggle />
         <PrivacyToggle />
       </header>
 
