@@ -58,7 +58,7 @@ async function fetchOne(symbol: string): Promise<StockQuote | null> {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${asYahooSymbol(symbol)}?interval=1d&range=5d`;
   try {
     const res = await fetch(url, {
-      next: { revalidate: 300 },
+      next: { revalidate: 300, tags: ["stock-prices"] },
       headers: { "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)" },
     });
     if (!res.ok) return null;
@@ -111,7 +111,7 @@ async function fetchOneExt(symbol: string): Promise<StockQuoteExt | null> {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${asYahooSymbol(symbol)}?interval=1d&range=3mo`;
   try {
     const res = await fetch(url, {
-      next: { revalidate: 600 },
+      next: { revalidate: 600, tags: ["stock-prices"] },
       headers: { "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)" },
     });
     if (!res.ok) return null;
@@ -229,7 +229,7 @@ async function fetchTechnicals(symbol: string): Promise<StockTechnicals | null> 
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${asYahooSymbol(symbol)}?interval=1d&range=1y`;
   try {
     const res = await fetch(url, {
-      next: { revalidate: 900 },
+      next: { revalidate: 900, tags: ["stock-prices"] },
       headers: { "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)" },
     });
     if (!res.ok) return null;
