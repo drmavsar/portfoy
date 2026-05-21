@@ -22,6 +22,8 @@ interface Person {
 interface Props {
   rows: DailySnapshotRow[];
   persons: Person[];
+  /** Bugünün canlı kişi-bazlı hisse MV'si — son nokta override edilir. */
+  liveEquityByPerson?: Record<string, number>;
 }
 
 function fmtAxis(v: number): string {
@@ -35,7 +37,34 @@ function fmtDate(iso: string): string {
   return `${d}.${m}`;
 }
 
-export function PersonEquityChart({ rows, persons }: Props) {
+export function PersonEquityChart({ rows: rawRows, persons, liveEquityByPerson }: Props) {
+  // Bugünün canlı değerini uygula
+  let rows = rawRows;
+  if (liveEquityByPerson && rawRows.length > 0) {
+    const today = new Date().toISOString().slice(0, 10);
+    const last = rawRows[rawRows.length - 1];
+    if (last.snapshot_date === today) {
+      rows = [
+        ...rawRows.slice(0, -1),
+        { ...last, equity_by_person: liveEquityByPerson },
+      ];
+    } else {
+      rows = [
+        ...rawRows,
+        {
+          snapshot_date: today,
+          total_wealth: 0,
+          cash_try: 0,
+          fx_try: 0,
+          metal_try: 0,
+          equity_mv: 0,
+          crypto_try: 0,
+          equity_by_person: liveEquityByPerson,
+        },
+      ];
+    }
+  }
+
   if (rows.length === 0) {
     return (
       <div className="empty">
