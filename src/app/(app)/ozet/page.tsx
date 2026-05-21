@@ -181,9 +181,14 @@ export default async function OzetPage() {
   for (const a of accounts) {
     bumpAcc(a.beneficiary_id ?? "__unassigned__", tryValueOf(a, fxRates));
   }
+  // Canlı kişi-bazlı hisse MV (tarihsel grafiğin bugün noktası için)
+  const liveEquityByPerson: Record<string, number> = {};
   for (const h of enriched) {
     const ben = portfolioBeneficiary.get(h.portfolio_id) ?? "__unassigned__";
     bumpInv(ben, h.mv);
+    if (ben !== "__unassigned__") {
+      liveEquityByPerson[ben] = (liveEquityByPerson[ben] ?? 0) + h.mv;
+    }
   }
   const personRows = Array.from(personTotals.entries())
     .map(([id, v]) => ({
@@ -854,7 +859,16 @@ export default async function OzetPage() {
               </div>
             </div>
             <div style={{ padding: "16px 12px 12px" }}>
-              <AssetCompositionChart rows={dailySnapshots} />
+              <AssetCompositionChart
+                rows={dailySnapshots}
+                live={{
+                  total_wealth: grandTotal,
+                  cash_try: cashTotal,
+                  fx_try: fxTotal,
+                  metal_try: metalTotal,
+                  equity_mv: investmentMv,
+                }}
+              />
             </div>
           </div>
 
@@ -867,6 +881,7 @@ export default async function OzetPage() {
               <div style={{ padding: "16px 12px 12px" }}>
                 <PersonEquityChart
                   rows={dailySnapshots}
+                  liveEquityByPerson={liveEquityByPerson}
                   persons={beneficiaries
                     .filter((b) => dailySnapshots.some(
                       (s) => Number((s.equity_by_person as Record<string, number>)[b.id] ?? 0) > 0,

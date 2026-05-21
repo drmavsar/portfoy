@@ -16,8 +16,19 @@ import {
 
 import type { DailySnapshotRow } from "@/app/(app)/_lib/daily-snapshots-actions";
 
+interface LiveSnapshot {
+  total_wealth: number;
+  cash_try: number;
+  fx_try: number;
+  metal_try: number;
+  equity_mv: number;
+}
+
 interface Props {
   rows: DailySnapshotRow[];
+  /** Bugünün canlı değerleri — snapshot sabah alındığı için son nokta
+   *  anlık portföy değeriyle override edilir. */
+  live?: LiveSnapshot;
 }
 
 function fmtAxis(v: number): string {
@@ -31,7 +42,29 @@ function fmtDate(iso: string): string {
   return `${d}.${m}`;
 }
 
-export function AssetCompositionChart({ rows }: Props) {
+/** dailySnapshots'a bugünün canlı değerini uygula: son satır bugünse
+ *  override et, değilse bugün için yeni satır ekle. */
+function applyLive(rows: DailySnapshotRow[], live?: LiveSnapshot): DailySnapshotRow[] {
+  if (!live) return rows;
+  const today = new Date().toISOString().slice(0, 10);
+  const liveRow: DailySnapshotRow = {
+    snapshot_date: today,
+    total_wealth: live.total_wealth,
+    cash_try: live.cash_try,
+    fx_try: live.fx_try,
+    metal_try: live.metal_try,
+    equity_mv: live.equity_mv,
+    crypto_try: 0,
+    equity_by_person: {},
+  };
+  if (rows.length > 0 && rows[rows.length - 1].snapshot_date === today) {
+    return [...rows.slice(0, -1), { ...rows[rows.length - 1], ...liveRow }];
+  }
+  return [...rows, liveRow];
+}
+
+export function AssetCompositionChart({ rows: rawRows, live }: Props) {
+  const rows = applyLive(rawRows, live);
   if (rows.length === 0) {
     return (
       <div className="empty">
@@ -153,16 +186,17 @@ export function AssetCompositionChart({ rows }: Props) {
         </div>
         <div style={{ width: "100%", height: 280 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 8, right: 12, left: 12, bottom: 8 }} stackOffset="expand">
+            <AreaChart data={data} margin={{ top: 8, right: 12, left: 12, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border-soft)" />
               <XAxis dataKey="label" stroke="var(--muted)" fontSize={10} tickLine={false} />
               <YAxis
                 stroke="var(--muted)"
                 fontSize={10}
-                tickFormatter={(v: number) => `${v.toFixed(0)}%`}
+                tickFormatter={(v: number) => `%${v.toFixed(0)}`}
                 tickLine={false}
                 domain={[0, 100]}
-                width={40}
+                ticks={[0, 25, 50, 75, 100]}
+                width={44}
               />
               <Tooltip
                 contentStyle={{
