@@ -110,33 +110,22 @@ async function computeUserSnapshot(
     ((assets ?? []) as AssetRow[]).map((a) => [a.id, a]),
   );
 
-  // Hesap class'ları
+  // Hesap class kırılımı + tüm hesapların toplamı. accountTotal, ozet
+  // sayfasındaki grandTotal ile tutarlı olması için TÜM hesapları içerir
+  // (kripto/diğer dahil); class total'ları yalnızca kart kırılımı içindir.
   let cashTotal = 0;
   let fxTotal = 0;
   let metalTotal = 0;
+  let accountTotal = 0;
   for (const a of ((accounts ?? []) as AccountRow[])) {
     const v = accountTryValue(a, fxRates);
+    accountTotal += v;
     const c = classifyAccountClass(a.currency);
     if (c === "cash_try") cashTotal += v;
     else if (c === "fx") fxTotal += v;
     else if (c === "metal") metalTotal += v;
   }
 
-  // Yatırım MV — BIST sembolleri için Yahoo quote
-  const bistSymbols: string[] = [];
-  const equityHoldings: Array<HoldingRow & { symbol: string }> = [];
-  for (const h of ((holdings ?? []) as HoldingRow[])) {
-    const a = assetMap.get(h.asset_id);
-    if (!a) continue;
-    if (a.asset_class === "equity_tr") {
-      bistSymbols.push(a.symbol);
-      equityHoldings.push({ ...h, symbol: a.symbol });
-    }
-  }
-  const quotes = bistSymbols.length > 0 ? await getStockPrices(bistSymbols) : {};
-
-  let investmentMv = 0;
-  const equityByPerson: Record<string, number> = {};
   // Portföy → ilk trade beneficiary
   const portfolioBen = new Map<string, string>();
   for (const t of ((trades ?? []) as TradeRow[])) {
@@ -144,17 +133,33 @@ async function computeUserSnapshot(
       portfolioBen.set(t.portfolio_id, t.beneficiary_id);
     }
   }
-  for (const h of equityHoldings) {
-    const q = quotes[h.symbol];
+
+  // Yatırım MV — BIST sembolleri için Yahoo quote çekilir.
+  const bistSymbols: string[] = [];
+  for (const h of ((holdings ?? []) as HoldingRow[])) {
+    const a = assetMap.get(h.asset_id);
+    if (a && a.asset_class === "equity_tr") bistSymbols.push(a.symbol);
+  }
+  const quotes = bistSymbols.length > 0 ? await getStockPrices(bistSymbols) : {};
+
+  // TÜM holding'ler dahil — BIST dışı varlıklar (equity_us, crypto, metal)
+  // Yahoo quote'u olmadığından cost_basis ile değerlenir; aksi halde
+  // total_wealth eksik kalırdı.
+  let investmentMv = 0;
+  const equityByPerson: Record<string, number> = {};
+  for (const h of ((holdings ?? []) as HoldingRow[])) {
+    const a = assetMap.get(h.asset_id);
+    if (!a) continue;
     const qty = Number(h.quantity);
     const cost = Number(h.cost_basis_try);
+    const q = quotes[a.symbol];
     const mv = q ? qty * q.price : cost;
     investmentMv += mv;
     const benId = portfolioBen.get(h.portfolio_id);
     if (benId) equityByPerson[benId] = (equityByPerson[benId] ?? 0) + mv;
   }
 
-  const totalWealth = cashTotal + fxTotal + metalTotal + investmentMv;
+  const totalWealth = accountTotal + investmentMv;
 
   return {
     total_wealth: totalWealth,
@@ -162,6 +167,7 @@ async function computeUserSnapshot(
     fx_try: fxTotal,
     metal_try: metalTotal,
     equity_mv: investmentMv,
+    // ozet sayfasıyla aynı: kripto total_wealth'e dahil ama ayrı kolona yazılmıyor.
     crypto_try: 0,
     equity_by_person: equityByPerson,
   };
