@@ -1,11 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { Icon } from "@/components/ui/icon";
 import type { IndexBadge } from "@/app/(app)/_lib/bist-index-members";
-import type { FundamentalsResult } from "@/app/(app)/_lib/fundamentals";
+import { fetchFundamentals, type FundamentalsResult } from "@/app/(app)/_lib/fundamentals";
 import {
   bandVerdict,
   FAIR_PE,
@@ -19,7 +19,6 @@ interface Props {
   selected: string;
   name: string;
   indices: IndexBadge[];
-  result: FundamentalsResult | null;
 }
 
 type TabKey =
@@ -220,11 +219,33 @@ function StatementTableView({ table }: { table: StatementTable | null | undefine
 
 // ---- ana bileşen ----------------------------------------------------------
 
-export function TemelClient({ symbols, selected, name, indices, result }: Props) {
+export function TemelClient({ symbols, selected, name, indices }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<TabKey>("degerleme");
+  const [fetched, setFetched] = useState<{
+    symbol: string;
+    value: FundamentalsResult;
+  } | null>(null);
+
+  // Temel veri tarayıcıdan çekilir (sunucu→sunucu fetch Vercel Deployment
+  // Protection'a takılıp 401 dönüyordu). selected değişince yeniden çekilir.
+  useEffect(() => {
+    if (!selected) return;
+    let cancelled = false;
+    fetchFundamentals(selected).then((value) => {
+      if (!cancelled) setFetched({ symbol: selected, value });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
+
+  // Sonuç yalnız güncel sembole aitse geçerli — sembol değişince render
+  // sırasında türetilerek anında sıfırlanır, yükleniyor durumuna geçilir.
+  const result = fetched && fetched.symbol === selected ? fetched.value : null;
+  const loading = Boolean(selected) && !result;
 
   const options = useMemo(() => {
     const set = new Set(symbols);
@@ -290,13 +311,22 @@ export function TemelClient({ symbols, selected, name, indices, result }: Props)
         <button className="btn btn-prim" onClick={() => go(query)} style={{ padding: "8px 16px" }}>
           Analiz Et
         </button>
-        {isPending && <span className="hint">Yükleniyor…</span>}
+        {(isPending || loading) && <span className="hint">Yükleniyor…</span>}
       </div>
 
       {!selected && (
         <div className="card" style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>
           <Icon name="search" size={28} />
           <div style={{ marginTop: 10 }}>Analiz için yukarıdan bir hisse seç.</div>
+        </div>
+      )}
+
+      {selected && !result && (
+        <div className="card" style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>
+          <Icon name="refresh" size={28} />
+          <div style={{ marginTop: 10 }}>
+            <strong>{selected}</strong> için temel analiz verisi yükleniyor…
+          </div>
         </div>
       )}
 
