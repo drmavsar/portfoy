@@ -178,9 +178,13 @@ export async function getStockPricesExtended(
 ): Promise<Record<string, StockQuoteExt>> {
   if (symbols.length === 0) return {};
   const unique = Array.from(new Set(symbols));
-  const results = await Promise.all(unique.map(fetchOneExt));
   const out: Record<string, StockQuoteExt> = {};
-  for (const r of results) if (r) out[r.symbol] = r;
+  // 10'arlı batch — Radar piyasa geneli ~100 sembol çekebiliyor (Yahoo rate limit)
+  for (let i = 0; i < unique.length; i += 10) {
+    const batch = unique.slice(i, i + 10);
+    const results = await Promise.all(batch.map(fetchOneExt));
+    for (const r of results) if (r) out[r.symbol] = r;
+  }
   return out;
 }
 

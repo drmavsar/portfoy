@@ -1,11 +1,23 @@
 import { RefreshButton } from "@/app/(app)/_components/refresh-button";
-import { listAssets, type AssetRow } from "@/app/(app)/_lib/wealth-actions";
+import {
+  getSymbolIndexMap,
+  getXK100Symbols,
+  type IndexBadge,
+} from "@/app/(app)/_lib/bist-index-members";
 import { getBistIndices } from "@/app/(app)/_lib/market-indices";
 import { getStockPricesExtended, type StockQuoteExt } from "@/app/(app)/_lib/stock-prices";
+import { listAssets } from "@/app/(app)/_lib/wealth-actions";
 import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
 
-type Mover = { asset: AssetRow; quote: StockQuoteExt };
+type Mover = {
+  symbol: string;
+  name: string;
+  external_url: string | null;
+  owned: boolean;
+  indices: IndexBadge[];
+  quote: StockQuoteExt;
+};
 
 function Sparkline({
   values,
@@ -42,6 +54,14 @@ function Sparkline({
   );
 }
 
+function OwnedDot() {
+  return (
+    <span title="Portföyünde" style={{ marginLeft: 5, color: "var(--positive)", fontSize: 9 }}>
+      ●
+    </span>
+  );
+}
+
 function MoversCard({
   title,
   rows,
@@ -71,23 +91,24 @@ function MoversCard({
               const v = getter(r.quote) ?? 0;
               const color = v >= 0 ? "var(--positive)" : "var(--negative)";
               return (
-                <tr key={r.asset.symbol}>
+                <tr key={r.symbol}>
                   <td style={{ fontSize: 12, padding: "6px 12px" }}>
-                    {r.asset.external_url ? (
+                    {r.external_url ? (
                       <a
-                        href={r.asset.external_url}
+                        href={r.external_url}
                         target="_blank"
                         rel="noopener noreferrer"
                         style={{ color: "inherit", textDecoration: "none", fontWeight: 600, borderBottom: "1px dotted var(--muted)" }}
                       >
-                        {r.asset.symbol}
+                        {r.symbol}
                       </a>
                     ) : (
-                      <span style={{ fontWeight: 600 }}>{r.asset.symbol}</span>
+                      <span style={{ fontWeight: 600 }}>{r.symbol}</span>
                     )}
+                    {r.owned && <OwnedDot />}
                   </td>
                   <td style={{ fontSize: 11, color: "var(--muted)", padding: "6px 8px" }}>
-                    {r.asset.name}
+                    {r.name}
                   </td>
                   <td className="num tabular" style={{ color, fontWeight: 600, fontSize: 12, padding: "6px 12px" }}>
                     {v >= 0 ? "+" : ""}{v.toFixed(2)}%
@@ -105,22 +126,38 @@ function MoversCard({
 export const dynamic = "force-dynamic";
 
 export default async function RadarPage() {
-  const [assets, indices] = await Promise.all([listAssets(), getBistIndices()]);
+  const [assets, indices, bistSymbols, symbolIndexMap] = await Promise.all([
+    listAssets(),
+    getBistIndices(),
+    getXK100Symbols(),
+    getSymbolIndexMap(),
+  ]);
 
-  const bistSymbols = assets
-    .filter((a) => a.asset_class === "equity_tr")
-    .map((a) => a.symbol);
+  // Hisse listesi piyasa geneli — BIST 100 üye listesi taranır (sadece
+  // portföydeki hisseler değil). Böylece yeni yukarı-trend adayları yakalanır.
   const quotes = await getStockPricesExtended(bistSymbols);
 
-  const stockRows = assets
-    .filter((a) => a.asset_class === "equity_tr" && quotes[a.symbol])
-    .map((a) => ({
-      asset: a,
-      quote: quotes[a.symbol],
-    }))
+  const assetMap = new Map(
+    assets.filter((a) => a.asset_class === "equity_tr").map((a) => [a.symbol, a]),
+  );
+
+  const stockRows: Mover[] = bistSymbols
+    .filter((sym) => quotes[sym])
+    .map((sym) => {
+      const a = assetMap.get(sym);
+      const info = symbolIndexMap[sym];
+      return {
+        symbol: sym,
+        name: a?.name ?? info?.name ?? sym,
+        external_url: a?.external_url ?? null,
+        owned: !!a,
+        indices: info?.indices ?? [],
+        quote: quotes[sym],
+      };
+    })
     .sort((a, b) => (b.quote.change_pct ?? 0) - (a.quote.change_pct ?? 0));
 
-  // Günlük en çok artan/azalan (top 5)
+  // Günlük / haftalık / aylık en çok artan/azalan (top 5)
   const dayGainers = [...stockRows].sort((a, b) => (b.quote.change_pct ?? 0) - (a.quote.change_pct ?? 0)).slice(0, 5);
   const dayLosers = [...stockRows].sort((a, b) => (a.quote.change_pct ?? 0) - (b.quote.change_pct ?? 0)).slice(0, 5);
   const weekGainers = [...stockRows].sort((a, b) => (b.quote.week_change_pct ?? 0) - (a.quote.week_change_pct ?? 0)).slice(0, 5);
@@ -137,7 +174,7 @@ export default async function RadarPage() {
         <div>
           <div className="page-title">Piyasa Radarı</div>
           <div className="page-sub">
-            BIST endeksleri · sektör rotasyonu · hisse listesi · Yahoo Finance (15 dk gecikme)
+            BIST 100 piyasa geneli · en çok hareket edenler · sektör rotasyonu · Yahoo Finance (15 dk gecikme)
           </div>
         </div>
         <div className="page-actions">
@@ -239,7 +276,7 @@ export default async function RadarPage() {
         )}
       </div>
 
-      {/* Top Movers — günlük / haftalık / aylık ikilileri */}
+      {/* Top Movers — günlük / haftalık / aylık ikilileri (BIST 100 geneli) */}
       {stockRows.length > 0 && (
         <div className="grid-base grid-3" style={{ gap: 16, marginBottom: 18 }}>
           <MoversCard title="Günlük En Çok Artan"  rows={dayGainers}  getter={(q) => q.change_pct} pos />
@@ -251,10 +288,10 @@ export default async function RadarPage() {
         </div>
       )}
 
-      {/* Tüm hisseler */}
+      {/* BIST 100 hisse listesi */}
       <div className="card">
         <div className="card-head">
-          <div className="card-title">Hisse Listesi (Tüm)</div>
+          <div className="card-title">BIST 100 Hisse Listesi</div>
           <div className="card-sub">
             {stockRows.length} sembol · günlük değişim azalan sıralı
           </div>
@@ -274,7 +311,7 @@ export default async function RadarPage() {
                 <th className="num">Günlük</th>
                 <th className="num">Haftalık</th>
                 <th className="num">Aylık</th>
-                <th>Sektör</th>
+                <th>Endeksler</th>
               </tr>
             </thead>
             <tbody>
@@ -286,28 +323,43 @@ export default async function RadarPage() {
                   v == null ? "var(--muted)" : v >= 0 ? "var(--positive)" : "var(--negative)";
                 const pctText = (v: number | null) =>
                   v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+                const shownIdx = r.indices.slice(0, 5);
+                const extraIdx = r.indices.length - shownIdx.length;
                 return (
-                  <tr key={r.asset.symbol}>
+                  <tr key={r.symbol}>
                     <td>
-                      {r.asset.external_url ? (
+                      {r.external_url ? (
                         <a
-                          href={r.asset.external_url}
+                          href={r.external_url}
                           target="_blank"
                           rel="noopener noreferrer"
                           style={{ color: "inherit", textDecoration: "none", fontWeight: 600, borderBottom: "1px dotted var(--muted)" }}
                         >
-                          {r.asset.symbol}
+                          {r.symbol}
                         </a>
                       ) : (
-                        <span style={{ fontWeight: 600 }}>{r.asset.symbol}</span>
+                        <span style={{ fontWeight: 600 }}>{r.symbol}</span>
                       )}
+                      {r.owned && <OwnedDot />}
                     </td>
-                    <td style={{ fontSize: 13 }}>{r.asset.name}</td>
+                    <td style={{ fontSize: 13 }}>{r.name}</td>
                     <td className="num tabular">{fmt.tr(r.quote.price, 2)} ₺</td>
                     <td className="num tabular" style={{ color: pctColor(d), fontWeight: 600 }}>{pctText(d)}</td>
                     <td className="num tabular" style={{ color: pctColor(w) }}>{pctText(w)}</td>
                     <td className="num tabular" style={{ color: pctColor(m) }}>{pctText(m)}</td>
-                    <td style={{ fontSize: 11, color: "var(--muted)" }}>{r.asset.sector ?? "—"}</td>
+                    <td style={{ fontSize: 10 }}>
+                      {r.indices.length > 0 ? (
+                        <span
+                          title={r.indices.map((x) => `${x.code} — ${x.name}`).join("\n")}
+                          style={{ color: "var(--muted)" }}
+                        >
+                          {shownIdx.map((x) => x.code).join(", ")}
+                          {extraIdx > 0 ? ` +${extraIdx}` : ""}
+                        </span>
+                      ) : (
+                        <span className="hint">—</span>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -320,8 +372,9 @@ export default async function RadarPage() {
         className="hint"
         style={{ marginTop: 18, padding: 12, background: "var(--surface-2)", borderRadius: 8 }}
       >
-        <Icon name="screener" size={12} /> Veri kaynağı: Yahoo Finance (BIST · 15 dk gecikmeli) ·
-        5 dk cache. KAP duyuruları, hisse arama ve screener filtreleri sonraki sprintte.
+        <Icon name="screener" size={12} /> Liste BIST 100 piyasa geneli — <b>●</b> işareti
+        portföyündeki hisseleri gösterir. Fiyatlar Yahoo Finance (BIST · 15 dk gecikmeli, 10 dk
+        cache); endeks üyeliği Borsa İstanbul CSV. Endeks hücresine gelince tam liste görünür.
       </div>
     </div>
   );
