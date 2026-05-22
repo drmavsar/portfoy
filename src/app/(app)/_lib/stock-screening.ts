@@ -16,10 +16,10 @@ export interface ScreeningRow {
   price: number;
   prev_close: number | null;
   daily_pct: number | null;
-  week_pct: number | null;     // 5 trading day
-  month_pct: number | null;    // 22 trading day
-  quarter_pct: number | null;  // 66 trading day
-  ytd_pct: number | null;      // yıl başından
+  week_pct: number | null;     // takvim: 7 gün önce
+  month_pct: number | null;    // takvim: 1 ay önce
+  quarter_pct: number | null;  // takvim: 3 ay önce
+  ytd_pct: number | null;      // önceki yıl sonundan
   high_52w: number | null;
   low_52w: number | null;
   high_distance_pct: number | null;   // (price - 52h) / 52h × 100 (negatif)
@@ -116,6 +116,19 @@ function priorCloseFromSeries(price: number, closes: number[]): number | null {
   return last;
 }
 
+/**
+ * base tarihinden `months` ay öncesinin epoch'u (saniye). Ay sonu taşması
+ * hedef ayın son gününe kırpılır (JS Date setMonth taşma hatasından kaçınmak için).
+ */
+function epochMonthsBefore(base: Date, months: number): number {
+  const first = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() - months, 1));
+  const lastDay = new Date(
+    Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  const day = Math.min(base.getUTCDate(), lastDay);
+  return Math.floor(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), day) / 1000);
+}
+
 /** RS (relative strength) vs index: lookback gün önce ile şimdi arasında
  *  symbol/index oranındaki değişim. Pozitif → outperform. */
 function computeRS(
@@ -202,15 +215,24 @@ async function fetchOne(
     // meta.chartPreviousClose range=1y'de ~1 yıl önceki fiyattır (günlük ≠ yıllık).
     const prev = priorCloseFromSeries(price, closes);
 
-    const lookback = (n: number) =>
-      closes.length > n ? closes[closes.length - 1 - n] : null;
-
-    // YTD: yıl başından bu yana
-    const yearStartIdx = ts.findIndex((t) => {
-      const d = new Date(t * 1000);
-      return d.getUTCFullYear() === new Date().getUTCFullYear();
-    });
-    const ytdRef = yearStartIdx > 0 ? closes[yearStartIdx] : null;
+    // Dönemsel getiriler takvim bazlı: hedef tarihten önceki (≤) en yakın
+    // işlem gününün kapanışı referans alınır. Sabit "N işlem günü" yöntemi
+    // tatil yoğun dönemlerde kayıyor ve Yahoo'nun dönem rozetleriyle tutmuyordu.
+    const lastSec = ts[ts.length - 1] || Math.floor(Date.now() / 1000);
+    const lastDate = new Date(lastSec * 1000);
+    const closeOnOrBefore = (targetSec: number): number | null => {
+      for (let i = ts.length - 1; i >= 0; i--) {
+        if (ts[i] > 0 && ts[i] <= targetSec) return closes[i];
+      }
+      return null;
+    };
+    const weekRef = closeOnOrBefore(lastSec - 7 * 86400);
+    const monthRef = closeOnOrBefore(epochMonthsBefore(lastDate, 1));
+    const quarterRef = closeOnOrBefore(epochMonthsBefore(lastDate, 3));
+    // YTD: önceki yılın son işlem günü (31 Aralık'tan önceki ≤ kapanış)
+    const ytdRef = closeOnOrBefore(
+      Math.floor(Date.UTC(lastDate.getUTCFullYear() - 1, 11, 31) / 1000),
+    );
 
     // 52 hafta yüksek/düşük (son ~252 trading day) — close değil gerçek high/low
     const high52 = Math.max(...highs.slice(-252));
@@ -235,9 +257,9 @@ async function fetchOne(
       price,
       prev_close: prev,
       daily_pct: pctChange(price, prev),
-      week_pct: pctChange(price, lookback(5)),
-      month_pct: pctChange(price, lookback(22)),
-      quarter_pct: pctChange(price, lookback(66)),
+      week_pct: pctChange(price, weekRef),
+      month_pct: pctChange(price, monthRef),
+      quarter_pct: pctChange(price, quarterRef),
       ytd_pct: pctChange(price, ytdRef),
       high_52w: high52,
       low_52w: low52,
