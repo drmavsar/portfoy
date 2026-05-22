@@ -125,7 +125,7 @@ async function fetchIndexCloses(symbol: string): Promise<number[]> {
     const res = await fetch(
       `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.IS?interval=1d&range=1y`,
       {
-        next: { revalidate: 1800 },
+        next: { revalidate: 1800, tags: ["stock-prices"] },
         headers: { "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)" },
       },
     );
@@ -145,7 +145,7 @@ async function fetchOne(
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.IS?interval=1d&range=1y`;
   try {
     const res = await fetch(url, {
-      next: { revalidate: 1800 },
+      next: { revalidate: 1800, tags: ["stock-prices"] },
       headers: { "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)" },
     });
     if (!res.ok) return null;

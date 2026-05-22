@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { Icon } from "@/components/ui/icon";
+import { RefreshButton } from "@/app/(app)/_components/refresh-button";
 import { fmt } from "@/lib/finance/fmt";
 
 import type { ScreeningRow } from "@/app/(app)/_lib/stock-screening";
@@ -126,6 +127,9 @@ export function TaramaClient({ rows, symbolCount }: Props) {
             BIST 100 multi-factor karar destek · {rows.length} sembol · ortalama skor{" "}
             {avgScore.toFixed(1)}
           </div>
+        </div>
+        <div className="page-actions">
+          <RefreshButton />
         </div>
       </div>
 
