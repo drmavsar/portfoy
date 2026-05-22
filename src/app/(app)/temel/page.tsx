@@ -1,5 +1,4 @@
 import { getSymbolIndexMap, getXK100Symbols } from "@/app/(app)/_lib/bist-index-members";
-import { getFundamentals, type FundamentalsResult } from "@/app/(app)/_lib/fundamentals";
 
 import { TemelClient } from "./temel-client";
 
@@ -19,16 +18,16 @@ export default async function TemelPage({
     getSymbolIndexMap(),
   ]);
 
-  const result: FundamentalsResult | null = sym ? await getFundamentals(sym) : null;
   const info = sym ? indexMap[sym] : undefined;
 
+  // Temel veri (getFundamentals) burada DEĞİL, client'ta çekilir — sunucu→sunucu
+  // çağrısı Vercel Deployment Protection nedeniyle 401 dönüyordu.
   return (
     <TemelClient
       symbols={[...symbols].sort()}
       selected={sym}
       name={info?.name ?? sym}
       indices={info?.indices ?? []}
-      result={result}
     />
   );
 }

@@ -1,8 +1,11 @@
-"use server";
-
-// BIST hisse temel analiz verisi — api/bist-fundamentals.py (borsapy) endpoint'i.
+// BIST hisse temel analiz verisi — /api/bist-fundamentals (borsapy) endpoint'i.
 // Endpoint TradingView + İş Yatırım + KAP + hedeffiyat birleştirir.
-// Cache 6 saat (temel veri çeyreklik değişir).
+//
+// Çağrı TARAYICIDAN yapılır. Daha önce bu fetch sunucu tarafında (server
+// component) çalışıyordu; sunucu→sunucu istek Vercel Deployment Protection
+// katmanına takılıp HTTP 401 dönüyordu ("Veri servisi yanıt vermedi").
+// Tarayıcı isteği aynı origin'e gider ve oturum çerezini taşıdığı için hem
+// dağıtım korumasını hem Supabase proxy kontrolünü sorunsuz geçer.
 
 import {
   enrichFundamentals,
@@ -14,25 +17,15 @@ export type FundamentalsResult =
   | { ok: true; data: Fundamentals }
   | { ok: false; error: string };
 
-function baseUrl(): string {
-  // Node fetch mutlak URL ister. VERCEL_URL deployment'a özel KORUMALI URL'dir
-  // (Deployment Protection → server→server çağrısında 401). Herkese açık
-  // production alias (VERCEL_PROJECT_PRODUCTION_URL) tercih edilir.
-  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
-  return host ? `https://${host}` : "http://localhost:3000";
-}
-
-export async function getFundamentals(symbol: string): Promise<FundamentalsResult> {
+export async function fetchFundamentals(symbol: string): Promise<FundamentalsResult> {
   const clean = symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
   if (!clean) return { ok: false, error: "Sembol boş." };
 
   try {
     const res = await fetch(
-      `${baseUrl()}/api/bist-fundamentals?symbol=${encodeURIComponent(clean)}`,
-      { next: { revalidate: 21600, tags: ["fundamentals"] } },
+      `/api/bist-fundamentals?symbol=${encodeURIComponent(clean)}`,
     );
     if (!res.ok) {
-      console.error(`[bist-fundamentals] ${clean} → HTTP ${res.status}`);
       return { ok: false, error: `Veri servisi yanıt vermedi (HTTP ${res.status}).` };
     }
     const json = (await res.json()) as
@@ -41,12 +34,10 @@ export async function getFundamentals(symbol: string): Promise<FundamentalsResul
 
     if (!json || json.ok !== true) {
       const msg = (json as { error?: string })?.error ?? "Bilinmeyen hata";
-      console.error(`[bist-fundamentals] ${clean} → ${msg}`);
       return { ok: false, error: `${clean} için temel veri çekilemedi: ${msg}` };
     }
     return { ok: true, data: enrichFundamentals(json) };
-  } catch (err) {
-    console.error("[bist-fundamentals] fetch error", clean, err);
+  } catch {
     return { ok: false, error: "Temel analiz servisine ulaşılamadı." };
   }
 }
