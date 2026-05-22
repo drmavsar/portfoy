@@ -33,7 +33,7 @@ async function fetchYahoo(symbol: string): Promise<IndexQuote | null> {
     const res = await fetch(
       `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.IS?interval=1d&range=1mo`,
       {
-        next: { revalidate: 600 },
+        next: { revalidate: 600, tags: ["stock-prices"] },
         headers: { "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)" },
       },
     );
@@ -81,7 +81,7 @@ async function fetchBistSectorsFromPython(baseUrl?: string): Promise<IndexQuote[
       ? `https://${process.env.VERCEL_URL}`
       : "http://localhost:3000";
     const res = await fetch(`${host}/api/bist-sectors`, {
-      next: { revalidate: 600 },
+      next: { revalidate: 600, tags: ["stock-prices"] },
     });
     if (!res.ok) {
       console.error(`[bist-sectors] HTTP ${res.status}`);
