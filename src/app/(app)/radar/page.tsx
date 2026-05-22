@@ -1,3 +1,4 @@
+import { RefreshButton } from "@/app/(app)/_components/refresh-button";
 import { listAssets, type AssetRow } from "@/app/(app)/_lib/wealth-actions";
 import { getBistIndices } from "@/app/(app)/_lib/market-indices";
 import { getStockPricesExtended, type StockQuoteExt } from "@/app/(app)/_lib/stock-prices";
@@ -138,6 +139,9 @@ export default async function RadarPage() {
           <div className="page-sub">
             BIST endeksleri · sektör rotasyonu · hisse listesi · Yahoo Finance (15 dk gecikme)
           </div>
+        </div>
+        <div className="page-actions">
+          <RefreshButton />
         </div>
       </div>
 
