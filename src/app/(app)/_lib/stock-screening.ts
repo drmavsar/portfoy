@@ -100,6 +100,22 @@ function pctChange(cur: number, ref: number | null | undefined): number | null {
   return ((cur - ref) / ref) * 100;
 }
 
+/**
+ * Önceki kapanışı normalize close serisinden türetir. Yahoo'nun
+ * `meta.chartPreviousClose` alanı range=1y isteğinde ~1 yıl önceki
+ * kapanıştır — günlük getiri için ASLA kullanılmamalı.
+ */
+function priorCloseFromSeries(price: number, closes: number[]): number | null {
+  if (closes.length === 0) return null;
+  const last = closes[closes.length - 1];
+  // last ≈ price → son mum bugünün kapanışı; T-1 = closes[-2]
+  if (last > 0 && Math.abs(last - price) / price < 0.005) {
+    return closes.length >= 2 ? closes[closes.length - 2] : null;
+  }
+  // aksi halde son mum dünün kapanışıdır (piyasa açık, bugünün mumu seride yok)
+  return last;
+}
+
 /** RS (relative strength) vs index: lookback gün önce ile şimdi arasında
  *  symbol/index oranındaki değişim. Pozitif → outperform. */
 function computeRS(
@@ -175,13 +191,16 @@ async function fetchOne(
         highs.push(h);
         lows.push(l);
         vols.push(typeof volumesRaw[i] === "number" ? (volumesRaw[i] as number) : 0);
-        if (timestamps[i]) ts.push(timestamps[i]);
+        // ts, closes ile birebir hizalı kalmalı — koşulsuz push
+        ts.push(timestamps[i] ?? 0);
       }
     }
     if (closes.length < 30 || !meta?.regularMarketPrice) return null;
 
     const price = meta.regularMarketPrice;
-    const prev = meta.previousClose ?? meta.chartPreviousClose ?? closes[closes.length - 2] ?? null;
+    // Günlük getiri önceki kapanışı YALNIZ normalize close serisinden alır;
+    // meta.chartPreviousClose range=1y'de ~1 yıl önceki fiyattır (günlük ≠ yıllık).
+    const prev = priorCloseFromSeries(price, closes);
 
     const lookback = (n: number) =>
       closes.length > n ? closes[closes.length - 1 - n] : null;
@@ -193,10 +212,9 @@ async function fetchOne(
     });
     const ytdRef = yearStartIdx > 0 ? closes[yearStartIdx] : null;
 
-    // 52 hafta yüksek/düşük (son ~252 trading day)
-    const oneYr = closes.slice(-252);
-    const high52 = Math.max(...oneYr);
-    const low52 = Math.min(...oneYr);
+    // 52 hafta yüksek/düşük (son ~252 trading day) — close değil gerçek high/low
+    const high52 = Math.max(...highs.slice(-252));
+    const low52 = Math.min(...lows.slice(-252));
 
     const s20 = sma(closes, 20);
     const s50 = sma(closes, 50);
