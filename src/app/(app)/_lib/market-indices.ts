@@ -27,9 +27,24 @@ const BIST_INDICES: Array<{ symbol: string; label: string; group: "main" | "sect
   { symbol: "XTEKS", label: "Tekstil",       group: "sector" },
 ];
 
+/**
+ * Günlük % bazı: Yahoo v8/chart `meta` previousClose döndürmez; düzeltilmiş
+ * close serisinden T-1 kapanışı çıkarılır (stock-prices.ts ile aynı mantık).
+ */
+function priorCloseFromSeries(price: number, closes: number[]): number | null {
+  if (closes.length === 0) return null;
+  const last = closes[closes.length - 1];
+  // last ≈ price → seri bugünü içeriyor; T-1 = sondan ikinci eleman
+  if (last > 0 && Math.abs(last - price) / price < 0.005) {
+    return closes.length >= 2 ? closes[closes.length - 2] : null;
+  }
+  // aksi halde son eleman zaten T-1 kapanışı (seri bugünü henüz içermiyor)
+  return last;
+}
+
 async function fetchYahoo(symbol: string): Promise<IndexQuote | null> {
   try {
-    // range=1mo → previousClose hâlâ T-1; ayrıca son ~22 günün close array'i ile sparkline
+    // range=1mo → son ~22 günün close array'i (sparkline + günlük % bazı)
     const res = await fetch(
       `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.IS?interval=1d&range=1mo`,
       {
@@ -41,11 +56,7 @@ async function fetchYahoo(symbol: string): Promise<IndexQuote | null> {
     const json = (await res.json()) as {
       chart?: {
         result?: Array<{
-          meta?: {
-            regularMarketPrice?: number;
-            chartPreviousClose?: number;
-            previousClose?: number;
-          };
+          meta?: { regularMarketPrice?: number };
           indicators?: { quote?: Array<{ close?: Array<number | null> }> };
         }>;
       };
@@ -54,10 +65,12 @@ async function fetchYahoo(symbol: string): Promise<IndexQuote | null> {
     const meta = r?.meta;
     if (!meta?.regularMarketPrice) return null;
     const price = meta.regularMarketPrice;
-    const prev = meta.previousClose ?? meta.chartPreviousClose ?? null;
-    const chg = prev ? ((price - prev) / prev) * 100 : null;
     const closes = (r?.indicators?.quote?.[0]?.close ?? [])
       .filter((x): x is number => typeof x === "number" && Number.isFinite(x));
+    // v8/chart meta'sında previousClose YOK; chartPreviousClose ise range başı
+    // (~1 ay önce) kapanışı — onu kullanmak günlük %'yi aylık %'ye çevirirdi.
+    const prev = priorCloseFromSeries(price, closes);
+    const chg = prev ? ((price - prev) / prev) * 100 : null;
     const item = BIST_INDICES.find((x) => x.symbol === symbol);
     return {
       symbol,
