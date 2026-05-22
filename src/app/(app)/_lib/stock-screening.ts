@@ -126,7 +126,12 @@ function epochMonthsBefore(base: Date, months: number): number {
     Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0),
   ).getUTCDate();
   const day = Math.min(base.getUTCDate(), lastDay);
-  return Math.floor(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), day) / 1000);
+  // Gün sonu (23:59:59): Yahoo günlük bar timestamp'i seans açılışında (~07:00
+  // UTC); gece yarısı verilirse hedef günün kendi barı "ts ≤ hedef" testine
+  // takılmaz ve bir önceki işlem günü seçilirdi.
+  return Math.floor(
+    Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), day, 23, 59, 59) / 1000,
+  );
 }
 
 /** RS (relative strength) vs index: lookback gün önce ile şimdi arasında
@@ -231,7 +236,7 @@ async function fetchOne(
     const quarterRef = closeOnOrBefore(epochMonthsBefore(lastDate, 3));
     // YTD: önceki yılın son işlem günü (31 Aralık'tan önceki ≤ kapanış)
     const ytdRef = closeOnOrBefore(
-      Math.floor(Date.UTC(lastDate.getUTCFullYear() - 1, 11, 31) / 1000),
+      Math.floor(Date.UTC(lastDate.getUTCFullYear() - 1, 11, 31, 23, 59, 59) / 1000),
     );
 
     // 52 hafta yüksek/düşük (son ~252 trading day) — close değil gerçek high/low
