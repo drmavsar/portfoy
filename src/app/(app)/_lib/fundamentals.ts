@@ -15,10 +15,11 @@ export type FundamentalsResult =
   | { ok: false; error: string };
 
 function baseUrl(): string {
-  // Node fetch mutlak URL ister; tarayıcı yok. Vercel'de VERCEL_URL set olur.
-  return process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : "http://localhost:3000";
+  // Node fetch mutlak URL ister. VERCEL_URL deployment'a özel KORUMALI URL'dir
+  // (Deployment Protection → server→server çağrısında 401). Herkese açık
+  // production alias (VERCEL_PROJECT_PRODUCTION_URL) tercih edilir.
+  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+  return host ? `https://${host}` : "http://localhost:3000";
 }
 
 export async function getFundamentals(symbol: string): Promise<FundamentalsResult> {

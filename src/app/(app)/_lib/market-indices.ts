@@ -90,9 +90,10 @@ async function fetchBistSectorsFromPython(baseUrl?: string): Promise<IndexQuote[
   try {
     // İlk önce relative URL (Vercel/Next.js içinde aynı host), Node fetch
     // mutlak URL ister; window olmadığı için absolute gerek.
-    const host = baseUrl ?? process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : "http://localhost:3000";
+    // VERCEL_URL deployment'a özel KORUMALI URL (Deployment Protection → 401);
+    // herkese açık production alias kullanılır.
+    const prodHost = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+    const host = baseUrl ?? (prodHost ? `https://${prodHost}` : "http://localhost:3000");
     const res = await fetch(`${host}/api/bist-sectors`, {
       next: { revalidate: 600, tags: ["stock-prices"] },
     });
