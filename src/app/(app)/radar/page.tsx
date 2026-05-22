@@ -6,7 +6,7 @@ import {
 } from "@/app/(app)/_lib/bist-index-members";
 import { getBistIndices } from "@/app/(app)/_lib/market-indices";
 import { getStockPricesExtended, type StockQuoteExt } from "@/app/(app)/_lib/stock-prices";
-import { listAssets } from "@/app/(app)/_lib/wealth-actions";
+import { listAssets, listHoldings } from "@/app/(app)/_lib/wealth-actions";
 import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
 
@@ -126,11 +126,12 @@ function MoversCard({
 export const dynamic = "force-dynamic";
 
 export default async function RadarPage() {
-  const [assets, indices, bistSymbols, symbolIndexMap] = await Promise.all([
+  const [assets, indices, bistSymbols, symbolIndexMap, holdings] = await Promise.all([
     listAssets(),
     getBistIndices(),
     getXK100Symbols(),
     getSymbolIndexMap(),
+    listHoldings(),
   ]);
 
   // Hisse listesi piyasa geneli — BIST 100 üye listesi taranır (sadece
@@ -139,6 +140,17 @@ export default async function RadarPage() {
 
   const assetMap = new Map(
     assets.filter((a) => a.asset_class === "equity_tr").map((a) => [a.symbol, a]),
+  );
+
+  // "Portföyünde" ● işareti gerçek pozisyona dayanır — assets satırının
+  // varlığına değil. assets master artık tüm BIST 100'ü kapsadığı için
+  // ownership yalnız net adedi > 0 olan holding'lerden türetilir.
+  const assetIdToSymbol = new Map(assets.map((a) => [a.id, a.symbol]));
+  const ownedSymbols = new Set(
+    holdings
+      .filter((h) => h.quantity > 0)
+      .map((h) => assetIdToSymbol.get(h.asset_id))
+      .filter((s): s is string => !!s),
   );
 
   const stockRows: Mover[] = bistSymbols
@@ -150,7 +162,7 @@ export default async function RadarPage() {
         symbol: sym,
         name: a?.name ?? info?.name ?? sym,
         external_url: a?.external_url ?? null,
-        owned: !!a,
+        owned: ownedSymbols.has(sym),
         indices: info?.indices ?? [],
         quote: quotes[sym],
       };
