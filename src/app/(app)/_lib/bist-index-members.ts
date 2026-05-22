@@ -122,3 +122,33 @@ export async function getXK100Symbols(): Promise<string[]> {
   console.log("[bist-csv] filter sıfır eşleşti, statik liste kullanılıyor");
   return BIST_100_FALLBACK;
 }
+
+export interface IndexBadge {
+  code: string;
+  name: string;
+}
+
+export interface SymbolIndexInfo {
+  name: string;
+  indices: IndexBadge[];
+}
+
+/**
+ * Sembol → ait olduğu tüm BIST endeksleri + temsili ad. Aynı CSV'den türetilir;
+ * getXK100Symbols yalnız XU100 satırlarını alırken bu, her endeks üyeliğini tutar.
+ */
+export async function getSymbolIndexMap(): Promise<Record<string, SymbolIndexInfo>> {
+  const all = await getBistIndexMembers();
+  const map: Record<string, SymbolIndexInfo> = {};
+  for (const m of all) {
+    if (!m.symbol) continue;
+    const entry = map[m.symbol] ?? { name: m.symbol, indices: [] };
+    if (m.name && m.name !== m.symbol) entry.name = m.name;
+    const code = (m.index_code ?? "").toUpperCase();
+    if (code && !entry.indices.some((x) => x.code === code)) {
+      entry.indices.push({ code, name: m.index_name || code });
+    }
+    map[m.symbol] = entry;
+  }
+  return map;
+}
