@@ -23,6 +23,7 @@ import { CashflowCard } from "@/app/(app)/_components/cashflow-card";
 import { PersonEquityChart } from "@/app/(app)/_components/person-equity-chart";
 import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
+import { istanbulDateFromUnix, istanbulToday, istanbulYesterday } from "@/lib/finance/istanbul-date";
 
 interface AssetClassSlice {
   label: string;
@@ -229,9 +230,9 @@ export default async function OzetPage() {
     classBreakdown.set(classKey, inner);
   };
   // Bugün TR günü mü kontrolü (üst tarafta hesapladık, tekrar)
-  const todayIso2 = new Date().toISOString().slice(0, 10);
+  const todayIso2 = istanbulToday();
   const isTodayUnix = (s: number | null | undefined) =>
-    s ? new Date(s * 1000).toISOString().slice(0, 10) === todayIso2 : false;
+    s ? istanbulDateFromUnix(s) === todayIso2 : false;
   // Hesaplar
   for (const a of accounts) {
     const c = classifyAccountClass(a.currency);
@@ -385,10 +386,10 @@ export default async function OzetPage() {
   // (resmi tatil / hafta sonu) — günlük değişim 0 gösterilir, yoksa
   // dünkü kapanış vs. dün-evvelki kapanış farkı (Yahoo'nun verdiği son
   // değişim) yanlışlıkla "bugün" gibi görünür.
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = istanbulToday();
   const isToday = (unixSec: number | null | undefined): boolean => {
     if (!unixSec) return false;
-    return new Date(unixSec * 1000).toISOString().slice(0, 10) === todayIso;
+    return istanbulDateFromUnix(unixSec) === todayIso;
   };
 
   // Hisse meta için Yahoo'nun en geç regularMarketTime'ını al
@@ -420,17 +421,25 @@ export default async function OzetPage() {
   const hisseEntry = dayChangeMap.get("equity");
   if (hisseEntry && yahooLastUpdate) hisseEntry.lastUpdate = yahooLastUpdate;
 
-  // Nakit (TRY hesapları) günlük değişimini daily_snapshots tablosundan hesapla.
-  // En son snapshot bugününki (bu sayfa açıldığında upsert oldu). Bir önceki
-  // snapshot dünün (veya en son ziyaret edilen günün) kayıttır. Fark = bugünkü
-  // nakit değişimi (gelir geldi / gider çıktı / vs).
+  // Nakit (TRY hesapları) günlük değişimini daily_snapshots'tan hesapla.
+  // Kanonik snapshot her gece TR 23:00'ta cron tarafından yazılır; dolayısıyla
+  // "dünden beri değişim" = canlı cashTotal − dünkü 23:00 snapshot. `length-2`
+  // indeksi gün atlamalarında yanıltır, o yüzden açıkça İstanbul takvim dünü
+  // aranır; o güne ait satır yoksa değişim 0 gösterilir.
   const cashEntry = dayChangeMap.get("cash_try");
-  if (cashEntry && dailySnapshots.length >= 2) {
-    const prev = dailySnapshots[dailySnapshots.length - 2];
-    const prevCash = Number(prev.cash_try ?? 0);
-    cashEntry.change = cashTotal - prevCash;
-    cashEntry.source = `daily_snapshots · ${prev.snapshot_date}'den beri`;
-    cashEntry.lastUpdate = prev.snapshot_date;
+  if (cashEntry) {
+    const yesterdayIso = istanbulYesterday();
+    const prev = dailySnapshots.find((s) => s.snapshot_date === yesterdayIso);
+    if (prev) {
+      const prevCash = Number(prev.cash_try ?? 0);
+      cashEntry.change = cashTotal - prevCash;
+      cashEntry.source = `daily_snapshots · dün 23:00'tan beri`;
+      cashEntry.lastUpdate = prev.snapshot_date;
+    } else {
+      cashEntry.change = 0;
+      cashEntry.source = "daily_snapshots · dünkü snapshot yok";
+      cashEntry.lastUpdate = null;
+    }
   }
 
   const dayChangeRows = Array.from(dayChangeMap.values())

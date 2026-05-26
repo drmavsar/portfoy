@@ -2,6 +2,13 @@
 
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
 import { createClient } from "@/lib/supabase/server";
+import { istanbulHour, istanbulToday } from "@/lib/finance/istanbul-date";
+
+// Page-load fallback için TR saati eşiği. Cron 23:00 TR'de kanonik snapshot
+// yazar; bu saatten önce sayfa açılışında DB'ye yazmıyoruz ki intra-day değer
+// gün-sonu değerini ezmesin. Cron arızalanırsa bu saatten sonra sayfa açıldığında
+// fallback olarak yazılır.
+const SNAPSHOT_FALLBACK_HOUR_TR = 23;
 
 export interface DailySnapshotRow {
   snapshot_date: string;
@@ -39,7 +46,7 @@ export async function captureDailySnapshot(input: {
   equity_mv: number;
   crypto_try: number;
   equity_by_person: Record<string, number>;
-}): Promise<{ ok: boolean; created?: boolean; error?: string }> {
+}): Promise<{ ok: boolean; created?: boolean; skipped?: boolean; error?: string }> {
   if (!(await isSupabaseConfigured())) {
     return { ok: false, error: "Supabase yapılandırılmamış." };
   }
@@ -47,7 +54,7 @@ export async function captureDailySnapshot(input: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Giriş yapmadın." };
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = istanbulToday();
 
   // Bugün için zaten var mı?
   const { data: existing } = await supabase
@@ -58,6 +65,13 @@ export async function captureDailySnapshot(input: {
     .maybeSingle();
 
   if (existing) return { ok: true, created: false };
+
+  // Cron 23:00 TR'de kanonik snapshot'ı yazar. Bu saatten önce sayfa açılışı
+  // intra-day değerlerle satır oluşturmasın — yoksa cron'un gün-sonu değeri
+  // ezilmiş olur ve "dünden beri değişim" intra-day kaymadan etkilenir.
+  if (istanbulHour() < SNAPSHOT_FALLBACK_HOUR_TR) {
+    return { ok: true, skipped: true };
+  }
 
   const { error } = await supabase.from("daily_snapshots").insert({
     user_id: user.id,

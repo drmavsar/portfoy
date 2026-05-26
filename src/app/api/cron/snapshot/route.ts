@@ -1,8 +1,11 @@
 /**
  * Vercel Cron — günlük servet snapshot'ı.
  *
- * vercel.json'da `crons: [{ path: "/api/cron/snapshot", schedule: "30 18 * * *" }]`
- * (UTC 18:30 → TR 21:30, BIST kapanışı sonrası).
+ * vercel.json'da `crons: [{ path: "/api/cron/snapshot", schedule: "0 20 * * *" }]`
+ * (UTC 20:00 → TR 23:00, gün sonu kanonik snapshot).
+ *
+ * `snapshot_date` İstanbul takvim gününe göre yazılır — UTC ile TR arasındaki
+ * 3 saatlik kayma cron çalışırken aynı günü hedeflesin diye.
  *
  * Authorization: Vercel cron `Authorization: Bearer ${CRON_SECRET}` gönderir.
  * Service role ile Supabase'e bağlanıp tüm hesap sahibi user'lar için snapshot
@@ -19,6 +22,7 @@ import { createClient } from "@supabase/supabase-js";
 
 import { getAssetRates } from "@/app/(app)/_lib/asset-rates";
 import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
+import { istanbulToday } from "@/lib/finance/istanbul-date";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -208,7 +212,7 @@ export async function GET(req: NextRequest) {
   // FX rates bir kez çekilir, tüm user'lar için kullanılır
   const fxRates = await getAssetRates();
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = istanbulToday();
   const results: Array<{ user_id: string; ok: boolean; total?: number; error?: string }> = [];
 
   for (const userId of userIds) {
