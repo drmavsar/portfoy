@@ -3,7 +3,10 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import type { Database } from "@/lib/types/database";
 
-const PUBLIC_PATHS = ["/login", "/auth", "/api/health"];
+// `/api/cron` route handler'ları Vercel cron'un gönderdiği Bearer token ile
+// kendileri kimlik doğrular; middleware'in Supabase user kontrolüyle /login'e
+// redirect etmemesi gerekir, aksi halde cron route'a hiç ulaşamaz.
+const PUBLIC_PATHS = ["/login", "/auth", "/api/health", "/api/cron"];
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
