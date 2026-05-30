@@ -3,6 +3,8 @@
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import {
+  applyTaxToCagr,
+  applyWithholdingTax,
   computeFundReturns,
   median,
   vsCategoryDelta,
@@ -10,7 +12,13 @@ import {
   type FundReturnsComputation,
   type NavPoint,
 } from "./returns-logic";
-import type { FundReturns } from "./types";
+import { resolveTaxRulePure } from "./tax-rules-logic";
+import type {
+  Fund,
+  FundReturns,
+  FundTaxKind,
+  FundTaxRule,
+} from "./types";
 
 const DEFAULT_CPI_SERIES = "CPI_TR_GENERAL";
 
@@ -60,17 +68,33 @@ export async function refreshAllFundReturns(): Promise<{
   }
   const supabase = await createServiceClient();
 
-  // 1) Aktif fonlar (+ category_id)
+  // 1) Aktif fonlar — net hesabı için tax_confidence ve tüm flag'ler lazım
   const { data: fundsData, error: fundsErr } = await supabase
     .from("funds")
-    .select("code, category_id")
+    .select("code, category_id, tax_confidence")
     .eq("is_active", true);
   if (fundsErr) {
     return { ok: false, processed: 0, upserted: 0, skipped: [], duration_ms: Date.now() - start, error: fundsErr.message };
   }
-  const funds = (fundsData ?? []) as Array<{ code: string; category_id: number }>;
+  type FundLite = Pick<Fund, "code" | "category_id" | "tax_confidence">;
+  const funds = (fundsData ?? []) as FundLite[];
   if (funds.length === 0) {
     return { ok: true, processed: 0, upserted: 0, skipped: [], duration_ms: Date.now() - start };
+  }
+
+  // 1b) Vergi kuralları + kategori default'ları (resolveTaxRulePure için)
+  const { data: rulesData } = await supabase
+    .from("fund_tax_rules")
+    .select("*")
+    .eq("is_active", true);
+  const taxRules = (rulesData ?? []) as FundTaxRule[];
+
+  const { data: catData } = await supabase
+    .from("fund_categories")
+    .select("id, default_tax_kind");
+  const defaultKindByCategory = new Map<number, FundTaxKind>();
+  for (const c of (catData ?? []) as Array<{ id: number; default_tax_kind: FundTaxKind }>) {
+    defaultKindByCategory.set(c.id, c.default_tax_kind);
   }
 
   // 2) NAV serileri — son 6 yıl yeter (5Y CAGR için)
@@ -110,7 +134,7 @@ export async function refreshAllFundReturns(): Promise<{
 
   // 4) Her fon için brüt + reel hesapla
   const skipped: string[] = [];
-  const computations = new Map<string, { fund: { code: string; category_id: number }; comp: FundReturnsComputation }>();
+  const computations = new Map<string, { fund: FundLite; comp: FundReturnsComputation }>();
   for (const fund of funds) {
     const series = seriesByFund.get(fund.code);
     if (!series || series.length === 0) {
@@ -140,9 +164,28 @@ export async function refreshAllFundReturns(): Promise<{
     });
   }
 
-  // 6) Payload + UPSERT
+  // 6) Net getiri (stopaj sonrası) — Sprint-3 PR-3
+  //    Her pencere için resolveTaxRulePure(fund, acquired, sold) çağrılır.
+  //    Lot-bazlı tarih semantiği: 1Y için (as_of − 1y) iktisap; 3Y/5Y benzer.
+  function shiftYears(iso: string, years: number): string {
+    const d = new Date(`${iso}T00:00:00Z`);
+    d.setUTCFullYear(d.getUTCFullYear() - years);
+    return d.toISOString().slice(0, 10);
+  }
+
   const payload = [...computations.values()].map(({ fund, comp }) => {
     const cat = medianByCategory.get(fund.category_id);
+    const defaultKind = defaultKindByCategory.get(fund.category_id) ?? "BELIRSIZ";
+
+    // Vergi kuralı: 1Y pencere üzerinden çözünür (PR-3 için tek as_of)
+    // Net hesabı her pencerede aynı kural varsayımıyla yapılır.
+    const acquired1y = shiftYears(comp.as_of, 1);
+    const tax = resolveTaxRulePure(fund, taxRules, defaultKind, acquired1y, comp.as_of);
+
+    const net_1y = applyWithholdingTax(comp.gross_1y, tax.effective_rate);
+    const net_3y_cagr = applyTaxToCagr(comp.gross_3y_cagr, tax.effective_rate, 3);
+    const net_5y_cagr = applyTaxToCagr(comp.gross_5y_cagr, tax.effective_rate, 5);
+
     return {
       fund_code: fund.code,
       as_of: comp.as_of,
@@ -160,6 +203,13 @@ export async function refreshAllFundReturns(): Promise<{
       real_5y_cagr: comp.real_5y_cagr,
       vs_category_1y: vsCategoryDelta(comp.gross_1y, cat?.median_1y ?? null),
       vs_category_3y: vsCategoryDelta(comp.gross_3y_cagr, cat?.median_3y ?? null),
+      net_1y,
+      net_3y_cagr,
+      net_5y_cagr,
+      applied_tax_kind: tax.kind,
+      applied_tax_rate: tax.effective_rate,
+      tax_confidence: tax.confidence,
+      tax_source: tax.source,
       computed_at: new Date().toISOString(),
       computed_from_period: comp.computed_from_period,
       warnings: comp.warnings,
