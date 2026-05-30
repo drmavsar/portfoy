@@ -188,13 +188,9 @@ export async function fetchEvdsCpi(opts: EvdsFetchOptions): Promise<EvdsFetchRes
       diagnostic: { api_key_len: 0 },
     };
   }
-  if (apiKey.length < 16) {
-    return {
-      ok: false,
-      error: `EVDS_API_KEY anlamsız kısa (len=${apiKey.length})`,
-      diagnostic: { api_key_len: apiKey.length },
-    };
-  }
+  // Not: EVDS yeni sistemi 10 karakter key verebilir (kullanıcı doğrulandı).
+  // Minimum uzunluk validasyonu kaldırıldı; gerçek geçerlilik EVDS API
+  // yanıtından anlaşılır (401/403 + body snippet diagnostic'e düşer).
 
   const url = buildEvdsUrl(evdsSeries, opts.start, opts.end, apiKey);
   const urlRedacted = url.replace(apiKey, "***");
