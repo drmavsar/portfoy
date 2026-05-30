@@ -80,13 +80,22 @@ export default async function FonlarDashboardPage() {
             <strong>{persona.name}</strong> persona aktif
           </div>
         </div>
-        <Link
-          href="/fonlar/komite"
-          className="chip"
-          style={{ textDecoration: "none", whiteSpace: "nowrap" }}
-        >
-          <Icon name="report" size={12} /> Fon Komitesi
-        </Link>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Link
+            href="/fonlar/komite"
+            className="chip"
+            style={{ textDecoration: "none", whiteSpace: "nowrap" }}
+          >
+            <Icon name="report" size={12} /> Fon Komitesi
+          </Link>
+          <Link
+            href="/fonlar/karsilastir"
+            className="chip"
+            style={{ textDecoration: "none", whiteSpace: "nowrap" }}
+          >
+            <Icon name="screener" size={12} /> Karşılaştır
+          </Link>
+        </div>
       </div>
 
       <div style={{ display: "grid", gap: 16 }}>
