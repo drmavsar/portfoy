@@ -213,16 +213,20 @@ describe("fetchEvdsCpi — hata yolları", () => {
     expect(r.diagnostic?.api_key_len).toBe(0);
   });
 
-  it("Kısa API key → ok=false + len reportu", async () => {
+  it("Kısa API key kabul edilir (EVDS yeni sistemi 10 char verir)", async () => {
+    // EVDS3 yeni sistemde key uzunluğu daha kısa olabilir. Min uzunluk
+    // validasyonu kaldırıldı; gerçek geçerlilik EVDS yanıtından belli olur.
+    const fetchImpl = async () =>
+      jsonResponse({ totalCount: 1, items: [{ Tarih: "2025-01", TP_FG_J0: "100" }] });
     const r = await fetchEvdsCpi({
       series: "CPI_TR_GENERAL",
       start: "2025-01",
       end: "2025-03",
-      apiKey: "short",
+      apiKey: "IsyBcVi1fg", // 10 char — kullanıcı tarafından doğrulanmış format
+      fetchImpl,
     });
-    expect(r.ok).toBe(false);
-    expect(r.error).toContain("anlamsız kısa");
-    expect(r.diagnostic?.api_key_len).toBe(5);
+    expect(r.ok).toBe(true);
+    expect(r.fetched_periods).toBe(1);
   });
 
   it("HTTP 500 → ok=false + status_code + body_snippet", async () => {
