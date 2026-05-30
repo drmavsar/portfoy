@@ -34,7 +34,8 @@ async function fetchNavSeries(
     .in("fund_code", codes)
     .gte("as_of", cutoffIso)
     .order("fund_code")
-    .order("as_of");
+    .order("as_of")
+    .range(0, 49999); // 5 fon × ~1250 satır, default 1000 limitini bypass et
   const out: Record<string, Array<{ as_of: string; nav: number }>> = {};
   for (const row of (data ?? []) as Array<{
     fund_code: string;

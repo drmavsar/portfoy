@@ -135,12 +135,15 @@ export async function refreshAllFundReturns(): Promise<{
   const cutoff = new Date();
   cutoff.setFullYear(cutoff.getFullYear() - 6);
   const cutoffIso = cutoff.toISOString().slice(0, 10);
+  // .range() ile PostgREST default 1000 satır limitini bypass et.
+  // 155 fon × ~1250 satır = ~190k; geniş tampon ver (500k).
   const { data: pricesData, error: pricesErr } = await supabase
     .from("fund_prices")
     .select("fund_code, as_of, nav")
     .gte("as_of", cutoffIso)
     .order("fund_code", { ascending: true })
-    .order("as_of", { ascending: true });
+    .order("as_of", { ascending: true })
+    .range(0, 499999);
   if (pricesErr) {
     return {
       ok: false,

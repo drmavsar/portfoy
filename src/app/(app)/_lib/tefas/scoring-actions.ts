@@ -141,12 +141,15 @@ export async function refreshAllFundScores(): Promise<{
   const cutoff = new Date();
   cutoff.setFullYear(cutoff.getFullYear() - 4);
   const cutoffIso = cutoff.toISOString().slice(0, 10);
+  // .range() ile PostgREST default 1000 satır limitini bypass et.
+  // 155 fon × ~1000 satır (4Y) = ~155k; geniş tampon ver (500k).
   const { data: pricesData } = await supabase
     .from("fund_prices")
     .select("fund_code, as_of, nav")
     .gte("as_of", cutoffIso)
     .order("fund_code", { ascending: true })
-    .order("as_of", { ascending: true });
+    .order("as_of", { ascending: true })
+    .range(0, 499999);
   const seriesByFund = new Map<string, NavPoint[]>();
   for (const row of (pricesData ?? []) as Array<{ fund_code: string; as_of: string; nav: number }>) {
     const list = seriesByFund.get(row.fund_code) ?? [];
