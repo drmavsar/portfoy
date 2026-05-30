@@ -1,51 +1,45 @@
 /**
- * TEFAS NAV POC — Sprint-2 PR-1 acceptance test.
+ * TEFAS NAV POC — Sprint-2 PR-1 acceptance test (PR-B sonrası güncellendi).
  *
- * Vercel preview deploy edilince çalıştırılır:
- *   TEFAS_BASE_URL="https://<preview>.vercel.app" npm run tefas:prices:poc
+ * Önceden `/api/tefas-prices` (Python) endpoint'ini çağırıyordu; artık doğrudan
+ * Node TS port'unu (`fetchTefasNav`) test eder. Vercel deploy gerekmez.
  *
- * Lokal Next dev için:
- *   TEFAS_BASE_URL="http://localhost:3000" npm run tefas:prices:poc
+ * Çalıştırma:
+ *   npm run tefas:prices:poc
  *
- * 5 örnek fon için NAV çeker; sonucu konsola yazar.
+ * Opsiyonel: TEFAS_PERIOD_MONTHS=1|3|6|12|36|60 (default 1).
  *
  * Beklenen davranış:
  *   - HFI, KMF, KPI, KIS, GUK için NAV ve tarih döner
  *   - Bilinmeyen fon kodu (XYZ_FAKE) failed[] içine düşer, hata atmaz
- *   - Yanıt 200 OK, ok=true
+ *   - ok=true
  */
+
+import { fetchTefasNav, type TefasPeriod } from "../src/app/(app)/_lib/tefas/tefas-nav-fetch";
 
 const POC_CODES = ["HFI", "KMF", "KPI", "KIS", "GUK"];
 const INVALID_CODE = "XYZ_FAKE"; // hata davranışı testi
 
-const baseUrl = process.env.TEFAS_BASE_URL;
-if (!baseUrl) {
-  console.error("TEFAS_BASE_URL env var gerekli (örn. http://localhost:3000)");
-  process.exit(1);
+function parsePeriod(raw: string | undefined): TefasPeriod {
+  const valid = new Set<TefasPeriod>([1, 3, 6, 12, 36, 60]);
+  const n = Number(raw ?? "1");
+  if (valid.has(n as TefasPeriod)) return n as TefasPeriod;
+  console.error(`Geçersiz TEFAS_PERIOD_MONTHS=${raw}, default 1 kullanılıyor.`);
+  return 1;
 }
-const base: string = baseUrl;
 
 async function main() {
-  const codes = [...POC_CODES, INVALID_CODE].join(",");
-  const url = `${base.replace(/\/$/, "")}/api/tefas-prices?codes=${codes}`;
-  console.log(`GET ${url}`);
+  const periodMonths = parsePeriod(process.env.TEFAS_PERIOD_MONTHS);
+  const codes = [...POC_CODES, INVALID_CODE];
+  console.log(`fetchTefasNav(${JSON.stringify(codes)}, { periodMonths: ${periodMonths} })`);
 
-  const res = await fetch(url);
-  console.log(`HTTP ${res.status}`);
-
-  if (!res.ok) {
-    const body = await res.text();
-    console.error("Beklenmedik statü:", body.slice(0, 500));
-    process.exit(2);
-  }
-
-  const data = await res.json();
+  const data = await fetchTefasNav(codes, { periodMonths });
   console.log(JSON.stringify(data, null, 2));
 
   const expected = new Set(POC_CODES);
-  const fetchedCodes = new Set((data.prices ?? []).map((p: { code: string }) => p.code));
+  const fetchedCodes = new Set(data.prices.map((p) => p.code));
   const missing = [...expected].filter((c) => !fetchedCodes.has(c));
-  const failedSet = new Set(data.failed ?? []);
+  const failedSet = new Set(data.failed);
 
   let exit = 0;
   if (data.ok !== true) {
