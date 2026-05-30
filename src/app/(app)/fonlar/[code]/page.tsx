@@ -34,7 +34,8 @@ async function fetchNavSeries(code: string, lookbackDays: number = 365 * 5) {
     .select("as_of, nav")
     .eq("fund_code", code)
     .gte("as_of", cutoff.toISOString().slice(0, 10))
-    .order("as_of", { ascending: true });
+    .order("as_of", { ascending: true })
+    .range(0, 9999); // 5Y = ~1250 satır, default 1000 limitini bypass et
   return (data ?? []) as Array<{ as_of: string; nav: number }>;
 }
 
