@@ -1,5 +1,6 @@
 import type {
   CpiMonthly,
+  FundReturns,
   FundReturnsIngestLog,
   FundScoresIngestLog,
   TefasIngestLog,
@@ -11,6 +12,8 @@ interface Props {
   lastReturnsRefresh: FundReturnsIngestLog | null;
   lastScoresRefresh: FundScoresIngestLog | null;
   latestCpi: CpiMonthly | null;
+  /** CPI lag fallback durumunu göstermek için returns cache satırları. */
+  returns?: FundReturns[];
 }
 
 function daysSince(iso: string | null): number | null {
@@ -49,13 +52,31 @@ export function SystemHealthStrip({
   lastReturnsRefresh,
   lastScoresRefresh,
   latestCpi,
+  returns = [],
 }: Props) {
   const navDays = daysSince(lastNavIngest?.ran_at ?? null);
   const returnsDays = daysSince(lastReturnsRefresh?.ran_at ?? null);
   const scoresDays = daysSince(lastScoresRefresh?.ran_at ?? null);
   const cpiAge = latestCpi ? daysSince(`${latestCpi.period_month}-15`) : null;
 
-  const chips = [
+  // CPI lag fallback metriği: kaç fonun real_* değeri stale CPI ile hesaplandı
+  let fallbackCount = 0;
+  let maxLagMonths = 0;
+  for (const r of returns) {
+    const ws = r.warnings ?? [];
+    if (ws.includes("cpi_lag_fallback_used")) {
+      fallbackCount++;
+      for (const w of ws) {
+        const m = /^cpi_lag_months=(\d+)$/.exec(w);
+        if (m) {
+          const n = Number(m[1]);
+          if (n > maxLagMonths) maxLagMonths = n;
+        }
+      }
+    }
+  }
+
+  const chips: Array<{ label: string; info: string; status: "ok" | "warn" | "stale" }> = [
     {
       label: "NAV ingest",
       info: lastNavIngest ? `${navDays}g önce · ${lastNavIngest.succeeded}/${lastNavIngest.requested}` : "hiç çalışmadı",
@@ -77,6 +98,14 @@ export function SystemHealthStrip({
       status: latestCpi ? statusFor(cpiAge, 35, 60) : "stale",
     },
   ];
+
+  if (fallbackCount > 0) {
+    chips.push({
+      label: "CPI fallback",
+      info: `${fallbackCount} fon · gecikme ${maxLagMonths} ay`,
+      status: "warn",
+    });
+  }
 
   return (
     <div
