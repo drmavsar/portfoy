@@ -25,6 +25,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const DEFAULT_SERIES = "CPI_TR_GENERAL";
+const WRAPPER_VERSION = "2026-05-30-pr135-baseurl-fix";
 
 interface CpiIngestPyResponse {
   ok: boolean;
@@ -43,17 +44,29 @@ interface CpiIngestPyResponse {
   error?: string;
 }
 
+/** Tüm cevaplara wrapper_version field + x-wrapper-version header ekler. */
+function tag<T extends Record<string, unknown>>(
+  body: T,
+  init: { status?: number } = {},
+): NextResponse<T & { wrapper_version: string }> {
+  const payload = { ...body, wrapper_version: WRAPPER_VERSION };
+  return NextResponse.json(payload, {
+    status: init.status,
+    headers: { "x-wrapper-version": WRAPPER_VERSION },
+  });
+}
+
 export async function GET(req: NextRequest) {
   const start = Date.now();
   const auth = req.headers.get("authorization");
   if (!process.env.CRON_SECRET || auth !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return tag({ error: "Unauthorized" }, { status: 401 });
   }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceKey) {
-    return NextResponse.json(
+    return tag(
       { error: "Missing env: SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_URL" },
       { status: 500 },
     );
@@ -65,8 +78,9 @@ export async function GET(req: NextRequest) {
   const endParam = req.nextUrl.searchParams.get("end");
 
   const baseUrl =
+    // ÖNCE production alias (deployment protection yok) — VERCEL_URL preview
+    // URL'i döndürür ve 401 alır.
     process.env.NEXT_PUBLIC_BASE_URL ??
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ??
     req.nextUrl.origin;
 
   // 1) Python endpoint'ten serileri çek — debug + tarih parametreleri forward
@@ -81,7 +95,7 @@ export async function GET(req: NextRequest) {
   try {
     res = await fetch(pyUrl.toString(), { cache: "no-store" });
   } catch (err) {
-    return NextResponse.json(
+    return tag(
       {
         ok: false,
         stage: "fetch_python_endpoint",
@@ -100,7 +114,7 @@ export async function GET(req: NextRequest) {
     py = JSON.parse(rawBody) as CpiIngestPyResponse & Record<string, unknown>;
   } catch {
     // Python yanıtı JSON değil (Vercel 500 HTML sayfası, vb.) — full body döndür
-    return NextResponse.json(
+    return tag(
       {
         ok: false,
         stage: "python_response_not_json",
@@ -115,7 +129,7 @@ export async function GET(req: NextRequest) {
 
   // Debug mode: Python'ın tüm yanıtını yansıt
   if (debug) {
-    return NextResponse.json(
+    return tag(
       {
         ok: py.ok ?? false,
         stage: "debug",
@@ -130,7 +144,7 @@ export async function GET(req: NextRequest) {
 
   if (!res.ok || !py.ok) {
     // Python tarafından dönen hatayı tüm metadata ile yansıt
-    return NextResponse.json(
+    return tag(
       {
         ok: false,
         stage: "fetch_evds",
@@ -145,7 +159,7 @@ export async function GET(req: NextRequest) {
 
   const rows = py.rows ?? [];
   if (rows.length === 0) {
-    return NextResponse.json({
+    return tag({
       ok: true,
       series_code: seriesCode,
       fetched_periods: 0,
@@ -178,7 +192,7 @@ export async function GET(req: NextRequest) {
     });
 
   if (upsertErr) {
-    return NextResponse.json(
+    return tag(
       {
         ok: false,
         stage: "upsert",
@@ -192,7 +206,7 @@ export async function GET(req: NextRequest) {
 
   const latestPeriod = rows[rows.length - 1]?.period_month ?? null;
 
-  return NextResponse.json({
+  return tag({
     ok: true,
     series_code: seriesCode,
     fetched_periods: rows.length,

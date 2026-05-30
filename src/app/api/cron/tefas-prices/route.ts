@@ -59,12 +59,10 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Base URL — kendi Python endpoint'imizi çağırmak için. Tercih sırası:
-  //   NEXT_PUBLIC_BASE_URL > VERCEL_URL > req.nextUrl.origin
-  const baseUrl =
-    process.env.NEXT_PUBLIC_BASE_URL ??
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ??
-    req.nextUrl.origin;
+  // Base URL — kendi Python endpoint'imizi çağırmak için.
+  // VERCEL_URL preview alias döndürür ve "Deployment Protection" 401 verir;
+  // bu yüzden production alias (req.nextUrl.origin) öncelikli.
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? req.nextUrl.origin;
 
   const supabase = createClient(url, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },

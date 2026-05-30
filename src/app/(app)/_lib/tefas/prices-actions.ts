@@ -62,10 +62,12 @@ export async function fetchTefasPrices(
     return { ok: true, source: "tefas", succeeded: 0, failed: [], prices: [] };
   }
 
+  // VERCEL_URL preview alias'ını döndürür; deployment protection altında 401 alır.
+  // Caller (cron route) baseUrl'i açıkça req.nextUrl.origin ile vermeli.
+  // Fallback olarak NEXT_PUBLIC_BASE_URL veya localhost.
   const baseUrl =
     options.baseUrl ??
     process.env.NEXT_PUBLIC_BASE_URL ??
-    process.env.VERCEL_URL ??
     "http://localhost:3000";
   const normalized = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
   const maxAttempts = Math.max(1, options.maxAttempts ?? 1);
