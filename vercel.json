@@ -17,10 +17,6 @@
     "api/tefas-prices.py": {
       "memory": 512,
       "maxDuration": 60
-    },
-    "api/cpi-ingest.py": {
-      "memory": 256,
-      "maxDuration": 30
     }
   },
   "crons": [
