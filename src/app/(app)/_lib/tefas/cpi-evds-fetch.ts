@@ -9,7 +9,10 @@
 // Pure: hiçbir DB veya Next.js bağımlılığı yok. `fetch` global olarak çağrılır
 // (test'te mock'lanır).
 
-const EVDS_BASE = "https://evds2.tcmb.gov.tr/service/evds/series";
+// EVDS3 yeni endpoint (2024+). Yeni key'ler evds3.tcmb.gov.tr portalından
+// geliyor ve EVDS3 backend'ine bağlı; EVDS2 endpoint'i bu key'i kabul etmez.
+// Override için env var: EVDS_BASE_URL (tam URL, "/series" suffix dahil).
+const EVDS_BASE_DEFAULT = "https://evds3.tcmb.gov.tr/igmevdsms-dis/series";
 
 export const SERIES_MAP: Record<string, string> = {
   // Bizim kanonik kodumuz → TCMB EVDS seri kodu
@@ -23,6 +26,11 @@ export interface EvdsFetchOptions {
   start: string; // "YYYY-MM"
   end: string; // "YYYY-MM"
   apiKey: string;
+  /**
+   * EVDS base URL override. Default `EVDS_BASE_DEFAULT` (evds3).
+   * Eski evds2 endpoint'i için: "https://evds2.tcmb.gov.tr/service/evds/series"
+   */
+  baseUrl?: string;
   /** İsteğe bağlı fetch override (test için). */
   fetchImpl?: typeof fetch;
 }
@@ -121,7 +129,13 @@ export function buildCpiRows(
 }
 
 /** EVDS HTTP URL'i kur. `key` hem header hem query'de (geriye dönük). */
-function buildEvdsUrl(evdsSeries: string, start: string, end: string, apiKey: string): string {
+function buildEvdsUrl(
+  evdsSeries: string,
+  start: string,
+  end: string,
+  apiKey: string,
+  baseOverride?: string,
+): string {
   const [sy, sm] = start.split("-");
   const [ey, em] = end.split("-");
   const startEvds = `01-${sm.padStart(2, "0")}-${sy.padStart(4, "0")}`;
@@ -136,7 +150,8 @@ function buildEvdsUrl(evdsSeries: string, start: string, end: string, apiKey: st
     decimalSeperator: ".",
     key: apiKey,
   });
-  return `${EVDS_BASE}=${evdsSeries}&${params.toString()}`;
+  const base = baseOverride ?? EVDS_BASE_DEFAULT;
+  return `${base}=${evdsSeries}&${params.toString()}`;
 }
 
 /** HTML detect (kolay heuristic). */
@@ -192,7 +207,7 @@ export async function fetchEvdsCpi(opts: EvdsFetchOptions): Promise<EvdsFetchRes
   // Minimum uzunluk validasyonu kaldırıldı; gerçek geçerlilik EVDS API
   // yanıtından anlaşılır (401/403 + body snippet diagnostic'e düşer).
 
-  const url = buildEvdsUrl(evdsSeries, opts.start, opts.end, apiKey);
+  const url = buildEvdsUrl(evdsSeries, opts.start, opts.end, apiKey, opts.baseUrl);
   const urlRedacted = url.replace(apiKey, "***");
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
 
