@@ -2,7 +2,12 @@
 
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
 import { createClient } from "@/lib/supabase/server";
-import type { TefasFundHealth, TefasIngestLog } from "./types";
+import type {
+  FundReturnsHealth,
+  FundReturnsIngestLog,
+  TefasFundHealth,
+  TefasIngestLog,
+} from "./types";
 
 /**
  * En son cron çalıştırmalarını döner (yeniden eskiye).
@@ -61,4 +66,69 @@ export async function getLastIngestSummary(): Promise<{
   const logs = await listIngestLog(1);
   const log = logs[0] ?? null;
   return { log, failed_codes: log?.failed_codes ?? [] };
+}
+
+// ---------- Sprint-3 PR-4: fund_returns refresh monitoring -----------
+
+/**
+ * Returns refresh çalıştırmalarını döner (yeniden eskiye). UI özet kartı +
+ * geçmiş için kullanılır.
+ */
+export async function listReturnsIngestLog(
+  limit: number = 10,
+): Promise<FundReturnsIngestLog[]> {
+  if (!(await isSupabaseConfigured())) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("fund_returns_ingest_log")
+    .select("*")
+    .order("ran_at", { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.error("listReturnsIngestLog error", error);
+    return [];
+  }
+  return (data ?? []) as FundReturnsIngestLog[];
+}
+
+/**
+ * Her aktif fon için son cache durumu (kaç gün stale, hangi pencereler dolu).
+ */
+export async function listReturnsHealth(): Promise<FundReturnsHealth[]> {
+  if (!(await isSupabaseConfigured())) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("v_fund_returns_health")
+    .select("*")
+    .order("days_stale", { ascending: false, nullsFirst: true });
+  if (error) {
+    console.error("listReturnsHealth error", error);
+    return [];
+  }
+  return (data ?? []) as FundReturnsHealth[];
+}
+
+/**
+ * `daysThreshold` günden geride kalmış (veya hiç cache satırı olmayan)
+ * fonlar — UI "stale returns" listesi için.
+ */
+export async function listStaleReturns(
+  daysThreshold: number = 3,
+): Promise<FundReturnsHealth[]> {
+  const all = await listReturnsHealth();
+  return all.filter(
+    (f) => f.last_as_of === null || (f.days_stale ?? 0) >= daysThreshold,
+  );
+}
+
+/**
+ * Son returns refresh çalıştırmasının özeti + atlanan fon kodları.
+ */
+export async function getLastReturnsRefreshSummary(): Promise<{
+  log: FundReturnsIngestLog | null;
+  skipped_codes: string[];
+}> {
+  const logs = await listReturnsIngestLog(1);
+  const log = logs[0] ?? null;
+  return { log, skipped_codes: log?.skipped_codes ?? [] };
 }

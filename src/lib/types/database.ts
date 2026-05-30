@@ -41,6 +41,7 @@ export interface Database {
       tefas_ingest_log: TableShape<TefasIngestLogRow, TefasIngestLogInsert>;
       cpi_monthly: TableShape<CpiMonthlyRow, CpiMonthlyInsert>;
       fund_returns_cache: TableShape<FundReturnsRow, FundReturnsInsert>;
+      fund_returns_ingest_log: TableShape<FundReturnsIngestLogRow, FundReturnsIngestLogInsert>;
     };
     Views: {
       v_account_balances: { Row: AccountBalanceRow };
@@ -52,6 +53,7 @@ export interface Database {
       v_tefas_fund_prices_health: { Row: TefasFundHealthRow };
       v_cpi_monthly_yoy: { Row: CpiYoyRow };
       v_fund_returns_latest: { Row: FundReturnsRow };
+      v_fund_returns_health: { Row: FundReturnsHealthRow };
     };
     Functions: {
       bootstrap_user_defaults: { Args: Record<string, never>; Returns: void };
@@ -666,3 +668,41 @@ export interface FundReturnsRow {
 export type FundReturnsInsert = Omit<FundReturnsRow, "computed_at"> & {
   computed_at?: string;
 };
+
+export interface FundReturnsIngestLogRow {
+  id: string;
+  ran_at: string;
+  duration_ms: number;
+  processed: number;
+  upserted: number;
+  skipped_count: number;
+  skipped_codes: string[];
+  error: string | null;
+  triggered_by: string;
+}
+export type FundReturnsIngestLogInsert = Omit<
+  FundReturnsIngestLogRow,
+  "id" | "ran_at"
+> & {
+  id?: string;
+  ran_at?: string;
+};
+
+export interface FundReturnsHealthRow {
+  fund_code: string;
+  is_equity_intensive: boolean;
+  is_free_fund: boolean;
+  is_fx_denominated: boolean;
+  last_as_of: string | null;
+  last_computed_at: string | null;
+  tax_confidence: string | null;
+  applied_tax_kind: string | null;
+  applied_tax_rate: number | null;
+  warnings: string[] | null;
+  days_stale: number | null;
+  has_1y: boolean;
+  has_3y: boolean;
+  has_5y: boolean;
+  has_real_1y: boolean;
+  has_net_1y: boolean;
+}

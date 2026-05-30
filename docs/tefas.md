@@ -21,8 +21,13 @@ Sprint-2 ekledikleri:
 - `v_fund_prices_latest` view — her fon için son NAV
 - `v_tefas_fund_prices_health` view — fon başına son fiyat tarihi + days_stale
 
-Sprint-3+ ekleyecekleri:
-- `fund_returns_cache` — brüt + net + reel (CPI) getiriler
+Sprint-3 ekledikleri:
+- `cpi_monthly` + `v_cpi_monthly_yoy` (TÜFE Genel, EVDS)
+- `fund_returns_cache` — brüt + reel (Fisher) + net (stopaj) + vs_category
+- `fund_returns_ingest_log` + `v_fund_returns_health` — refresh izleme
+- Cron: `/api/cron/cpi-ingest` (aylık), `/api/cron/fund-returns-refresh` (günlük)
+
+Sprint-4+ ekleyecekleri:
 - `fund_scores_cache` — Mehmet Score + dinamik bileşenler
 - `user_personas` — Mehmet Score ağırlıkları (parametrik)
 - `allocation_recommendations` — fon dağılım önerileri

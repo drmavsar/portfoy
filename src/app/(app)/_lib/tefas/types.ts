@@ -16,6 +16,8 @@ export type {
   CpiMonthlyRow as CpiMonthly,
   CpiYoyRow as CpiYoy,
   FundReturnsRow as FundReturns,
+  FundReturnsIngestLogRow as FundReturnsIngestLog,
+  FundReturnsHealthRow as FundReturnsHealth,
   FundTaxKind,
   FundInvestmentUniverse,
   FundTaxConfidence,
