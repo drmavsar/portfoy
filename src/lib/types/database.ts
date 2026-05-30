@@ -42,6 +42,7 @@ export interface Database {
       cpi_monthly: TableShape<CpiMonthlyRow, CpiMonthlyInsert>;
       fund_returns_cache: TableShape<FundReturnsRow, FundReturnsInsert>;
       fund_returns_ingest_log: TableShape<FundReturnsIngestLogRow, FundReturnsIngestLogInsert>;
+      user_personas: TableShape<UserPersonaRow, UserPersonaInsert>;
     };
     Views: {
       v_account_balances: { Row: AccountBalanceRow };
@@ -654,6 +655,8 @@ export interface FundReturnsRow {
   real_5y_cagr: number | null;
   vs_category_1y: number | null;
   vs_category_3y: number | null;
+  vs_category_net_1y: number | null;
+  vs_category_net_3y: number | null;
   net_1y: number | null;
   net_3y_cagr: number | null;
   net_5y_cagr: number | null;
@@ -706,3 +709,26 @@ export interface FundReturnsHealthRow {
   has_real_1y: boolean;
   has_net_1y: boolean;
 }
+
+export type TaxConfidenceFilter = "NONE" | "LOW" | "MEDIUM" | "HIGH";
+
+export interface UserPersonaRow {
+  id: string;
+  user_id: string | null;
+  name: string;
+  is_default: boolean;
+  inflation_weight: number;
+  tax_weight: number;
+  risk_weight: number;
+  long_term_weight: number;
+  diversification_weight: number;
+  investment_horizon_years: number | null;
+  max_volatility_pct: number | null;
+  min_tax_confidence: TaxConfidenceFilter | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export type UserPersonaInsert = Omit<UserPersonaRow, "id" | "created_at" | "updated_at"> & {
+  id?: string;
+};

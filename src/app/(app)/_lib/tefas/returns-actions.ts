@@ -40,19 +40,41 @@ export async function getLatestFundReturns(code: string): Promise<FundReturns | 
   return rows[0] ?? null;
 }
 
+function shiftYears(iso: string, years: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCFullYear(d.getUTCFullYear() - years);
+  return d.toISOString().slice(0, 10);
+}
+
+type FundLite = Pick<Fund, "code" | "category_id" | "tax_confidence">;
+
+interface PerFundResult {
+  fund: FundLite;
+  comp: FundReturnsComputation;
+  tax: {
+    kind: string;
+    rate: number | null;
+    confidence: string;
+    source: string;
+  };
+  net_1y: number | null;
+  net_3y_cagr: number | null;
+  net_5y_cagr: number | null;
+}
+
 /**
- * Tüm aktif fonlar için cache'i hesapla + UPSERT et.
+ * Tüm aktif fonlar için fund_returns_cache'i hesapla + UPSERT.
  *
  * Akış:
- *  1. fund_prices'tan her aktif fonun NAV serisini çek (max ~6 yıl geçmiş)
- *  2. cpi_monthly'den varsayılan seriyi haritala
- *  3. Her fon için computeFundReturns → gross + real
- *  4. Kategori bazında medyan(gross_1y, gross_3y_cagr) hesapla
- *  5. vs_category_1y, vs_category_3y'yi her fonun değerinden çıkar
- *  6. fund_returns_cache'a batch UPSERT
+ *  1. funds + fund_tax_rules + fund_categories.default_tax_kind çek
+ *  2. fund_prices'tan son 6 yıl NAV serileri
+ *  3. cpi_monthly'den varsayılan seri
+ *  4. Her fon için: computeFundReturns + resolveTaxRulePure + applyTax* →
+ *     PerFundResult
+ *  5. Kategori medyanları: brüt (1y/3y) + net (1y/3y)
+ *  6. Payload + batch UPSERT (onConflict: fund_code, as_of)
  *
- * Cron veya manuel refresh endpoint'i tarafından çağrılır. Service role
- * gerekir (RLS bypass + write).
+ * Service role gerekir (RLS bypass + write).
  */
 export async function refreshAllFundReturns(): Promise<{
   ok: boolean;
@@ -64,25 +86,37 @@ export async function refreshAllFundReturns(): Promise<{
 }> {
   const start = Date.now();
   if (!(await isSupabaseConfigured())) {
-    return { ok: false, processed: 0, upserted: 0, skipped: [], duration_ms: 0, error: "Supabase yapılandırılmamış." };
+    return {
+      ok: false,
+      processed: 0,
+      upserted: 0,
+      skipped: [],
+      duration_ms: 0,
+      error: "Supabase yapılandırılmamış.",
+    };
   }
   const supabase = await createServiceClient();
 
-  // 1) Aktif fonlar — net hesabı için tax_confidence ve tüm flag'ler lazım
+  // 1) Aktif fonlar + vergi metadata
   const { data: fundsData, error: fundsErr } = await supabase
     .from("funds")
     .select("code, category_id, tax_confidence")
     .eq("is_active", true);
   if (fundsErr) {
-    return { ok: false, processed: 0, upserted: 0, skipped: [], duration_ms: Date.now() - start, error: fundsErr.message };
+    return {
+      ok: false,
+      processed: 0,
+      upserted: 0,
+      skipped: [],
+      duration_ms: Date.now() - start,
+      error: fundsErr.message,
+    };
   }
-  type FundLite = Pick<Fund, "code" | "category_id" | "tax_confidence">;
   const funds = (fundsData ?? []) as FundLite[];
   if (funds.length === 0) {
     return { ok: true, processed: 0, upserted: 0, skipped: [], duration_ms: Date.now() - start };
   }
 
-  // 1b) Vergi kuralları + kategori default'ları (resolveTaxRulePure için)
   const { data: rulesData } = await supabase
     .from("fund_tax_rules")
     .select("*")
@@ -97,11 +131,10 @@ export async function refreshAllFundReturns(): Promise<{
     defaultKindByCategory.set(c.id, c.default_tax_kind);
   }
 
-  // 2) NAV serileri — son 6 yıl yeter (5Y CAGR için)
+  // 2) NAV serileri (son 6 yıl)
   const cutoff = new Date();
   cutoff.setFullYear(cutoff.getFullYear() - 6);
   const cutoffIso = cutoff.toISOString().slice(0, 10);
-
   const { data: pricesData, error: pricesErr } = await supabase
     .from("fund_prices")
     .select("fund_code, as_of, nav")
@@ -109,7 +142,14 @@ export async function refreshAllFundReturns(): Promise<{
     .order("fund_code", { ascending: true })
     .order("as_of", { ascending: true });
   if (pricesErr) {
-    return { ok: false, processed: 0, upserted: 0, skipped: [], duration_ms: Date.now() - start, error: pricesErr.message };
+    return {
+      ok: false,
+      processed: 0,
+      upserted: 0,
+      skipped: [],
+      duration_ms: Date.now() - start,
+      error: pricesErr.message,
+    };
   }
   const rawPrices = (pricesData ?? []) as Array<{ fund_code: string; as_of: string; nav: number }>;
   const seriesByFund = new Map<string, NavPoint[]>();
@@ -120,21 +160,18 @@ export async function refreshAllFundReturns(): Promise<{
   }
 
   // 3) CPI sözlüğü
-  const { data: cpiData, error: cpiErr } = await supabase
+  const { data: cpiData } = await supabase
     .from("cpi_monthly")
     .select("period_month, index_value")
     .eq("series_code", DEFAULT_CPI_SERIES);
-  if (cpiErr) {
-    console.error("CPI read error:", cpiErr.message);
-  }
   const cpi: CpiByPeriod = {};
   for (const c of (cpiData ?? []) as Array<{ period_month: string; index_value: number }>) {
     cpi[c.period_month] = Number(c.index_value);
   }
 
-  // 4) Her fon için brüt + reel hesapla
+  // 4) Her fon için kompozit hesap (return + tax + net)
   const skipped: string[] = [];
-  const computations = new Map<string, { fund: FundLite; comp: FundReturnsComputation }>();
+  const results: PerFundResult[] = [];
   for (const fund of funds) {
     const series = seriesByFund.get(fund.code);
     if (!series || series.length === 0) {
@@ -146,73 +183,81 @@ export async function refreshAllFundReturns(): Promise<{
       skipped.push(fund.code);
       continue;
     }
-    computations.set(fund.code, { fund, comp });
-  }
-
-  // 5) Kategori medyanları (1y ve 3y için) — her kategori için ayrı
-  const byCategory = new Map<number, FundReturnsComputation[]>();
-  for (const { fund, comp } of computations.values()) {
-    const list = byCategory.get(fund.category_id) ?? [];
-    list.push(comp);
-    byCategory.set(fund.category_id, list);
-  }
-  const medianByCategory = new Map<number, { median_1y: number | null; median_3y: number | null }>();
-  for (const [catId, comps] of byCategory) {
-    medianByCategory.set(catId, {
-      median_1y: median(comps.map((c) => c.gross_1y)),
-      median_3y: median(comps.map((c) => c.gross_3y_cagr)),
+    const defaultKind = defaultKindByCategory.get(fund.category_id) ?? "BELIRSIZ";
+    const acquired1y = shiftYears(comp.as_of, 1);
+    const tax = resolveTaxRulePure(fund, taxRules, defaultKind, acquired1y, comp.as_of);
+    results.push({
+      fund,
+      comp,
+      tax: {
+        kind: tax.kind,
+        rate: tax.effective_rate,
+        confidence: tax.confidence,
+        source: tax.source,
+      },
+      net_1y: applyWithholdingTax(comp.gross_1y, tax.effective_rate),
+      net_3y_cagr: applyTaxToCagr(comp.gross_3y_cagr, tax.effective_rate, 3),
+      net_5y_cagr: applyTaxToCagr(comp.gross_5y_cagr, tax.effective_rate, 5),
     });
   }
 
-  // 6) Net getiri (stopaj sonrası) — Sprint-3 PR-3
-  //    Her pencere için resolveTaxRulePure(fund, acquired, sold) çağrılır.
-  //    Lot-bazlı tarih semantiği: 1Y için (as_of − 1y) iktisap; 3Y/5Y benzer.
-  function shiftYears(iso: string, years: number): string {
-    const d = new Date(`${iso}T00:00:00Z`);
-    d.setUTCFullYear(d.getUTCFullYear() - years);
-    return d.toISOString().slice(0, 10);
+  // 5) Kategori medyanları (brüt + net)
+  const byCategory = new Map<number, PerFundResult[]>();
+  for (const r of results) {
+    const list = byCategory.get(r.fund.category_id) ?? [];
+    list.push(r);
+    byCategory.set(r.fund.category_id, list);
+  }
+  const medianByCategory = new Map<
+    number,
+    {
+      gross_1y: number | null;
+      gross_3y: number | null;
+      net_1y: number | null;
+      net_3y: number | null;
+    }
+  >();
+  for (const [catId, items] of byCategory) {
+    medianByCategory.set(catId, {
+      gross_1y: median(items.map((i) => i.comp.gross_1y)),
+      gross_3y: median(items.map((i) => i.comp.gross_3y_cagr)),
+      net_1y: median(items.map((i) => i.net_1y)),
+      net_3y: median(items.map((i) => i.net_3y_cagr)),
+    });
   }
 
-  const payload = [...computations.values()].map(({ fund, comp }) => {
-    const cat = medianByCategory.get(fund.category_id);
-    const defaultKind = defaultKindByCategory.get(fund.category_id) ?? "BELIRSIZ";
-
-    // Vergi kuralı: 1Y pencere üzerinden çözünür (PR-3 için tek as_of)
-    // Net hesabı her pencerede aynı kural varsayımıyla yapılır.
-    const acquired1y = shiftYears(comp.as_of, 1);
-    const tax = resolveTaxRulePure(fund, taxRules, defaultKind, acquired1y, comp.as_of);
-
-    const net_1y = applyWithholdingTax(comp.gross_1y, tax.effective_rate);
-    const net_3y_cagr = applyTaxToCagr(comp.gross_3y_cagr, tax.effective_rate, 3);
-    const net_5y_cagr = applyTaxToCagr(comp.gross_5y_cagr, tax.effective_rate, 5);
-
+  // 6) Payload + UPSERT
+  const payload = results.map((r) => {
+    const m = medianByCategory.get(r.fund.category_id);
     return {
-      fund_code: fund.code,
-      as_of: comp.as_of,
-      gross_1d: comp.gross_1d,
-      gross_1w: comp.gross_1w,
-      gross_1m: comp.gross_1m,
-      gross_3m: comp.gross_3m,
-      gross_6m: comp.gross_6m,
-      gross_ytd: comp.gross_ytd,
-      gross_1y: comp.gross_1y,
-      gross_3y_cagr: comp.gross_3y_cagr,
-      gross_5y_cagr: comp.gross_5y_cagr,
-      real_1y: comp.real_1y,
-      real_3y_cagr: comp.real_3y_cagr,
-      real_5y_cagr: comp.real_5y_cagr,
-      vs_category_1y: vsCategoryDelta(comp.gross_1y, cat?.median_1y ?? null),
-      vs_category_3y: vsCategoryDelta(comp.gross_3y_cagr, cat?.median_3y ?? null),
-      net_1y,
-      net_3y_cagr,
-      net_5y_cagr,
-      applied_tax_kind: tax.kind,
-      applied_tax_rate: tax.effective_rate,
-      tax_confidence: tax.confidence,
-      tax_source: tax.source,
+      fund_code: r.fund.code,
+      as_of: r.comp.as_of,
+      gross_1d: r.comp.gross_1d,
+      gross_1w: r.comp.gross_1w,
+      gross_1m: r.comp.gross_1m,
+      gross_3m: r.comp.gross_3m,
+      gross_6m: r.comp.gross_6m,
+      gross_ytd: r.comp.gross_ytd,
+      gross_1y: r.comp.gross_1y,
+      gross_3y_cagr: r.comp.gross_3y_cagr,
+      gross_5y_cagr: r.comp.gross_5y_cagr,
+      real_1y: r.comp.real_1y,
+      real_3y_cagr: r.comp.real_3y_cagr,
+      real_5y_cagr: r.comp.real_5y_cagr,
+      vs_category_1y: vsCategoryDelta(r.comp.gross_1y, m?.gross_1y ?? null),
+      vs_category_3y: vsCategoryDelta(r.comp.gross_3y_cagr, m?.gross_3y ?? null),
+      vs_category_net_1y: vsCategoryDelta(r.net_1y, m?.net_1y ?? null),
+      vs_category_net_3y: vsCategoryDelta(r.net_3y_cagr, m?.net_3y ?? null),
+      net_1y: r.net_1y,
+      net_3y_cagr: r.net_3y_cagr,
+      net_5y_cagr: r.net_5y_cagr,
+      applied_tax_kind: r.tax.kind,
+      applied_tax_rate: r.tax.rate,
+      tax_confidence: r.tax.confidence,
+      tax_source: r.tax.source,
       computed_at: new Date().toISOString(),
-      computed_from_period: comp.computed_from_period,
-      warnings: comp.warnings,
+      computed_from_period: r.comp.computed_from_period,
+      warnings: r.comp.warnings,
     };
   });
 
