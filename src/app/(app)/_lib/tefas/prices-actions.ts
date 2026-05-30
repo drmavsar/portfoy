@@ -2,31 +2,51 @@
 
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import {
+  fetchTefasNav,
+  type NavFetchFailure,
+  type TefasPeriod,
+} from "./tefas-nav-fetch";
 import type { FundPrice } from "./types";
 
-const TEFAS_PRICES_PATH = "/api/tefas-prices";
-const MAX_CODES_PER_REQUEST = 20;
+/**
+ * Yeni TS port — `api/tefas-prices.py` artık yok. Function-to-function HTTP
+ * çağrısı kaldırıldı; doğrudan TEFAS yeni JSON API'ye gidiyoruz
+ * (Vercel Deployment Protection sorunu yok).
+ *
+ * Backward-compat: önceki şema { ok, source, succeeded, failed, prices } korundu.
+ * `options.start/end` artık ignore edilir — TEFAS yeni API sadece sabit
+ * `periodMonths` enum'u kabul ediyor (1/3/6/12/36/60).
+ */
 
 interface TefasFetchResult {
   ok: boolean;
   source: string;
   fetched_at?: string;
+  endpoint?: string;
   requested?: number;
   succeeded?: number;
   failed?: string[];
+  /** Failure detayları (debug için). */
+  failures?: NavFetchFailure[];
   prices?: Array<{ code: string; title: string | null; as_of: string; nav: number }>;
   error?: string;
 }
 
 interface FetchOptions {
+  /** @deprecated TEFAS yeni API tarih aralığı kabul etmiyor; ignore edilir. */
   start?: string;
+  /** @deprecated TEFAS yeni API tarih aralığı kabul etmiyor; ignore edilir. */
   end?: string;
+  /** @deprecated HTTP çağrısı yok artık. */
   baseUrl?: string;
-  /** Bir chunk başarısızsa toplam kaç deneme yapılır (default 1 = retry yok). */
+  /** Bir çağrı başarısızsa kaç deneme (default 2 — TEFAS rate limit'i için). */
   maxAttempts?: number;
   /** Retry'lar arası bekleme (ms). */
   retryDelayMs?: number;
-  /** Cache stratejisi: 'revalidate' (cron için 'no-store' daha mantıklı). */
+  /** TEFAS lookback (ay). 1/3/6/12/36/60. Default 1 — günlük cron için yeter. */
+  periodMonths?: TefasPeriod;
+  /** @deprecated cache stratejisi artık no-store sabit. */
   cache?: "revalidate" | "no-store";
 }
 
@@ -34,25 +54,11 @@ async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchChunk(
-  url: string,
-  cache: "revalidate" | "no-store",
-): Promise<TefasFetchResult | null> {
-  const init: RequestInit & { next?: { revalidate: number } } =
-    cache === "no-store"
-      ? { cache: "no-store" }
-      : { next: { revalidate: 21600 } };
-  const res = await fetch(url, init);
-  if (!res.ok) return null;
-  const data = (await res.json()) as TefasFetchResult;
-  return data.ok ? data : null;
-}
-
 /**
- * `/api/tefas-prices` endpoint'inden bir veya birden çok fonun en son NAV'ını çek.
+ * Tüm aktif fonların en son NAV'ını TEFAS yeni JSON API'sinden çek.
  *
- * Birden çok fon `MAX_CODES_PER_REQUEST` ile sınırlı; üstü chunk'lara bölünür.
- * Bir chunk başarısız olursa `maxAttempts` kadar tekrar denenir (default 1).
+ * Retry: başarısız fonlar için aynı kodlar tekrar denenir (TEFAS rate limit
+ * geçici reject'lerine karşı koruma).
  */
 export async function fetchTefasPrices(
   codes: string[],
@@ -62,64 +68,45 @@ export async function fetchTefasPrices(
     return { ok: true, source: "tefas", succeeded: 0, failed: [], prices: [] };
   }
 
-  // VERCEL_URL preview alias'ını döndürür; deployment protection altında 401 alır.
-  // Caller (cron route) baseUrl'i açıkça req.nextUrl.origin ile vermeli.
-  // Fallback olarak NEXT_PUBLIC_BASE_URL veya localhost.
-  const baseUrl =
-    options.baseUrl ??
-    process.env.NEXT_PUBLIC_BASE_URL ??
-    "http://localhost:3000";
-  const normalized = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
-  const maxAttempts = Math.max(1, options.maxAttempts ?? 1);
-  const retryDelayMs = options.retryDelayMs ?? 1000;
-  const cache = options.cache ?? "revalidate";
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 2);
+  const retryDelayMs = options.retryDelayMs ?? 1500;
+  const periodMonths = options.periodMonths ?? 1;
 
-  const chunks: string[][] = [];
-  for (let i = 0; i < codes.length; i += MAX_CODES_PER_REQUEST) {
-    chunks.push(codes.slice(i, i + MAX_CODES_PER_REQUEST));
-  }
-
-  const merged: TefasFetchResult = {
+  const merged: Required<Pick<TefasFetchResult, "prices" | "failed" | "failures">> &
+    TefasFetchResult = {
     ok: true,
     source: "tefas",
     fetched_at: new Date().toISOString(),
     requested: codes.length,
     succeeded: 0,
-    failed: [],
     prices: [],
+    failed: [],
+    failures: [],
   };
 
-  for (const chunk of chunks) {
-    const url = new URL(`${normalized}${TEFAS_PRICES_PATH}`);
-    url.searchParams.set("codes", chunk.join(","));
-    if (options.start) url.searchParams.set("start", options.start);
-    if (options.end) url.searchParams.set("end", options.end);
-
-    let data: TefasFetchResult | null = null;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        data = await fetchChunk(url.toString(), cache);
-        if (data) break;
-      } catch (err) {
-        console.error(`fetchTefasPrices chunk attempt ${attempt} error`, err);
-      }
-      if (attempt < maxAttempts) await sleep(retryDelayMs * attempt);
+  let remaining = [...codes];
+  let lastFailures: NavFetchFailure[] = [];
+  let lastEndpoint: string | undefined;
+  for (let attempt = 1; attempt <= maxAttempts && remaining.length > 0; attempt++) {
+    const result = await fetchTefasNav(remaining, { periodMonths });
+    merged.prices.push(...result.prices);
+    remaining = result.failed;
+    lastFailures = result.failures;
+    lastEndpoint = result.endpoint;
+    if (remaining.length > 0 && attempt < maxAttempts) {
+      await sleep(retryDelayMs * attempt);
     }
-
-    if (!data) {
-      merged.failed!.push(...chunk);
-      continue;
-    }
-    merged.prices!.push(...(data.prices ?? []));
-    merged.failed!.push(...(data.failed ?? []));
   }
-  merged.succeeded = merged.prices!.length;
+  merged.failed.push(...remaining);
+  merged.failures.push(...lastFailures);
+  merged.succeeded = merged.prices.length;
+  merged.endpoint = lastEndpoint;
+  merged.ok = merged.prices.length > 0;
   return merged;
 }
 
 /**
- * fund_prices tablosuna upsert. PR-2 bulk ingest tarafından kullanılacak;
- * POC için tek tek çağırarak da test edilebilir.
+ * fund_prices tablosuna upsert.
  */
 export async function upsertFundPrices(
   rows: Array<{ fund_code: string; as_of: string; nav: number; source?: string }>,

@@ -19,8 +19,8 @@
 | Route | Bağlı olduğu logic | HTTP çağrısı? | Risk |
 |---|---|---|---|
 | `/api/cron/snapshot` | `computeUserSnapshot` (inline) + `getAssetRates`/`getStockPrices` (lib) | ❌ Yok (lib fonksiyonları dışarı `truncgil.com` vb. çağırır, internal değil) | — |
-| `/api/cron/cpi-ingest` | `/api/cpi-ingest.py` (Python serverless) | ✅ **internal HTTP** | **Yüksek — Deployment Protection** |
-| `/api/cron/tefas-prices` | `/api/tefas-prices.py` (Python serverless) via `fetchTefasPrices` | ✅ **internal HTTP** | **Yüksek — Deployment Protection** |
+| `/api/cron/cpi-ingest` | `fetchEvdsCpi()` (TS port, PR-A) | ❌ Yok (EVDS dış API) | — |
+| `/api/cron/tefas-prices` | `fetchTefasPrices` → `fetchTefasNav()` (TS port, PR-B) | ❌ Yok (TEFAS dış API) | — |
 | `/api/cron/fund-returns-refresh` | `refreshAllFundReturns()` server action | ❌ Yok (DB read/write only) | — |
 | `/api/cron/fund-scores-refresh` | `refreshAllFundScores()` server action | ❌ Yok (DB read/write only) | — |
 | `/api/cron/cpi-manual-import` | Inline UPSERT | ❌ Yok | — |
