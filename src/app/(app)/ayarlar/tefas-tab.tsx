@@ -120,7 +120,7 @@ function TakiptePane({ funds, categories, tracked, setTracked, configured }: Pan
     return (
       <div className="empty">
         <div>Takipte fon yok</div>
-        <div className="hint">"Ekle" sekmesinden fon ekleyebilirsin.</div>
+        <div className="hint">&ldquo;Ekle&rdquo; sekmesinden fon ekleyebilirsin.</div>
       </div>
     );
   }
@@ -506,7 +506,7 @@ function StopajPane({
           lineHeight: 1.55,
         }}
       >
-        Sprint-1'de salt görüntü. Mevzuat değişikliği olursa kural ekleme/değiştirme Sprint-5'te admin UI ile gelecek.
+        Sprint-1&apos;de salt görüntü. Mevzuat değişikliği olursa kural ekleme/değiştirme Sprint-5&apos;te admin UI ile gelecek.
         Çözüm sırası: <strong>FUND</strong> &gt; <strong>CATEGORY</strong> &gt; <strong>TAX_KIND_DEFAULT</strong>.
         Aynı seviyede birden çok eşleşme varsa <strong>priority DESC</strong> karar verir.
       </div>
