@@ -31,7 +31,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const DEFAULT_SERIES = "CPI_TR_GENERAL";
-const WRAPPER_VERSION = "2026-05-30-pr-a-ts-port";
+const WRAPPER_VERSION = "2026-05-30-pr-a-ts-port-keyrelax";
 
 /** Tüm cevaplara wrapper_version field + x-wrapper-version header ekler. */
 function tag<T extends Record<string, unknown>>(
