@@ -10,6 +10,7 @@ import {
   listScoresHealth,
 } from "@/app/(app)/_lib/tefas/monitoring-actions";
 import { Icon } from "@/components/ui/icon";
+import Link from "next/link";
 
 import { SystemHealthStrip } from "./_components/system-health-strip";
 import { KpiCards } from "./_components/kpi-cards";
@@ -79,6 +80,13 @@ export default async function FonlarDashboardPage() {
             <strong>{persona.name}</strong> persona aktif
           </div>
         </div>
+        <Link
+          href="/fonlar/komite"
+          className="chip"
+          style={{ textDecoration: "none", whiteSpace: "nowrap" }}
+        >
+          <Icon name="report" size={12} /> Fon Komitesi
+        </Link>
       </div>
 
       <div style={{ display: "grid", gap: 16 }}>
