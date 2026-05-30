@@ -86,10 +86,27 @@ interface TefasResultItem {
   fonKodu?: string;
   fonUnvan?: string;
   fiyat?: string | number;
+  // Yeni JSON API'sinde aşağıdaki alanlar genelde yok ama old-school
+  // tefas-crawler şemasında vardı; defansif parse — yoksa null kalır.
+  portfoyToplamDeger?: string | number | null;
+  portfoyBuyukluk?: string | number | null;
+  toplamPay?: string | number | null;
+  paySayisi?: string | number | null;
+  kisiSayisi?: string | number | null;
+  yatirimciSayisi?: string | number | null;
   [k: string]: unknown;
 }
 interface TefasResponse {
   resultList?: TefasResultItem[];
+}
+
+function parseOptionalNumber(v: unknown): number | null {
+  if (v == null) return null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  const s = String(v).trim();
+  if (!s) return null;
+  const n = Number(s.replace(/,/g, "."));
+  return Number.isFinite(n) ? n : null;
 }
 
 function defaultHeaders(baseUrl: string): Record<string, string> {
@@ -332,5 +349,289 @@ export async function fetchTefasNav(
     prices,
     failed,
     failures,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// History (backfill) — tüm resultList'i parse eder, sadece en sonuncu değil.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface NavHistoryRow {
+  code: string;
+  title: string | null;
+  /** NAV tarihi, YYYY-MM-DD. */
+  as_of: string;
+  nav: number;
+  /** TEFAS yeni API'de yok ama defansif (eski şema/JSON v3 için). */
+  total_value_try: number | null;
+  share_count: number | null;
+  investor_count: number | null;
+}
+
+export interface NavHistoryResult {
+  ok: boolean;
+  source: "tefas";
+  fetched_at: string;
+  endpoint: string;
+  api_version: "v2-spa";
+  period_months: TefasPeriod;
+  requested: number;
+  succeeded: number;
+  /** Tüm fonların tarihsel NAV satırları (flat). */
+  prices: NavHistoryRow[];
+  failed: string[];
+  failures: NavFetchFailure[];
+  /** Code → kaç satır geldi. */
+  rows_per_fund: Record<string, number>;
+  date_min: string | null;
+  date_max: string | null;
+  error?: string;
+}
+
+/** TEFAS resultList içindeki TÜM geçerli satırları normalize eder. */
+export function parseAllNavRows(
+  json: TefasResponse,
+  fallbackCode: string,
+): NavHistoryRow[] {
+  const items = Array.isArray(json.resultList) ? json.resultList : [];
+  const rows: NavHistoryRow[] = [];
+  for (const it of items) {
+    const dateRaw = String(it.tarih ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) continue;
+    const navRaw = it.fiyat;
+    const nav =
+      typeof navRaw === "number"
+        ? navRaw
+        : navRaw != null
+        ? Number(String(navRaw).replace(",", "."))
+        : NaN;
+    if (!Number.isFinite(nav) || nav <= 0) continue;
+    const code = String(it.fonKodu ?? fallbackCode).trim().toUpperCase();
+    const title = it.fonUnvan != null ? String(it.fonUnvan).trim() : null;
+    rows.push({
+      code,
+      title: title || null,
+      as_of: dateRaw,
+      nav,
+      total_value_try: parseOptionalNumber(
+        it.portfoyToplamDeger ?? it.portfoyBuyukluk ?? null,
+      ),
+      share_count: parseOptionalNumber(it.toplamPay ?? it.paySayisi ?? null),
+      investor_count: parseOptionalNumber(
+        it.kisiSayisi ?? it.yatirimciSayisi ?? null,
+      ),
+    });
+  }
+  return rows;
+}
+
+/** Tek fon için tüm tarihsel satırları getirir. */
+async function fetchOneFundHistory(
+  code: string,
+  options: NavFetchOptions = {},
+): Promise<
+  | { ok: true; rows: NavHistoryRow[] }
+  | { ok: false; failure: NavFetchFailure }
+> {
+  const periodMonths = options.periodMonths ?? DEFAULT_PERIOD;
+  const baseUrl = options.baseUrl ?? TEFAS_BASE_DEFAULT;
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  const timeoutMs = options.timeoutMs ?? 15000;
+
+  const url = `${baseUrl}${PRICE_ENDPOINT}`;
+  const body = JSON.stringify({
+    fonKodu: code,
+    dil: "TR",
+    periyod: periodMonths,
+  });
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await fetchImpl(url, {
+      method: "POST",
+      headers: defaultHeaders(baseUrl),
+      body,
+      signal: controller.signal,
+      cache: "no-store",
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    const msg = err instanceof Error ? err.message : String(err);
+    const reason: NavFailureReason = /abort/i.test(msg) ? "timeout" : "network_error";
+    return { ok: false, failure: { code, reason, error_message: msg } };
+  }
+  clearTimeout(timer);
+
+  const contentType = res.headers.get("content-type");
+  const text = await res.text().catch(() => "");
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      failure: {
+        code,
+        reason: "http_error",
+        http_status: res.status,
+        content_type: contentType ?? undefined,
+        body_snippet: text.slice(0, 300),
+      },
+    };
+  }
+
+  const ttrim = text.trimStart().toLowerCase();
+  if (
+    (contentType && /text\/html/i.test(contentType)) ||
+    ttrim.startsWith("<!doctype") ||
+    ttrim.startsWith("<html") ||
+    ttrim.startsWith("<")
+  ) {
+    return {
+      ok: false,
+      failure: {
+        code,
+        reason: "html_response",
+        http_status: res.status,
+        content_type: contentType ?? undefined,
+        body_snippet: text.slice(0, 300),
+      },
+    };
+  }
+
+  let json: TefasResponse;
+  try {
+    json = JSON.parse(text) as TefasResponse;
+  } catch (je) {
+    return {
+      ok: false,
+      failure: {
+        code,
+        reason: "json_parse_error",
+        http_status: res.status,
+        content_type: contentType ?? undefined,
+        body_snippet: text.slice(0, 300),
+        error_message: je instanceof Error ? je.message : String(je),
+      },
+    };
+  }
+
+  const items = Array.isArray(json.resultList) ? json.resultList : [];
+  if (items.length === 0) {
+    return {
+      ok: false,
+      failure: {
+        code,
+        reason: "empty_result",
+        http_status: res.status,
+        content_type: contentType ?? undefined,
+        body_snippet: text.slice(0, 300),
+      },
+    };
+  }
+
+  const rows = parseAllNavRows(json, code);
+  if (rows.length === 0) {
+    return {
+      ok: false,
+      failure: {
+        code,
+        reason: "no_valid_row",
+        http_status: res.status,
+        content_type: contentType ?? undefined,
+        body_snippet: text.slice(0, 300),
+      },
+    };
+  }
+  return { ok: true, rows };
+}
+
+/**
+ * Birden çok fon için tarihsel NAV history getirir.
+ *
+ * period_months = 60 → 5 yıllık history (TEFAS API'sinin maksimumu).
+ * Concurrency: rate limit için küçük (default 3).
+ *
+ * `ok`: en az 1 fon için satır gelmişse true.
+ */
+export async function fetchTefasNavHistory(
+  codes: string[],
+  options: NavFetchOptions = {},
+): Promise<NavHistoryResult> {
+  const periodMonths = options.periodMonths ?? DEFAULT_PERIOD;
+  const baseUrl = options.baseUrl ?? TEFAS_BASE_DEFAULT;
+  const endpointFull = `${baseUrl}${PRICE_ENDPOINT}`;
+  if (!VALID_PERIODS.includes(periodMonths)) {
+    return {
+      ok: false,
+      source: "tefas",
+      fetched_at: new Date().toISOString(),
+      endpoint: endpointFull,
+      api_version: "v2-spa",
+      period_months: periodMonths,
+      requested: codes.length,
+      succeeded: 0,
+      prices: [],
+      failed: codes,
+      failures: codes.map((c) => ({
+        code: c,
+        reason: "http_error" as NavFailureReason,
+        error_message: `Geçersiz periodMonths=${periodMonths}`,
+      })),
+      rows_per_fund: {},
+      date_min: null,
+      date_max: null,
+      error: `Geçersiz periodMonths=${periodMonths}. Kabul edilen: ${VALID_PERIODS.join(", ")}`,
+    };
+  }
+
+  const concurrency = Math.max(1, options.concurrency ?? 3);
+
+  const allRows: NavHistoryRow[] = [];
+  const rowsPerFund: Record<string, number> = {};
+  const failed: string[] = [];
+  const failures: NavFetchFailure[] = [];
+  let dateMin: string | null = null;
+  let dateMax: string | null = null;
+
+  for (let i = 0; i < codes.length; i += concurrency) {
+    const batch = codes.slice(i, i + concurrency);
+    const results = await Promise.all(
+      batch.map((code) => fetchOneFundHistory(code, options)),
+    );
+    for (let j = 0; j < batch.length; j++) {
+      const r = results[j];
+      const code = batch[j];
+      if (r.ok) {
+        rowsPerFund[code] = r.rows.length;
+        for (const row of r.rows) {
+          allRows.push(row);
+          if (dateMin === null || row.as_of < dateMin) dateMin = row.as_of;
+          if (dateMax === null || row.as_of > dateMax) dateMax = row.as_of;
+        }
+      } else {
+        failed.push(r.failure.code);
+        failures.push(r.failure);
+      }
+    }
+  }
+
+  const succeeded = Object.keys(rowsPerFund).length;
+  return {
+    ok: succeeded > 0,
+    source: "tefas",
+    fetched_at: new Date().toISOString(),
+    endpoint: endpointFull,
+    api_version: "v2-spa",
+    period_months: periodMonths,
+    requested: codes.length,
+    succeeded,
+    prices: allRows,
+    failed,
+    failures,
+    rows_per_fund: rowsPerFund,
+    date_min: dateMin,
+    date_max: dateMax,
   };
 }
