@@ -2,8 +2,6 @@
 
 import { useMemo, useState } from "react";
 
-// Render anında dondurulmuş "şu an" timestamp — useMemo deterministik kalsın
-// (React 19 react-hooks/purity kuralı için).
 import {
   Area,
   AreaChart,
@@ -14,19 +12,11 @@ import {
   YAxis,
 } from "recharts";
 
-type Range = "1M" | "3M" | "6M" | "1Y" | "3Y" | "5Y" | "ALL";
-
-const RANGE_DAYS: Record<Range, number | null> = {
-  "1M": 30,
-  "3M": 90,
-  "6M": 180,
-  "1Y": 365,
-  "3Y": 365 * 3,
-  "5Y": 365 * 5,
-  ALL: null,
-};
-
-const RANGES: Range[] = ["1M", "3M", "6M", "1Y", "3Y", "5Y", "ALL"];
+import {
+  NAV_RANGES,
+  filterSeriesByRange,
+  type NavRange,
+} from "./nav-chart-range";
 
 interface Props {
   series: Array<{ as_of: string; nav: number }>;
@@ -45,20 +35,18 @@ function fmtDate(iso: string): string {
 
 export function NavChart({ series, fundCode }: Props) {
   // Karar #6: default 3Y
-  const [range, setRange] = useState<Range>("3Y");
-  const [nowMs] = useState(() => Date.now());
+  const [range, setRange] = useState<NavRange>("3Y");
 
+  // Anchor = serideki son NAV tarihi (wall-clock değil).
+  // Bug fix: önce Date.now() kullanılıyordu; gerçek bugün NAV tarihinden
+  // farklı ise (test/dev/stale prod) 1M/3M/6M cutoff aralık dışına düşüyordu.
   const filteredData = useMemo(() => {
-    if (series.length === 0) return [];
-    const days = RANGE_DAYS[range];
-    const cutoff =
-      days === null
-        ? series[0].as_of
-        : new Date(nowMs - days * 86_400_000).toISOString().slice(0, 10);
-    return series
-      .filter((p) => p.as_of >= cutoff)
-      .map((p) => ({ label: fmtDate(p.as_of), full: p.as_of, nav: p.nav }));
-  }, [series, range, nowMs]);
+    return filterSeriesByRange(series, range).map((p) => ({
+      label: fmtDate(p.as_of),
+      full: p.as_of,
+      nav: p.nav,
+    }));
+  }, [series, range]);
 
   if (series.length === 0) {
     return (
@@ -83,7 +71,7 @@ export function NavChart({ series, fundCode }: Props) {
         </div>
       </div>
       <div style={{ padding: "12px 14px 0", display: "flex", gap: 4, flexWrap: "wrap" }}>
-        {RANGES.map((r) => (
+        {NAV_RANGES.map((r) => (
           <button
             key={r}
             onClick={() => setRange(r)}
@@ -101,6 +89,18 @@ export function NavChart({ series, fundCode }: Props) {
           </button>
         ))}
       </div>
+      {filteredData.length === 0 ? (
+        <div
+          style={{
+            padding: "40px 14px",
+            textAlign: "center",
+            color: "var(--muted)",
+            fontSize: 13,
+          }}
+        >
+          Bu dönem için NAV verisi yok ({range}). Daha geniş bir aralık seçin.
+        </div>
+      ) : (
       <div style={{ width: "100%", height: 280, padding: "12px 0" }}>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={filteredData} margin={{ top: 8, right: 16, left: 16, bottom: 8 }}>
@@ -143,6 +143,7 @@ export function NavChart({ series, fundCode }: Props) {
           </AreaChart>
         </ResponsiveContainer>
       </div>
+      )}
     </div>
   );
 }

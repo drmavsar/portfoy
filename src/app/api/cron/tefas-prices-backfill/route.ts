@@ -264,6 +264,36 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // funds.name UPDATE — TEFAS'tan title geliyor (fonUnvan). Seed sırasında
+  // funds.name çoğu zaman code'un kendisi olarak doldurulur; ilk gelen non-null
+  // title ile güncelle. dryRun ise atla.
+  let names_updated = 0;
+  let names_update_error: string | undefined;
+  if (!dryRun && fetched.prices.length > 0) {
+    const firstTitleByCode = new Map<string, string>();
+    for (const row of fetched.prices) {
+      if (!firstTitleByCode.has(row.code) && row.title && row.title.trim() !== "") {
+        firstTitleByCode.set(row.code, row.title.trim());
+      }
+    }
+    if (firstTitleByCode.size > 0) {
+      // Sadece name = code olan satırları güncelle (eski seed'leri).
+      // Manuel düzenlenmiş isimler korunur.
+      for (const [code, title] of firstTitleByCode) {
+        const { error: nameErr } = await supabase
+          .from("funds")
+          .update({ name: title } as never)
+          .eq("code", code)
+          .eq("name", code);
+        if (nameErr) {
+          names_update_error = nameErr.message;
+          break;
+        }
+        names_updated++;
+      }
+    }
+  }
+
   // KRA ve diğer "veri yok" fonları data quality exception olarak ayır
   const dataQualityExceptions = fetched.failures
     .filter((f) => f.reason === "empty_result")
@@ -295,6 +325,8 @@ export async function GET(req: NextRequest) {
       // Data quality: KRA gibi delisted fonlar — blokaj değil, bilgi
       data_quality_exceptions: dataQualityExceptions,
       upsert_error: upsertError,
+      names_updated,
+      names_update_error,
       duration_ms: Date.now() - start,
     },
     { status: upsertError ? 500 : 200 },
