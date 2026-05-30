@@ -163,7 +163,8 @@ class handler(BaseHTTPRequestHandler):
         payload = json.dumps(body, ensure_ascii=False)
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        # 6 saat cache: TEFAS akşam yayınlar, intra-day update yok
-        self.send_header("Cache-Control", "s-maxage=21600, stale-while-revalidate=86400")
+        # 24 saat cache: TEFAS bir defa akşam yayınlar; bir sonraki yayına kadar
+        # NAV değişmez. stale-while-revalidate ile arka planda yenileme.
+        self.send_header("Cache-Control", "s-maxage=86400, stale-while-revalidate=172800")
         self.end_headers()
         self.wfile.write(payload.encode("utf-8"))

@@ -137,5 +137,24 @@ export async function GET(req: NextRequest) {
     source: "tefas",
   };
 
+  // 4) Ingest log'a yaz (best-effort — başarısız olursa sessizce devam et)
+  const triggeredBy = req.headers.get("x-triggered-by") ?? "cron";
+  const { error: logErr } = await supabase
+    .from("tefas_ingest_log")
+    .insert({
+      duration_ms: result.duration_ms,
+      requested: result.requested,
+      succeeded: result.succeeded,
+      upserted: result.upserted,
+      failed_count: result.failed_count,
+      failed_codes: result.failed_codes,
+      upsert_error: result.upsert_error ?? null,
+      source: result.source,
+      triggered_by: triggeredBy,
+    } as never);
+  if (logErr) {
+    console.error("tefas_ingest_log insert failed:", logErr.message);
+  }
+
   return NextResponse.json(result, { status: upsertError ? 500 : 200 });
 }

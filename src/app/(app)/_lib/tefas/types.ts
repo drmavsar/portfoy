@@ -11,6 +11,8 @@ export type {
   TaxRulesAuditRow as TaxRulesAuditEntry,
   TrackedFundRow as TrackedFund,
   FundPriceRow as FundPrice,
+  TefasIngestLogRow as TefasIngestLog,
+  TefasFundHealthRow as TefasFundHealth,
   FundTaxKind,
   FundInvestmentUniverse,
   FundTaxConfidence,
