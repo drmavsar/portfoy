@@ -33,6 +33,7 @@ from urllib.parse import urlparse, parse_qs
 import json
 import os
 import traceback
+import urllib.error
 import urllib.request
 
 EVDS_BASE = "https://evds2.tcmb.gov.tr/service/evds/series"
@@ -79,6 +80,12 @@ def fetch_evds(series_evds: str, start_iso: str, end_iso: str, api_key: str):
     """EVDS API'sinden seri verilerini çek.
 
     start/end formatı EVDS için 'DD-MM-YYYY'. Aylık veri için gün hep '01'.
+
+    EVDS 5 Nisan 2024'ten sonra API key'i HTTP header'da bekliyor (eskiden
+    query parametresiydi). Hem header hem query'ye koyuyoruz — geriye dönük
+    uyum için.
+
+    Yanıt JSON değilse (genelde HTML hata sayfası) ayrıntılı hata fırlatır.
     """
     sy, sm = start_iso.split("-")
     ey, em = end_iso.split("-")
@@ -94,14 +101,54 @@ def fetch_evds(series_evds: str, start_iso: str, end_iso: str, api_key: str):
         f"&aggregationTypes=avg"
         f"&formulas=0"
         f"&decimalSeperator=."
+        f"&key={api_key}"  # legacy / geriye dönük destek
     )
     req = urllib.request.Request(
         url,
-        headers={"key": api_key, "User-Agent": "portfoy-cpi-ingest/1.0"},
+        headers={
+            "key": api_key,
+            "User-Agent": "Mozilla/5.0 (compatible; portfoy-cpi-ingest/1.0)",
+            "Accept": "application/json",
+        },
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        body = resp.read().decode("utf-8")
-    return json.loads(body)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            status = resp.status
+            content_type = resp.headers.get("Content-Type", "unknown")
+            body = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as he:
+        body = he.read().decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"EVDS HTTP {he.code}: content-type={he.headers.get('Content-Type', 'unknown')}, "
+            f"body[0:300]={body[:300]!r}"
+        )
+
+    # JSON değilse açıklayıcı hata
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as je:
+        is_html = body.lstrip().lower().startswith(("<", "&lt;"))
+        kind = "HTML" if is_html else "non-JSON"
+        # Olası nedenler diagnostik:
+        hints = []
+        if is_html and "captcha" in body.lower():
+            hints.append("EVDS CAPTCHA döndürdü (rate limit veya IP block olabilir)")
+        if is_html and "login" in body.lower():
+            hints.append("EVDS login sayfası döndü — API key geçersiz veya süresi dolmuş")
+        if "Forbidden" in body or "403" in body:
+            hints.append("403 Forbidden — IP veya User-Agent reject")
+        if api_key and len(api_key) < 20:
+            hints.append(f"API key kısa görünüyor (len={len(api_key)}) — yanlış kopyalanmış olabilir")
+        hint_str = " | ".join(hints) if hints else "EVDS'nin yanıt formatı değişmiş olabilir"
+
+        raise RuntimeError(
+            f"EVDS {kind} döndü (JSON beklenirken). "
+            f"status={status}, content-type={content_type}, "
+            f"url={url.replace(api_key, '***' if api_key else '')}, "
+            f"hints={hint_str}, "
+            f"body[0:300]={body[:300]!r}, "
+            f"json_error={je}"
+        )
 
 
 def build_rows(evds_json, evds_field):
@@ -152,13 +199,28 @@ class handler(BaseHTTPRequestHandler):
 
             evds_series = SERIES_MAP[series_code]
 
-            api_key = os.environ.get("EVDS_API_KEY")
+            api_key = (os.environ.get("EVDS_API_KEY") or "").strip()
             if not api_key:
                 self._respond(500, {
                     "ok": False,
-                    "error": "EVDS_API_KEY env var eksik (TCMB EVDS portalından ücretsiz alınır)",
+                    "error": "EVDS_API_KEY env var eksik veya boş",
+                    "fix": "Vercel Project Settings → Environment Variables → EVDS_API_KEY ekle. "
+                           "TCMB EVDS portal (https://evds2.tcmb.gov.tr) → Profil → API anahtarı. "
+                           "Ekledikten sonra Vercel'de redeploy gerekli.",
                 })
                 return
+
+            # Sanity: çoğu API key uzunluğu ≥ 24
+            if len(api_key) < 16:
+                self._respond(500, {
+                    "ok": False,
+                    "error": f"EVDS_API_KEY anlamsız kısa (len={len(api_key)})",
+                    "hint": "Çoğu EVDS key 24+ karakterdir. Vercel env var değerini yeniden kontrol et.",
+                })
+                return
+
+            # Debug mode: raw EVDS yanıtını döndür (parse etmeden)
+            debug = qs.get("debug", ["0"])[0] == "1"
 
             today = date.today()
             start = qs.get("start", ["2010-01"])[0]
@@ -173,6 +235,30 @@ class handler(BaseHTTPRequestHandler):
                     "ok": False,
                     "error": "start/end YYYY-MM formatında olmalı",
                 })
+                return
+
+            if debug:
+                # Raw EVDS yanıtını döndür (parse etmeden) — diagnostic için
+                try:
+                    data = fetch_evds(evds_series, start, end, api_key)
+                    self._respond(200, {
+                        "ok": True,
+                        "debug": True,
+                        "evds_raw_keys": list(data.keys()) if isinstance(data, dict) else None,
+                        "evds_items_count": len(data.get("items", [])) if isinstance(data, dict) else 0,
+                        "evds_items_sample": data.get("items", [])[:3] if isinstance(data, dict) else None,
+                        "api_key_len": len(api_key),
+                        "api_key_first6": api_key[:6] + "***",
+                    })
+                except Exception as e:
+                    self._respond(500, {
+                        "ok": False,
+                        "debug": True,
+                        "stage": "fetch_evds_debug",
+                        "error": str(e),
+                        "api_key_len": len(api_key),
+                        "api_key_first6": api_key[:6] + "***",
+                    })
                 return
 
             data = fetch_evds(evds_series, start, end, api_key)
