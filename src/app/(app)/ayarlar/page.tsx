@@ -3,6 +3,9 @@ import {
   listBeneficiariesLite,
   listCustodyLocations,
 } from "@/app/(app)/hesaplar/actions";
+import { listFunds, listFundCategories } from "@/app/(app)/_lib/tefas/funds-actions";
+import { listTrackedFunds } from "@/app/(app)/_lib/tefas/tracked-funds-actions";
+import { listTaxRules } from "@/app/(app)/_lib/tefas/tax-rules-actions";
 
 import { AyarlarClient } from "./ayarlar-client";
 import {
@@ -23,6 +26,10 @@ export default async function AyarlarPage() {
     accounts,
     custodies,
     beneficiariesLite,
+    tefasFunds,
+    tefasCategories,
+    tefasTracked,
+    tefasTaxRules,
   ] = await Promise.all([
     isSupabaseConfigured(),
     listBeneficiaries(),
@@ -31,6 +38,10 @@ export default async function AyarlarPage() {
     listAccounts(),
     listCustodyLocations(),
     listBeneficiariesLite(),
+    listFunds(),
+    listFundCategories(),
+    listTrackedFunds(),
+    listTaxRules({ activeOnly: true }),
   ]);
 
   return (
@@ -42,6 +53,10 @@ export default async function AyarlarPage() {
       custodies={custodies}
       beneficiariesLite={beneficiariesLite}
       supabaseConfigured={configured}
+      tefasFunds={tefasFunds}
+      tefasCategories={tefasCategories}
+      tefasTracked={tefasTracked}
+      tefasTaxRules={tefasTaxRules}
     />
   );
 }
