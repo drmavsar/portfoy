@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "tefas:quality": "tsx scripts/tefas-seed-quality-report.ts"
+    "tefas:quality": "tsx scripts/tefas-seed-quality-report.ts",
+    "tefas:prices:poc": "tsx scripts/tefas-prices-poc.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",

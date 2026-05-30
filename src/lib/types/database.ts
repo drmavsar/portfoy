@@ -37,6 +37,7 @@ export interface Database {
       fund_tax_rules: TableShape<FundTaxRuleRow, FundTaxRuleInsert>;
       tax_rules_audit: TableShape<TaxRulesAuditRow, TaxRulesAuditInsert>;
       tracked_funds: TableShape<TrackedFundRow, TrackedFundInsert>;
+      fund_prices: TableShape<FundPriceRow, FundPriceInsert>;
     };
     Views: {
       v_account_balances: { Row: AccountBalanceRow };
@@ -44,6 +45,7 @@ export interface Database {
       v_screener_today: { Row: ScreenerTodayRow };
       v_monthly_cashflow: { Row: MonthlyCashflowRow };
       v_beneficiary_spend: { Row: BeneficiarySpendRow };
+      v_fund_prices_latest: { Row: FundPriceRow };
     };
     Functions: {
       bootstrap_user_defaults: { Args: Record<string, never>; Returns: void };
@@ -552,4 +554,20 @@ export interface TrackedFundRow {
 }
 export type TrackedFundInsert = Omit<TrackedFundRow, "id" | "added_at"> & {
   id?: string;
+};
+
+export interface FundPriceRow {
+  fund_code: string;
+  as_of: string;
+  nav: number;
+  total_value_try: number | null;
+  investor_count: number | null;
+  share_count: number | null;
+  management_fee_annual_pct: number | null;
+  expense_ratio_pct: number | null;
+  source: string;
+  fetched_at: string;
+}
+export type FundPriceInsert = Omit<FundPriceRow, "fetched_at"> & {
+  fetched_at?: string;
 };

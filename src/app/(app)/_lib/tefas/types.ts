@@ -10,6 +10,7 @@ export type {
   FundTaxRuleRow as FundTaxRule,
   TaxRulesAuditRow as TaxRulesAuditEntry,
   TrackedFundRow as TrackedFund,
+  FundPriceRow as FundPrice,
   FundTaxKind,
   FundInvestmentUniverse,
   FundTaxConfidence,
