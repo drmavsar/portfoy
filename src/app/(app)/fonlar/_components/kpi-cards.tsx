@@ -19,19 +19,29 @@ function avg(values: Array<number | null | undefined>): number | null {
   return xs.reduce((a, b) => a + b, 0) / xs.length;
 }
 
+function safeMax(values: Array<number | null | undefined>): number | null {
+  const xs = values.filter((v): v is number => v != null && Number.isFinite(v));
+  if (xs.length === 0) return null;
+  return Math.max(...xs);
+}
+
 export function KpiCards({ scores, funds }: Props) {
   const codeToFund = new Map(funds.map((f) => [f.code, f]));
 
   const mehmetScores = scores.map((s) => s.mehmet_score);
+  const scoredCount = mehmetScores.filter((v): v is number => v != null).length;
   const medianMehmet = median(mehmetScores);
-  const topMehmet = Math.max(...mehmetScores.filter((v): v is number => v != null));
+  const topMehmet = safeMax(mehmetScores);
 
   const hsyfScores = scores
     .filter((s) => codeToFund.get(s.fund_code)?.is_equity_intensive)
     .map((s) => s.mehmet_score);
   const hsyfAvg = avg(hsyfScores);
+  const hsyfScored = hsyfScores.filter((v): v is number => v != null).length;
 
-  const top10Real = [...scores]
+  // Top 10 hesaplaması — sadece skoru hesaplanmış fonlar arasından.
+  const top10Real = scores
+    .filter((s) => s.mehmet_score != null)
     .sort((a, b) => (b.mehmet_score ?? 0) - (a.mehmet_score ?? 0))
     .slice(0, 10);
   // Top 10 fonun "inflation_protection_score" ortalaması — reel getirinin
@@ -42,24 +52,36 @@ export function KpiCards({ scores, funds }: Props) {
     {
       label: "Mehmet Score",
       value: medianMehmet != null ? medianMehmet.toFixed(0) : "—",
-      sub: `medyan · top ${topMehmet}`,
+      sub:
+        topMehmet != null
+          ? `medyan · top ${topMehmet}`
+          : "henüz hesaplanmadı (NAV history bekleniyor)",
     },
     {
       label: "HSYF Avg",
       value: hsyfAvg != null ? hsyfAvg.toFixed(0) : "—",
-      sub: `${hsyfScores.length} fon · stopaj %0`,
+      sub:
+        hsyfAvg != null
+          ? `${hsyfScored} fon · stopaj %0`
+          : `${hsyfScores.length} fon · skor yok`,
       color: "#c44569",
     },
     {
       label: "Reel Koruma (Top 10)",
       value: top10ReelAvg != null ? top10ReelAvg.toFixed(0) : "—",
-      sub: "enflasyon koruma ortalaması",
+      sub:
+        top10ReelAvg != null
+          ? "enflasyon koruma ortalaması"
+          : "real_1y için NAV history gerek",
       color: "#4cc9b0",
     },
     {
       label: "Skor Kapsamı",
-      value: `${scores.length}/${funds.length}`,
-      sub: `${Math.round((scores.length / Math.max(1, funds.length)) * 100)}% fon skorlu`,
+      value: `${scoredCount}/${funds.length}`,
+      sub:
+        scoredCount === 0
+          ? `${scores.length} satır var, hesaplama bekleniyor`
+          : `${Math.round((scoredCount / Math.max(1, funds.length)) * 100)}% fon skorlu`,
     },
   ];
 

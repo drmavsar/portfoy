@@ -32,6 +32,23 @@ export function TopMehmetTable({ scores, funds, categories }: Props) {
     .sort((a, b) => (b.mehmet_score ?? 0) - (a.mehmet_score ?? 0))
     .slice(0, 10);
 
+  if (top10.length === 0) {
+    return (
+      <div className="card">
+        <div className="card-head">
+          <div className="card-title">Top 10 Mehmet Score</div>
+          <div className="card-sub">veri yok</div>
+        </div>
+        <div style={{ padding: 14, fontSize: 12, color: "var(--muted)" }}>
+          {scores.length} fon için skor satırı var ama tümünde{" "}
+          <code>mehmet_score = null</code>. Mehmet Score 5 component üzerine kuruludur;
+          performance / risk / inflation_protection için en az 1 yıllık NAV history
+          gerekir. NAV backfill çalıştırıldıktan sonra skor dolar.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="card">
       <div className="card-head">
