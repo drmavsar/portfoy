@@ -141,20 +141,24 @@ export async function refreshAllFundScores(): Promise<{
   const cutoff = new Date();
   cutoff.setFullYear(cutoff.getFullYear() - 4);
   const cutoffIso = cutoff.toISOString().slice(0, 10);
-  // .range() ile PostgREST default 1000 satır limitini bypass et.
-  // 155 fon × ~1000 satır (4Y) = ~155k; geniş tampon ver (500k).
-  const { data: pricesData } = await supabase
-    .from("fund_prices")
-    .select("fund_code, as_of, nav")
-    .gte("as_of", cutoffIso)
-    .order("fund_code", { ascending: true })
-    .order("as_of", { ascending: true })
-    .range(0, 499999);
+  // PostgREST hard max-rows cap'i için pagination loop.
   const seriesByFund = new Map<string, NavPoint[]>();
-  for (const row of (pricesData ?? []) as Array<{ fund_code: string; as_of: string; nav: number }>) {
-    const list = seriesByFund.get(row.fund_code) ?? [];
-    list.push({ as_of: row.as_of, nav: Number(row.nav) });
-    seriesByFund.set(row.fund_code, list);
+  const PAGE = 1000;
+  for (let off = 0; ; off += PAGE) {
+    const { data } = await supabase
+      .from("fund_prices")
+      .select("fund_code, as_of, nav")
+      .gte("as_of", cutoffIso)
+      .order("fund_code", { ascending: true })
+      .order("as_of", { ascending: true })
+      .range(off, off + PAGE - 1);
+    const chunk = (data ?? []) as Array<{ fund_code: string; as_of: string; nav: number }>;
+    for (const row of chunk) {
+      const list = seriesByFund.get(row.fund_code) ?? [];
+      list.push({ as_of: row.as_of, nav: Number(row.nav) });
+      seriesByFund.set(row.fund_code, list);
+    }
+    if (chunk.length < PAGE) break;
   }
 
   // 4-5) Hesap + payload

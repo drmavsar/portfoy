@@ -135,26 +135,33 @@ export async function refreshAllFundReturns(): Promise<{
   const cutoff = new Date();
   cutoff.setFullYear(cutoff.getFullYear() - 6);
   const cutoffIso = cutoff.toISOString().slice(0, 10);
-  // .range() ile PostgREST default 1000 satır limitini bypass et.
-  // 155 fon × ~1250 satır = ~190k; geniş tampon ver (500k).
-  const { data: pricesData, error: pricesErr } = await supabase
-    .from("fund_prices")
-    .select("fund_code, as_of, nav")
-    .gte("as_of", cutoffIso)
-    .order("fund_code", { ascending: true })
-    .order("as_of", { ascending: true })
-    .range(0, 499999);
-  if (pricesErr) {
-    return {
-      ok: false,
-      processed: 0,
-      upserted: 0,
-      skipped: [],
-      duration_ms: Date.now() - start,
-      error: pricesErr.message,
-    };
+  // PostgREST hard max-rows cap'i (Supabase project default 1000) için
+  // pagination loop. Tek .range() çağrısı yetmez — server kapsa, .range()
+  // sadece istemci tarafında istek belirtir; max-rows server'da sabit.
+  const rawPrices: Array<{ fund_code: string; as_of: string; nav: number }> = [];
+  const PAGE = 1000;
+  for (let off = 0; ; off += PAGE) {
+    const { data, error } = await supabase
+      .from("fund_prices")
+      .select("fund_code, as_of, nav")
+      .gte("as_of", cutoffIso)
+      .order("fund_code", { ascending: true })
+      .order("as_of", { ascending: true })
+      .range(off, off + PAGE - 1);
+    if (error) {
+      return {
+        ok: false,
+        processed: 0,
+        upserted: 0,
+        skipped: [],
+        duration_ms: Date.now() - start,
+        error: error.message,
+      };
+    }
+    const chunk = (data ?? []) as Array<{ fund_code: string; as_of: string; nav: number }>;
+    rawPrices.push(...chunk);
+    if (chunk.length < PAGE) break;
   }
-  const rawPrices = (pricesData ?? []) as Array<{ fund_code: string; as_of: string; nav: number }>;
   const seriesByFund = new Map<string, NavPoint[]>();
   for (const row of rawPrices) {
     const list = seriesByFund.get(row.fund_code) ?? [];
