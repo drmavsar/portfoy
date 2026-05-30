@@ -7,6 +7,13 @@
 
 import { cpiPeriodForNavDate, realReturnFromCpiPair } from "./cpi-logic";
 
+/**
+ * CPI fallback toleransı (ay). NAV son ayı için CPI henüz yayınlanmamışsa
+ * en son available CPI dönemine kadar bu kadar aya geri gidebilir.
+ * Üstündeyse `missing_cpi_end` warning'i + `cpi_lag_exceeded_max=N` ile fail.
+ */
+export const MAX_CPI_LAG_MONTHS = 6;
+
 /** Tek bir NAV gözlemi. */
 export interface NavPoint {
   /** "YYYY-MM-DD" */
@@ -55,6 +62,39 @@ function shiftIsoBack(asOf: string, daysBack: number): string {
 /** Yıl başı: as_of'un yılının "YYYY-01-01"i. */
 function yearStart(asOf: string): string {
   return `${asOf.slice(0, 4)}-01-01`;
+}
+
+/** "YYYY-MM" iki dönem arasındaki ay farkı (her zaman pozitif). */
+function monthsBetweenPeriods(a: string, b: string): number {
+  const [ya, ma] = a.split("-").map(Number);
+  const [yb, mb] = b.split("-").map(Number);
+  return Math.abs((yb - ya) * 12 + (mb - ma));
+}
+
+/** Bir CpiByPeriod sözlüğünden en son (lexicographically max) periyod. */
+function latestCpiPeriod(cpi: CpiByPeriod): string | null {
+  let max: string | null = null;
+  for (const p of Object.keys(cpi)) {
+    if (!Number.isFinite(cpi[p])) continue;
+    if (max === null || p > max) max = p;
+  }
+  return max;
+}
+
+/**
+ * Verilen CPI period (YYYY-MM) için NAV as_of ankrası: bir SONRAKİ ayın 15'i.
+ * cpiPeriodForNavDate() bir önceki aya gittiği için, "15" güvenli orta gün
+ * her zaman doğru CPI period'a map edilir (ay sonu overflow problemi yok).
+ */
+function navAnchorForCpiPeriod(period: string): string {
+  const [y, m] = period.split("-").map(Number);
+  let yy = y;
+  let mm = m + 1;
+  if (mm > 12) {
+    mm = 1;
+    yy += 1;
+  }
+  return `${String(yy).padStart(4, "0")}-${String(mm).padStart(2, "0")}-15`;
 }
 
 /**
@@ -162,29 +202,86 @@ export function computeFundReturns(
   if (!cpi || Object.keys(cpi).length === 0) {
     warnings.push("no_cpi_data");
   } else {
-    const endPeriod = cpiPeriodForNavDate(asOf);
-    const endCpi = cpi[endPeriod] ?? null;
-    if (endCpi == null) {
-      warnings.push("missing_cpi_end");
+    const expectedEndPeriod = cpiPeriodForNavDate(asOf);
+    const exactEndCpi = cpi[expectedEndPeriod];
+
+    // CPI fallback: NAV son ayı için CPI henüz yayınlanmamışsa en son
+    // available periyoda kadar geri kay (max MAX_CPI_LAG_MONTHS).
+    // Pencere ucu (asOf) da aynı kadar geri kaydırılır → real_* tutarlı
+    // bir 1Y/3Y/5Y pencere üzerinden hesaplanır.
+    let resolvedEndPeriod: string | null = null;
+    let resolvedEndCpi: number | null = null;
+    let resolvedAsOf: string = asOf;
+    let cpiLagMonths = 0;
+
+    if (exactEndCpi != null && Number.isFinite(exactEndCpi)) {
+      resolvedEndPeriod = expectedEndPeriod;
+      resolvedEndCpi = exactEndCpi;
     } else {
-      computedFromPeriod = endPeriod;
-      if (gross_1y != null && start1y) {
-        const startPeriod = cpiPeriodForNavDate(start1y.as_of);
-        real_1y = realReturnFromCpiPair(gross_1y, cpi[startPeriod] ?? null, endCpi);
+      const latest = latestCpiPeriod(cpi);
+      if (latest != null && latest < expectedEndPeriod) {
+        const lag = monthsBetweenPeriods(latest, expectedEndPeriod);
+        if (lag <= MAX_CPI_LAG_MONTHS) {
+          resolvedEndPeriod = latest;
+          resolvedEndCpi = cpi[latest];
+          // Pencere ucunu CPI period'a uyumlu bir NAV tarihine indir
+          // (sonraki ayın 15'i — cpiPeriodForNavDate ile latest'a map).
+          resolvedAsOf = navAnchorForCpiPeriod(latest);
+          cpiLagMonths = lag;
+          warnings.push("cpi_lag_fallback_used");
+          warnings.push(`cpi_lag_months=${lag}`);
+        } else {
+          warnings.push("missing_cpi_end");
+          warnings.push(`cpi_lag_exceeded_max=${lag}`);
+        }
+      } else {
+        warnings.push("missing_cpi_end");
+      }
+    }
+
+    if (resolvedEndCpi != null && resolvedEndPeriod != null) {
+      computedFromPeriod = resolvedEndPeriod;
+      // Fallback durumunda pencere ucunu shiftedAsOf'a indir → nominal
+      // hesabı da bu kaydırılmış uca göre yeniden yap (CPI penceresi ile
+      // uyumlu olsun).
+      let useStart1y = start1y;
+      let useStart3y = start3y;
+      let useStart5y = start5y;
+      let useLatest = latest;
+      let useTotal3y = total_3y;
+      let useTotal5y = total_5y;
+      let useGross1y = gross_1y;
+      if (cpiLagMonths > 0) {
+        const endPoint = findOnOrBefore(series, resolvedAsOf, tolerance * 2);
+        if (endPoint) {
+          useLatest = endPoint;
+          useStart1y = findOnOrBefore(series, shiftIsoBack(endPoint.as_of, 365), tolerance);
+          useStart3y = findOnOrBefore(series, shiftIsoBack(endPoint.as_of, 365 * 3), tolerance * 2);
+          useStart5y = findOnOrBefore(series, shiftIsoBack(endPoint.as_of, 365 * 5), tolerance * 2);
+          useGross1y = windowReturn(useStart1y, endPoint);
+          useTotal3y = windowReturn(useStart3y, endPoint);
+          useTotal5y = windowReturn(useStart5y, endPoint);
+        }
+      }
+
+      if (useGross1y != null && useStart1y) {
+        const startPeriod = cpiPeriodForNavDate(useStart1y.as_of);
+        real_1y = realReturnFromCpiPair(useGross1y, cpi[startPeriod] ?? null, resolvedEndCpi);
         if (real_1y == null) warnings.push("missing_cpi_1y");
       }
-      if (gross_3y_cagr != null && total_3y != null && start3y) {
-        const startPeriod = cpiPeriodForNavDate(start3y.as_of);
-        const total_real_3y = realReturnFromCpiPair(total_3y, cpi[startPeriod] ?? null, endCpi);
+      if (useTotal3y != null && useStart3y) {
+        const startPeriod = cpiPeriodForNavDate(useStart3y.as_of);
+        const total_real_3y = realReturnFromCpiPair(useTotal3y, cpi[startPeriod] ?? null, resolvedEndCpi);
         real_3y_cagr = annualize(total_real_3y, 3);
         if (total_real_3y == null) warnings.push("missing_cpi_3y");
       }
-      if (gross_5y_cagr != null && total_5y != null && start5y) {
-        const startPeriod = cpiPeriodForNavDate(start5y.as_of);
-        const total_real_5y = realReturnFromCpiPair(total_5y, cpi[startPeriod] ?? null, endCpi);
+      if (useTotal5y != null && useStart5y) {
+        const startPeriod = cpiPeriodForNavDate(useStart5y.as_of);
+        const total_real_5y = realReturnFromCpiPair(useTotal5y, cpi[startPeriod] ?? null, resolvedEndCpi);
         real_5y_cagr = annualize(total_real_5y, 5);
         if (total_real_5y == null) warnings.push("missing_cpi_5y");
       }
+      void useLatest; // shifted end point — debug için tutuluyor
     }
   }
 

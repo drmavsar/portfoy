@@ -174,17 +174,59 @@ describe("computeFundReturns — reel getiri (CPI Fisher)", () => {
     expect(r!.computed_from_period).toBe("2026-04");
   });
 
-  it("CPI end yoksa real_1y null + missing_cpi_end warning", () => {
+  it("CPI end yoksa real_1y null + missing_cpi_end warning (lag > 6 ay)", () => {
+    // expected period 2026-04, latest 2025-04 → lag 12 ay > MAX_CPI_LAG_MONTHS
     const series = makeSeries({
       baseStart: 100,
       baseEnd: 150,
       startDate: "2025-05-30",
       endDate: "2026-05-30",
     });
-    const cpi = { "2025-04": 1000 }; // end period eksik
+    const cpi = { "2025-04": 1000 };
     const r = computeFundReturns(series, { cpi });
     expect(r!.real_1y).toBeNull();
     expect(r!.warnings).toContain("missing_cpi_end");
+    expect(r!.warnings.some((w) => w.startsWith("cpi_lag_exceeded_max="))).toBe(true);
+  });
+
+  it("CPI fallback: latest CPI 4 ay eski (lag ≤ 6) → real_1y dolar + warning", () => {
+    // 2 yıllık seri — fallback için 1Y geri kayma yapacağız
+    // NAV: 2024-05-30 → 2026-05-30, %50 toplam büyüme
+    const series = makeSeries({
+      baseStart: 100,
+      baseEnd: 200, // 2 yılda 2x
+      startDate: "2024-05-30",
+      endDate: "2026-05-30",
+    });
+    // CPI: 2026-01 latest (expected 2026-04 → lag 3 ay), 2025-01 startCpi available
+    // Pencere shifted: asOf shifted back 3 ay → 2026-02-28, start1y → 2025-02-28
+    // start CPI for shifted: cpiPeriodForNavDate("2025-02-28") = 2025-01
+    const cpi = {
+      "2025-01": 1500,
+      "2026-01": 1800, // %20 enflasyon 1Y'da (2025-01 → 2026-01)
+    };
+    const r = computeFundReturns(series, { cpi });
+    expect(r!.real_1y).not.toBeNull();
+    expect(r!.warnings).toContain("cpi_lag_fallback_used");
+    expect(r!.warnings).toContain("cpi_lag_months=3");
+    expect(r!.computed_from_period).toBe("2026-01");
+    // Shifted nominal: NAV 2025-02-28 → 2026-02-28, ratio = 2^(1Y/2Y) = √2
+    // nominal_shifted ≈ 0.4142 (yani %41.4)
+    // real = (1+0.4142)/(1+0.20) - 1 ≈ 0.1785 (%17.85)
+    expect(r!.real_1y).toBeCloseTo(0.1785, 1);
+  });
+
+  it("CPI fallback: tam eşleşme varsa fallback warning üretmez", () => {
+    const series = makeSeries({
+      baseStart: 100,
+      baseEnd: 150,
+      startDate: "2025-05-30",
+      endDate: "2026-05-30",
+    });
+    const cpi = { "2025-04": 1000, "2026-04": 1200 };
+    const r = computeFundReturns(series, { cpi });
+    expect(r!.warnings).not.toContain("cpi_lag_fallback_used");
+    expect(r!.computed_from_period).toBe("2026-04");
   });
 
   it("3Y reel CAGR: nominal %120, enflasyon %100 (3 yılda) → reel CAGR ≈ %3.2", () => {

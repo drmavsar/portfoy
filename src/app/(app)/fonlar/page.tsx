@@ -104,6 +104,7 @@ export default async function FonlarDashboardPage() {
           lastReturnsRefresh={lastReturnsRefresh.log}
           lastScoresRefresh={lastScoresRefresh.log}
           latestCpi={latestCpi}
+          returns={returns}
         />
 
         {scores.length === 0 ? (
