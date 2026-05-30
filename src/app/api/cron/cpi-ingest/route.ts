@@ -60,38 +60,83 @@ export async function GET(req: NextRequest) {
   }
 
   const seriesCode = req.nextUrl.searchParams.get("series")?.toUpperCase() ?? DEFAULT_SERIES;
+  const debug = req.nextUrl.searchParams.get("debug") === "1";
+  const startParam = req.nextUrl.searchParams.get("start");
+  const endParam = req.nextUrl.searchParams.get("end");
 
   const baseUrl =
     process.env.NEXT_PUBLIC_BASE_URL ??
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ??
     req.nextUrl.origin;
 
-  // 1) Python endpoint'ten serileri çek
+  // 1) Python endpoint'ten serileri çek — debug + tarih parametreleri forward
   const pyUrl = new URL("/api/cpi-ingest", baseUrl);
   pyUrl.searchParams.set("series", seriesCode);
-  // start/end parametrelerini default'a bırak (Python: 2010-01 → bugünün ayı)
+  if (debug) pyUrl.searchParams.set("debug", "1");
+  if (startParam) pyUrl.searchParams.set("start", startParam);
+  if (endParam) pyUrl.searchParams.set("end", endParam);
 
-  let py: CpiIngestPyResponse;
+  // Python yanıtını ham al; JSON parse edilemese bile body'i kullanıcıya göster
+  let res: Response;
   try {
-    const res = await fetch(pyUrl.toString(), { cache: "no-store" });
-    py = (await res.json()) as CpiIngestPyResponse;
-    if (!res.ok || !py.ok) {
-      return NextResponse.json(
-        {
-          ok: false,
-          stage: "fetch_evds",
-          error: py.error ?? `HTTP ${res.status}`,
-          duration_ms: Date.now() - start,
-        },
-        { status: 502 },
-      );
-    }
+    res = await fetch(pyUrl.toString(), { cache: "no-store" });
   } catch (err) {
     return NextResponse.json(
       {
         ok: false,
-        stage: "fetch_evds",
+        stage: "fetch_python_endpoint",
         error: err instanceof Error ? err.message : String(err),
+        py_url: pyUrl.toString().replace(/key=[^&]+/, "key=***"),
+        duration_ms: Date.now() - start,
+      },
+      { status: 502 },
+    );
+  }
+
+  const responseContentType = res.headers.get("content-type") ?? "unknown";
+  const rawBody = await res.text();
+  let py: CpiIngestPyResponse & Record<string, unknown>;
+  try {
+    py = JSON.parse(rawBody) as CpiIngestPyResponse & Record<string, unknown>;
+  } catch {
+    // Python yanıtı JSON değil (Vercel 500 HTML sayfası, vb.) — full body döndür
+    return NextResponse.json(
+      {
+        ok: false,
+        stage: "python_response_not_json",
+        py_status: res.status,
+        py_content_type: responseContentType,
+        py_body_snippet: rawBody.slice(0, 1000),
+        duration_ms: Date.now() - start,
+      },
+      { status: 502 },
+    );
+  }
+
+  // Debug mode: Python'ın tüm yanıtını yansıt
+  if (debug) {
+    return NextResponse.json(
+      {
+        ok: py.ok ?? false,
+        stage: "debug",
+        py_status: res.status,
+        py_content_type: responseContentType,
+        py_response: py,
+        duration_ms: Date.now() - start,
+      },
+      { status: res.ok ? 200 : 502 },
+    );
+  }
+
+  if (!res.ok || !py.ok) {
+    // Python tarafından dönen hatayı tüm metadata ile yansıt
+    return NextResponse.json(
+      {
+        ok: false,
+        stage: "fetch_evds",
+        py_status: res.status,
+        py_content_type: responseContentType,
+        py_response: py,
         duration_ms: Date.now() - start,
       },
       { status: 502 },
