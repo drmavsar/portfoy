@@ -43,6 +43,7 @@ export interface Database {
       fund_returns_cache: TableShape<FundReturnsRow, FundReturnsInsert>;
       fund_returns_ingest_log: TableShape<FundReturnsIngestLogRow, FundReturnsIngestLogInsert>;
       user_personas: TableShape<UserPersonaRow, UserPersonaInsert>;
+      fund_scores_cache: TableShape<FundScoresRow, FundScoresInsert>;
     };
     Views: {
       v_account_balances: { Row: AccountBalanceRow };
@@ -55,6 +56,7 @@ export interface Database {
       v_cpi_monthly_yoy: { Row: CpiYoyRow };
       v_fund_returns_latest: { Row: FundReturnsRow };
       v_fund_returns_health: { Row: FundReturnsHealthRow };
+      v_fund_scores_latest: { Row: FundScoresRow };
     };
     Functions: {
       bootstrap_user_defaults: { Args: Record<string, never>; Returns: void };
@@ -731,4 +733,32 @@ export interface UserPersonaRow {
 }
 export type UserPersonaInsert = Omit<UserPersonaRow, "id" | "created_at" | "updated_at"> & {
   id?: string;
+};
+
+export interface FundScoresRow {
+  fund_code: string;
+  as_of: string;
+  persona_id: string;
+  volatility_1y: number | null;
+  max_drawdown_3y: number | null;
+  downside_volatility_1y: number | null;
+  sharpe_like_1y: number | null;
+  bist_correlation_1y: number | null;
+  gold_correlation_1y: number | null;
+  bist_source: string | null;
+  gold_source: string | null;
+  inflation_protection_score: number | null;
+  tax_advantage_score: number | null;
+  normalized_risk_score: number | null;
+  long_term_performance_score: number | null;
+  diversification_score: number | null;
+  bist_dependency_score: number | null;
+  gold_dependency_score: number | null;
+  mehmet_score: number | null;
+  components_used: number | null;
+  computed_at: string;
+  warnings: string[];
+}
+export type FundScoresInsert = Omit<FundScoresRow, "computed_at"> & {
+  computed_at?: string;
 };
