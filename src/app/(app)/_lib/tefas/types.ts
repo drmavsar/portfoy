@@ -17,6 +17,7 @@ export type {
   CpiYoyRow as CpiYoy,
   FundReturnsRow as FundReturns,
   UserPersonaRow as UserPersona,
+  FundScoresRow as FundScores,
   TaxConfidenceFilter,
   FundReturnsIngestLogRow as FundReturnsIngestLog,
   FundReturnsHealthRow as FundReturnsHealth,
