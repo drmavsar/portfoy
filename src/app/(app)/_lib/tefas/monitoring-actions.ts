@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import type {
   FundReturnsHealth,
   FundReturnsIngestLog,
+  FundScoresHealth,
+  FundScoresIngestLog,
   TefasFundHealth,
   TefasIngestLog,
 } from "./types";
@@ -129,6 +131,74 @@ export async function getLastReturnsRefreshSummary(): Promise<{
   skipped_codes: string[];
 }> {
   const logs = await listReturnsIngestLog(1);
+  const log = logs[0] ?? null;
+  return { log, skipped_codes: log?.skipped_codes ?? [] };
+}
+
+// ---------- Sprint-4 PR-4: fund_scores refresh monitoring -----------
+
+/**
+ * Skor refresh çalıştırmalarını döner (yeniden eskiye).
+ */
+export async function listScoresIngestLog(
+  limit: number = 10,
+): Promise<FundScoresIngestLog[]> {
+  if (!(await isSupabaseConfigured())) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("fund_scores_ingest_log")
+    .select("*")
+    .order("ran_at", { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.error("listScoresIngestLog error", error);
+    return [];
+  }
+  return (data ?? []) as FundScoresIngestLog[];
+}
+
+/**
+ * Her aktif fon × persona için skor sağlık durumu.
+ */
+export async function listScoresHealth(
+  personaId?: string,
+): Promise<FundScoresHealth[]> {
+  if (!(await isSupabaseConfigured())) return [];
+  const supabase = await createClient();
+  let q = supabase
+    .from("v_fund_scores_health")
+    .select("*")
+    .order("days_stale", { ascending: false, nullsFirst: true });
+  if (personaId) q = q.eq("persona_id", personaId);
+  const { data, error } = await q;
+  if (error) {
+    console.error("listScoresHealth error", error);
+    return [];
+  }
+  return (data ?? []) as FundScoresHealth[];
+}
+
+/**
+ * `daysThreshold` günden eski (veya hiç skor üretilmemiş) fon×persona kayıtları.
+ */
+export async function listStaleScores(
+  daysThreshold: number = 3,
+  personaId?: string,
+): Promise<FundScoresHealth[]> {
+  const all = await listScoresHealth(personaId);
+  return all.filter(
+    (h) => h.last_as_of === null || (h.days_stale ?? 0) >= daysThreshold,
+  );
+}
+
+/**
+ * Son skor refresh özeti + atlanan fon kodları.
+ */
+export async function getLastScoresRefreshSummary(): Promise<{
+  log: FundScoresIngestLog | null;
+  skipped_codes: string[];
+}> {
+  const logs = await listScoresIngestLog(1);
   const log = logs[0] ?? null;
   return { log, skipped_codes: log?.skipped_codes ?? [] };
 }

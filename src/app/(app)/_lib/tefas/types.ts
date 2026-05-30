@@ -18,6 +18,8 @@ export type {
   FundReturnsRow as FundReturns,
   UserPersonaRow as UserPersona,
   FundScoresRow as FundScores,
+  FundScoresIngestLogRow as FundScoresIngestLog,
+  FundScoresHealthRow as FundScoresHealth,
   TaxConfidenceFilter,
   FundReturnsIngestLogRow as FundReturnsIngestLog,
   FundReturnsHealthRow as FundReturnsHealth,
