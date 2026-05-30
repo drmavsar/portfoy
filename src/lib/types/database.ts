@@ -32,6 +32,11 @@ export interface Database {
       price_snapshots: TableShape<PriceSnapshotRow, PriceSnapshotInsert>;
       screener_ranks: TableShape<ScreenerRankRow, ScreenerRankInsert>;
       catalyst_events: TableShape<CatalystRow, CatalystInsert>;
+      fund_categories: TableShape<FundCategoryRow, FundCategoryInsert>;
+      funds: TableShape<FundRow, FundInsert>;
+      fund_tax_rules: TableShape<FundTaxRuleRow, FundTaxRuleInsert>;
+      tax_rules_audit: TableShape<TaxRulesAuditRow, TaxRulesAuditInsert>;
+      tracked_funds: TableShape<TrackedFundRow, TrackedFundInsert>;
     };
     Views: {
       v_account_balances: { Row: AccountBalanceRow };
@@ -430,3 +435,121 @@ export interface BeneficiarySpendRow {
   period: string;
   total_try: number;
 }
+
+// ---------- TEFAS Sprint-1 ----------------------------------------------
+
+export type FundTaxKind =
+  | "HSYF_0_STOPAJ"
+  | "GENEL_17_5"
+  | "DOVIZ_BAZLI"
+  | "SERBEST_FON"
+  | "BELIRSIZ";
+
+export type FundInvestmentUniverse =
+  | "BIST_HISSE_TR"
+  | "BIST_KATILIM_30"
+  | "KIRA_SERTIFIKASI_TRY"
+  | "KIRA_SERTIFIKASI_FX"
+  | "ALTIN"
+  | "GUMUS"
+  | "KIYMETLI_MADEN_KARMA"
+  | "TEKNOLOJI_HISSE"
+  | "SEKTOREL_BIST"
+  | "KATILIM_PARA_PIYASASI"
+  | "COKLU_VARLIK"
+  | "ULUSLARARASI_HISSE"
+  | "DOVIZ_SERBEST_USD"
+  | "DOVIZ_SERBEST_EUR"
+  | "ARBITRAJ"
+  | "FON_SEPETI"
+  | "DIGER";
+
+export type FundTaxConfidence = "HIGH" | "MEDIUM" | "LOW" | "NONE";
+export type FundTaxRuleScope = "FUND" | "CATEGORY" | "TAX_KIND";
+export type TaxAuditOperation = "INSERT" | "UPDATE" | "DELETE" | "DEACTIVATE";
+
+export interface FundCategoryRow {
+  id: number;
+  code: string;
+  name_tr: string;
+  color: string | null;
+  default_tax_kind: FundTaxKind;
+  default_risk_band: string | null;
+  sort_order: number;
+  notes: string | null;
+  created_at: string;
+}
+export type FundCategoryInsert = Omit<FundCategoryRow, "id" | "created_at"> & {
+  id?: number;
+};
+
+export interface FundRow {
+  code: string;
+  name: string;
+  category_id: number;
+  currency: "TRY" | "USD" | "EUR";
+  is_participation: boolean;
+  is_equity_intensive: boolean;
+  is_free_fund: boolean;
+  is_fx_denominated: boolean;
+  is_tefas_traded: boolean;
+  risk_level: number | null;
+  management_firm: string | null;
+  fund_type: string | null;
+  investment_universe: FundInvestmentUniverse;
+  tax_confidence: FundTaxConfidence;
+  metadata: Json;
+  is_active: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export type FundInsert = Omit<FundRow, "created_at" | "updated_at">;
+
+export interface FundTaxRuleRow {
+  id: string;
+  scope: FundTaxRuleScope;
+  fund_code: string | null;
+  category_id: number | null;
+  tax_kind: FundTaxKind;
+  withholding_rate: number | null;
+  effective_from: string;
+  effective_to: string | null;
+  applies_to_acquired_from: string | null;
+  applies_to_acquired_to: string | null;
+  min_holding_days: number | null;
+  priority: number;
+  description: string;
+  source_url: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+export type FundTaxRuleInsert = Omit<FundTaxRuleRow, "id" | "created_at"> & {
+  id?: string;
+};
+
+export interface TaxRulesAuditRow {
+  id: string;
+  rule_id: string | null;
+  operation: TaxAuditOperation;
+  old_values: Json | null;
+  new_values: Json | null;
+  changed_at: string;
+  changed_by: string;
+  change_reason: string | null;
+}
+export type TaxRulesAuditInsert = Omit<TaxRulesAuditRow, "id" | "changed_at"> & {
+  id?: string;
+};
+
+export interface TrackedFundRow {
+  id: string;
+  user_id: string;
+  fund_code: string;
+  is_active: boolean;
+  notes: string | null;
+  added_at: string;
+}
+export type TrackedFundInsert = Omit<TrackedFundRow, "id" | "added_at"> & {
+  id?: string;
+};
