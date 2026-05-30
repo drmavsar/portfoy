@@ -231,3 +231,51 @@ export function vsCategoryDelta(
   if (fundValue == null || categoryMedian == null) return null;
   return fundValue - categoryMedian;
 }
+
+/**
+ * Stopaj uygulanmış net getiri (Türkiye fon vergi mantığı).
+ *
+ *   gross ≥ 0  →  net = gross × (1 − rate)
+ *   gross  < 0 →  net = gross         (zararda stopaj kesilmez)
+ *   rate null  →  null                (BELIRSIZ/DOVIZ_BAZLI/SERBEST_FON)
+ *   gross null →  null
+ *
+ * Not: 3Y/5Y CAGR için **annualized** net hesabı için doğrudan brüt-CAGR'a
+ * uygulanmaz; önce toplam dönem brüt-getirisi vergilenip annualize edilir.
+ * Bu helper hem tek pencere (1Y) hem total-CAGR'a annualize-öncesi
+ * uygulanabilir.
+ */
+export function applyWithholdingTax(
+  grossReturn: number | null,
+  rate: number | null,
+): number | null {
+  if (grossReturn == null) return null;
+  if (rate == null) return null;
+  if (grossReturn < 0) return grossReturn;
+  return grossReturn * (1 - rate);
+}
+
+/**
+ * CAGR pencereleri için: önce toplam dönem brütüne stopajı uygula,
+ * sonra annualize et. (CAGR formülü doğrusal değil, doğrudan
+ * `cagr × (1 − rate)` matematiksel olarak yanlış olur.)
+ *
+ *   total_gross = (1 + cagr) ^ years − 1
+ *   total_net   = applyWithholdingTax(total_gross, rate)
+ *   net_cagr    = (1 + total_net) ^ (1/years) − 1
+ */
+export function applyTaxToCagr(
+  grossCagr: number | null,
+  rate: number | null,
+  years: number,
+): number | null {
+  if (grossCagr == null) return null;
+  if (rate == null) return null;
+  if (years <= 0) return null;
+  const totalGross = Math.pow(1 + grossCagr, years) - 1;
+  const totalNet = applyWithholdingTax(totalGross, rate);
+  if (totalNet == null) return null;
+  const ratio = 1 + totalNet;
+  if (ratio <= 0) return null;
+  return Math.pow(ratio, 1 / years) - 1;
+}

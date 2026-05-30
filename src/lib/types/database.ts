@@ -652,6 +652,13 @@ export interface FundReturnsRow {
   real_5y_cagr: number | null;
   vs_category_1y: number | null;
   vs_category_3y: number | null;
+  net_1y: number | null;
+  net_3y_cagr: number | null;
+  net_5y_cagr: number | null;
+  applied_tax_kind: string | null;
+  applied_tax_rate: number | null;
+  tax_confidence: string | null;
+  tax_source: string | null;
   computed_at: string;
   computed_from_period: string | null;
   warnings: string[];

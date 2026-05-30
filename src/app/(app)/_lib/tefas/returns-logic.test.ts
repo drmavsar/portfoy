@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyTaxToCagr,
+  applyWithholdingTax,
   computeFundReturns,
   median,
   vsCategoryDelta,
@@ -263,5 +265,67 @@ describe("computeFundReturns — kenar durumlar", () => {
     });
     const r = computeFundReturns(series, { asOf: "2026-05-30" });
     expect(r!.as_of).toBe("2026-05-30");
+  });
+});
+
+describe("applyWithholdingTax (Türkiye fon stopajı)", () => {
+  it("Pozitif kar + %17.5 stopaj → net = gross × 0.825", () => {
+    expect(applyWithholdingTax(0.50, 0.175)).toBeCloseTo(0.4125, 6);
+  });
+
+  it("Negatif (zarar) → net = gross (stopaj kesilmez)", () => {
+    expect(applyWithholdingTax(-0.20, 0.175)).toBe(-0.20);
+  });
+
+  it("Sıfır getiri → net = 0", () => {
+    expect(applyWithholdingTax(0, 0.175)).toBe(0);
+  });
+
+  it("HSYF %0 stopaj → net = gross", () => {
+    expect(applyWithholdingTax(0.50, 0)).toBe(0.50);
+  });
+
+  it("rate null (BELIRSIZ) → null", () => {
+    expect(applyWithholdingTax(0.50, null)).toBeNull();
+  });
+
+  it("gross null → null", () => {
+    expect(applyWithholdingTax(null, 0.175)).toBeNull();
+  });
+});
+
+describe("applyTaxToCagr — annualize edilmiş CAGR'da vergi", () => {
+  it("3Y CAGR %30, rate %17.5 → annualize öncesi vergilenir", () => {
+    // total_gross = 1.30^3 − 1 = 1.197 (%119.7)
+    // total_net   = 1.197 × 0.825 = 0.9875 (%98.75)
+    // net_cagr    = 1.9875^(1/3) − 1 ≈ 0.2573
+    const r = applyTaxToCagr(0.30, 0.175, 3);
+    expect(r).toBeCloseTo(0.2573, 3);
+  });
+
+  it("HSYF %0 stopaj → net CAGR = brüt CAGR", () => {
+    expect(applyTaxToCagr(0.45, 0, 3)).toBeCloseTo(0.45, 6);
+  });
+
+  it("Zarar CAGR (negatif) → net = gross (CAGR olarak)", () => {
+    // -0.10 CAGR, 3 yıl: total -0.271 (zarar). Vergi yok.
+    const r = applyTaxToCagr(-0.10, 0.175, 3);
+    expect(r).toBeCloseTo(-0.10, 6);
+  });
+
+  it("rate null → null", () => {
+    expect(applyTaxToCagr(0.30, null, 3)).toBeNull();
+  });
+
+  it("CAGR null → null", () => {
+    expect(applyTaxToCagr(null, 0.175, 3)).toBeNull();
+  });
+
+  it("Naif cagr × (1−rate) yaklaşımı yanlış", () => {
+    // Doğru: ~%25.5
+    // Naif:  %30 × 0.825 = %24.75
+    const correct = applyTaxToCagr(0.30, 0.175, 3);
+    const naive = 0.30 * (1 - 0.175);
+    expect(Math.abs((correct ?? 0) - naive)).toBeGreaterThan(0.005);
   });
 });
