@@ -66,7 +66,9 @@ export function TodayMoversCard({ returns, funds }: Props) {
           <div className="card-sub">veri yok</div>
         </div>
         <div style={{ padding: 14, fontSize: 12, color: "var(--muted)" }}>
-          Günlük NAV değişimi cache&apos;de yok. NAV ingest cron tetiklendiğinde dolar.
+          1G NAV değişimi için en az 2 günlük history gerekir. Şu an cache&apos;de yalnızca
+          1 günlük NAV var; NAV backfill (5y) çalıştırıldıktan sonra her gün ingest
+          birikerek delta hesaplanabilir.
         </div>
       </div>
     );
