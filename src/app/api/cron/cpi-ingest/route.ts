@@ -31,7 +31,11 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const DEFAULT_SERIES = "CPI_TR_GENERAL";
-const WRAPPER_VERSION = "2026-05-30-pr-a-ts-port-keyrelax";
+const WRAPPER_VERSION = "2026-05-30-pr-a-ts-port-evds3";
+// EVDS yeni endpoint (EVDS3 — yeni key sistemine bağlı).
+// Override için: process.env.EVDS_BASE_URL (tam URL, "/series" suffix dahil)
+const DEFAULT_EVDS_BASE_URL = "https://evds3.tcmb.gov.tr/igmevdsms-dis/series";
+const EVDS_API_VERSION = "v3";
 
 /** Tüm cevaplara wrapper_version field + x-wrapper-version header ekler. */
 function tag<T extends Record<string, unknown>>(
@@ -81,6 +85,7 @@ export async function GET(req: NextRequest) {
   }
 
   const apiKey = process.env.EVDS_API_KEY ?? "";
+  const evdsBaseUrl = process.env.EVDS_BASE_URL ?? DEFAULT_EVDS_BASE_URL;
 
   // 1) EVDS fetch — pure async, function-to-function HTTP yok
   const result = await fetchEvdsCpi({
@@ -88,17 +93,21 @@ export async function GET(req: NextRequest) {
     start: startParam,
     end: endParam,
     apiKey,
+    baseUrl: evdsBaseUrl,
   });
 
-  // Debug: full result yansıt
+  // Debug: full result yansıt + endpoint metadata
   if (debug) {
     return tag(
       {
         stage: "debug",
         ok: result.ok,
+        endpoint_base: evdsBaseUrl,
+        evds_api_version: EVDS_API_VERSION,
+        series_code_requested: seriesCode,
+        evds_series_resolved: result.evds_series,
         fetched_periods: result.fetched_periods,
         rows_sample: (result.rows ?? []).slice(0, 3),
-        evds_series: result.evds_series,
         window: result.window,
         error: result.error,
         diagnostic: result.diagnostic,
