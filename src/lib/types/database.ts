@@ -44,6 +44,7 @@ export interface Database {
       fund_returns_ingest_log: TableShape<FundReturnsIngestLogRow, FundReturnsIngestLogInsert>;
       user_personas: TableShape<UserPersonaRow, UserPersonaInsert>;
       fund_scores_cache: TableShape<FundScoresRow, FundScoresInsert>;
+      fund_scores_ingest_log: TableShape<FundScoresIngestLogRow, FundScoresIngestLogInsert>;
     };
     Views: {
       v_account_balances: { Row: AccountBalanceRow };
@@ -57,6 +58,7 @@ export interface Database {
       v_fund_returns_latest: { Row: FundReturnsRow };
       v_fund_returns_health: { Row: FundReturnsHealthRow };
       v_fund_scores_latest: { Row: FundScoresRow };
+      v_fund_scores_health: { Row: FundScoresHealthRow };
     };
     Functions: {
       bootstrap_user_defaults: { Args: Record<string, never>; Returns: void };
@@ -762,3 +764,36 @@ export interface FundScoresRow {
 export type FundScoresInsert = Omit<FundScoresRow, "computed_at"> & {
   computed_at?: string;
 };
+
+export interface FundScoresIngestLogRow {
+  id: string;
+  ran_at: string;
+  duration_ms: number;
+  processed_funds: number;
+  processed_personas: number;
+  upserted: number;
+  skipped_count: number;
+  skipped_codes: string[];
+  error: string | null;
+  triggered_by: string;
+}
+export type FundScoresIngestLogInsert = Omit<FundScoresIngestLogRow, "id" | "ran_at"> & {
+  id?: string;
+  ran_at?: string;
+};
+
+export interface FundScoresHealthRow {
+  fund_code: string;
+  persona_id: string;
+  persona_name: string;
+  investment_universe: FundInvestmentUniverse;
+  last_as_of: string | null;
+  last_computed_at: string | null;
+  mehmet_score: number | null;
+  components_used: number | null;
+  warnings: string[] | null;
+  days_stale: number | null;
+  has_mehmet: boolean;
+  has_volatility: boolean;
+  has_max_drawdown: boolean;
+}

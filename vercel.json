@@ -39,6 +39,10 @@
     {
       "path": "/api/cron/fund-returns-refresh",
       "schedule": "0 17 * * *"
+    },
+    {
+      "path": "/api/cron/fund-scores-refresh",
+      "schedule": "0 18 * * *"
     }
   ]
 }
