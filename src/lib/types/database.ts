@@ -40,6 +40,7 @@ export interface Database {
       fund_prices: TableShape<FundPriceRow, FundPriceInsert>;
       tefas_ingest_log: TableShape<TefasIngestLogRow, TefasIngestLogInsert>;
       cpi_monthly: TableShape<CpiMonthlyRow, CpiMonthlyInsert>;
+      fund_returns_cache: TableShape<FundReturnsRow, FundReturnsInsert>;
     };
     Views: {
       v_account_balances: { Row: AccountBalanceRow };
@@ -50,6 +51,7 @@ export interface Database {
       v_fund_prices_latest: { Row: FundPriceRow };
       v_tefas_fund_prices_health: { Row: TefasFundHealthRow };
       v_cpi_monthly_yoy: { Row: CpiYoyRow };
+      v_fund_returns_latest: { Row: FundReturnsRow };
     };
     Functions: {
       bootstrap_user_defaults: { Args: Record<string, never>; Returns: void };
@@ -632,3 +634,28 @@ export interface CpiYoyRow {
   source: string;
   fetched_at: string;
 }
+
+export interface FundReturnsRow {
+  fund_code: string;
+  as_of: string;
+  gross_1d: number | null;
+  gross_1w: number | null;
+  gross_1m: number | null;
+  gross_3m: number | null;
+  gross_6m: number | null;
+  gross_ytd: number | null;
+  gross_1y: number | null;
+  gross_3y_cagr: number | null;
+  gross_5y_cagr: number | null;
+  real_1y: number | null;
+  real_3y_cagr: number | null;
+  real_5y_cagr: number | null;
+  vs_category_1y: number | null;
+  vs_category_3y: number | null;
+  computed_at: string;
+  computed_from_period: string | null;
+  warnings: string[];
+}
+export type FundReturnsInsert = Omit<FundReturnsRow, "computed_at"> & {
+  computed_at?: string;
+};
