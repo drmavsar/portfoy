@@ -18,6 +18,8 @@ import type {
   FundCategory,
   FundTaxConfidence,
   FundTaxRule,
+  TefasFundHealth,
+  TefasIngestLog,
   TrackedFund,
 } from "@/app/(app)/_lib/tefas/types";
 
@@ -26,15 +28,18 @@ interface TefasTabProps {
   categories: FundCategory[];
   initialTracked: TrackedFund[];
   taxRules: FundTaxRule[];
+  ingestLog: TefasIngestLog[];
+  fundsHealth: TefasFundHealth[];
   configured: boolean;
 }
 
-type SubTab = "takipte" | "ekle" | "stopaj";
+type SubTab = "takipte" | "ekle" | "stopaj" | "veri";
 
 const subTabs: Array<[SubTab, string]> = [
   ["takipte", "Takipte"],
   ["ekle", "Ekle"],
   ["stopaj", "Stopaj kuralları"],
+  ["veri", "Veri Durumu"],
 ];
 
 export function TefasTab(props: TefasTabProps) {
@@ -79,6 +84,12 @@ export function TefasTab(props: TefasTabProps) {
       )}
       {sub === "stopaj" && (
         <StopajPane rules={props.taxRules} categories={props.categories} />
+      )}
+      {sub === "veri" && (
+        <VeriDurumuPane
+          ingestLog={props.ingestLog}
+          fundsHealth={props.fundsHealth}
+        />
       )}
     </div>
   );
@@ -554,5 +565,248 @@ function StopajPane({
         ))}
       </div>
     </div>
+  );
+}
+
+// ---------- Veri Durumu (monitoring) ------------------------------------
+
+function VeriDurumuPane({
+  ingestLog,
+  fundsHealth,
+}: {
+  ingestLog: TefasIngestLog[];
+  fundsHealth: TefasFundHealth[];
+}) {
+  const last = ingestLog[0];
+  const staleFunds = useMemo(
+    () =>
+      fundsHealth
+        .filter((f) => f.last_as_of === null || (f.days_stale ?? 0) >= 3)
+        .sort((a, b) => (b.days_stale ?? 999) - (a.days_stale ?? 999)),
+    [fundsHealth],
+  );
+  const neverFetched = fundsHealth.filter((f) => f.last_as_of === null);
+  const upToDate = fundsHealth.filter((f) => (f.days_stale ?? 999) <= 2).length;
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <div
+        style={{
+          padding: 12,
+          background: "var(--surface-2)",
+          borderRadius: 8,
+          fontSize: 12,
+          color: "var(--muted)",
+          lineHeight: 1.55,
+        }}
+      >
+        Cron <code style={{ fontFamily: "var(--font-mono)" }}>/api/cron/tefas-prices</code>{" "}
+        her gün TR 19:00&apos;da çalışır (TEFAS akşam yayını sonrası). Manuel tetikleme:{" "}
+        <code style={{ fontFamily: "var(--font-mono)" }}>Bearer $CRON_SECRET</code> ile
+        GET request. Truncgil v4 katılım fonu desteği vermediğinden Sprint-2&apos;de NAV
+        fallback kaynağı eklenmedi; TEFAS erişilemezse mevcut son fiyat upsert ile korunur.
+      </div>
+
+      {/* Son ingest özet kartı */}
+      <div className="card">
+        <div className="card-head">
+          <div className="card-title">Son Ingest</div>
+          <div className="card-sub">{last ? new Date(last.ran_at).toLocaleString("tr-TR") : "Henüz çalışmadı"}</div>
+        </div>
+        {last ? (
+          <div
+            style={{
+              padding: "12px 14px",
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+              gap: 10,
+              fontSize: 12,
+            }}
+          >
+            <Stat label="Talep edilen" value={last.requested} />
+            <Stat label="Başarılı" value={last.succeeded} color="#4cc9b0" />
+            <Stat label="Upsert" value={last.upserted} />
+            <Stat label="Başarısız" value={last.failed_count} color={last.failed_count > 0 ? "#e26a8f" : undefined} />
+            <Stat label="Süre" value={`${(last.duration_ms / 1000).toFixed(1)} sn`} />
+            <Stat label="Tetiklenen" value={last.triggered_by} />
+          </div>
+        ) : (
+          <div style={{ padding: 14, color: "var(--muted)", fontSize: 13 }}>
+            Henüz hiç ingest çalışmamış. Vercel cron dashboard&apos;ından manuel tetikleyebilirsin.
+          </div>
+        )}
+        {last && last.failed_codes.length > 0 && (
+          <div style={{ padding: "10px 14px", borderTop: "1px solid var(--border-soft)" }}>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>
+              Başarısız fonlar ({last.failed_codes.length}):
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+              {last.failed_codes.map((code) => (
+                <code
+                  key={code}
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 11,
+                    padding: "2px 6px",
+                    background: "#e26a8f22",
+                    color: "#e26a8f",
+                    borderRadius: 4,
+                  }}
+                >
+                  {code}
+                </code>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Genel sağlık */}
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 8,
+          fontSize: 12,
+        }}
+      >
+        <SummaryChip label="Aktif fon" value={fundsHealth.length} />
+        <SummaryChip label="Güncel (≤2 gün)" value={upToDate} color="#4cc9b0" />
+        <SummaryChip label="Stale (≥3 gün)" value={staleFunds.length} color={staleFunds.length > 0 ? "#e0b341" : undefined} />
+        <SummaryChip label="Hiç fiyatı yok" value={neverFetched.length} color={neverFetched.length > 0 ? "#e26a8f" : undefined} />
+      </div>
+
+      {/* Stale fonlar tablosu */}
+      {staleFunds.length > 0 && (
+        <div className="card">
+          <div className="card-head">
+            <div className="card-title">Stale / Hiç Veri Yok</div>
+            <div className="card-sub">{staleFunds.length}</div>
+          </div>
+          <div style={{ padding: "4px 0" }}>
+            {staleFunds.slice(0, 30).map((f) => (
+              <div
+                key={f.fund_code}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "70px 1fr auto auto auto",
+                  gap: 10,
+                  alignItems: "center",
+                  padding: "8px 14px",
+                  borderBottom: "1px solid var(--border-soft)",
+                  fontSize: 12,
+                }}
+              >
+                <code style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}>{f.fund_code}</code>
+                <span style={{ color: "var(--muted)" }}>
+                  {f.last_as_of ? `Son: ${f.last_as_of}` : "Hiç veri yok"}
+                </span>
+                <FlagBadges
+                  fund={{
+                    code: f.fund_code,
+                    is_equity_intensive: f.is_equity_intensive,
+                    is_free_fund: f.is_free_fund,
+                    is_fx_denominated: f.is_fx_denominated,
+                    currency: "TRY",
+                  } as unknown as Fund}
+                />
+                <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                  {f.last_nav !== null ? `NAV: ${Number(f.last_nav).toFixed(4)}` : "—"}
+                </span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    padding: "2px 8px",
+                    borderRadius: 999,
+                    background:
+                      f.days_stale === null ? "#e26a8f22"
+                      : f.days_stale >= 7 ? "#e26a8f22"
+                      : "#e0b34122",
+                    color:
+                      f.days_stale === null ? "#e26a8f"
+                      : f.days_stale >= 7 ? "#e26a8f"
+                      : "#e0b341",
+                  }}
+                >
+                  {f.days_stale === null ? "veri yok" : `${f.days_stale} gün eski`}
+                </span>
+              </div>
+            ))}
+            {staleFunds.length > 30 && (
+              <div style={{ padding: "10px 14px", fontSize: 11, color: "var(--muted)" }}>
+                ... ve {staleFunds.length - 30} fon daha.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Son N ingest geçmişi */}
+      {ingestLog.length > 1 && (
+        <div className="card">
+          <div className="card-head">
+            <div className="card-title">Ingest Geçmişi</div>
+            <div className="card-sub">{ingestLog.length}</div>
+          </div>
+          <div style={{ padding: "4px 0" }}>
+            {ingestLog.map((row) => (
+              <div
+                key={row.id}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto auto auto auto",
+                  gap: 10,
+                  alignItems: "center",
+                  padding: "8px 14px",
+                  borderBottom: "1px solid var(--border-soft)",
+                  fontSize: 12,
+                }}
+              >
+                <span style={{ color: "var(--muted)" }}>
+                  {new Date(row.ran_at).toLocaleString("tr-TR")}
+                </span>
+                <span style={{ fontSize: 11 }}>
+                  {row.triggered_by === "cron" ? "🕒 cron" : "🖱️ manuel"}
+                </span>
+                <span style={{ color: "#4cc9b0" }}>{row.succeeded}✓</span>
+                <span style={{ color: row.failed_count > 0 ? "#e26a8f" : "var(--muted)" }}>
+                  {row.failed_count}✗
+                </span>
+                <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                  {(row.duration_ms / 1000).toFixed(1)}s
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value, color }: { label: string; value: string | number; color?: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 600, color: color ?? "var(--fg)" }}>{value}</div>
+    </div>
+  );
+}
+
+function SummaryChip({ label, value, color }: { label: string; value: number; color?: string }) {
+  return (
+    <span
+      style={{
+        padding: "5px 10px",
+        borderRadius: 999,
+        background: "var(--surface-2)",
+        border: "1px solid var(--border-soft)",
+      }}
+    >
+      <span style={{ color: "var(--muted)" }}>{label}: </span>
+      <strong style={{ color: color ?? "var(--fg)" }}>{value}</strong>
+    </span>
   );
 }

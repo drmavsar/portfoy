@@ -6,6 +6,7 @@ import {
 import { listFunds, listFundCategories } from "@/app/(app)/_lib/tefas/funds-actions";
 import { listTrackedFunds } from "@/app/(app)/_lib/tefas/tracked-funds-actions";
 import { listTaxRules } from "@/app/(app)/_lib/tefas/tax-rules-actions";
+import { listFundsHealth, listIngestLog } from "@/app/(app)/_lib/tefas/monitoring-actions";
 
 import { AyarlarClient } from "./ayarlar-client";
 import {
@@ -30,6 +31,8 @@ export default async function AyarlarPage() {
     tefasCategories,
     tefasTracked,
     tefasTaxRules,
+    tefasIngestLog,
+    tefasFundsHealth,
   ] = await Promise.all([
     isSupabaseConfigured(),
     listBeneficiaries(),
@@ -42,6 +45,8 @@ export default async function AyarlarPage() {
     listFundCategories(),
     listTrackedFunds(),
     listTaxRules({ activeOnly: true }),
+    listIngestLog(10),
+    listFundsHealth(),
   ]);
 
   return (
@@ -57,6 +62,8 @@ export default async function AyarlarPage() {
       tefasCategories={tefasCategories}
       tefasTracked={tefasTracked}
       tefasTaxRules={tefasTaxRules}
+      tefasIngestLog={tefasIngestLog}
+      tefasFundsHealth={tefasFundsHealth}
     />
   );
 }

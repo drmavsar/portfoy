@@ -38,6 +38,7 @@ export interface Database {
       tax_rules_audit: TableShape<TaxRulesAuditRow, TaxRulesAuditInsert>;
       tracked_funds: TableShape<TrackedFundRow, TrackedFundInsert>;
       fund_prices: TableShape<FundPriceRow, FundPriceInsert>;
+      tefas_ingest_log: TableShape<TefasIngestLogRow, TefasIngestLogInsert>;
     };
     Views: {
       v_account_balances: { Row: AccountBalanceRow };
@@ -46,6 +47,7 @@ export interface Database {
       v_monthly_cashflow: { Row: MonthlyCashflowRow };
       v_beneficiary_spend: { Row: BeneficiarySpendRow };
       v_fund_prices_latest: { Row: FundPriceRow };
+      v_tefas_fund_prices_health: { Row: TefasFundHealthRow };
     };
     Functions: {
       bootstrap_user_defaults: { Args: Record<string, never>; Returns: void };
@@ -571,3 +573,34 @@ export interface FundPriceRow {
 export type FundPriceInsert = Omit<FundPriceRow, "fetched_at"> & {
   fetched_at?: string;
 };
+
+export interface TefasIngestLogRow {
+  id: string;
+  ran_at: string;
+  duration_ms: number;
+  requested: number;
+  succeeded: number;
+  upserted: number;
+  failed_count: number;
+  failed_codes: string[];
+  upsert_error: string | null;
+  source: string;
+  triggered_by: string;
+}
+export type TefasIngestLogInsert = Omit<TefasIngestLogRow, "id" | "ran_at"> & {
+  id?: string;
+  ran_at?: string;
+};
+
+export interface TefasFundHealthRow {
+  fund_code: string;
+  is_active: boolean;
+  is_equity_intensive: boolean;
+  is_free_fund: boolean;
+  is_fx_denominated: boolean;
+  last_as_of: string | null;
+  last_nav: number | null;
+  last_source: string | null;
+  last_fetched_at: string | null;
+  days_stale: number | null;
+}

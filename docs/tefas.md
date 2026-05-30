@@ -15,12 +15,33 @@ tracked_funds         ── kullanıcı bazlı takip listesi
                         (bootstrap: kayıt anında tüm aktif fonlar eklenir)
 ```
 
-İleride (Sprint-2+):
-- `fund_prices` — günlük NAV + büyüklük/yatırımcı/ücret
+Sprint-2 ekledikleri:
+- `fund_prices` — günlük NAV (büyüklük/yatırımcı kolonları null; TEFAS yeni API'sinde yok)
+- `tefas_ingest_log` — her cron çalıştırmasının özet sonucu
+- `v_fund_prices_latest` view — her fon için son NAV
+- `v_tefas_fund_prices_health` view — fon başına son fiyat tarihi + days_stale
+
+Sprint-3+ ekleyecekleri:
 - `fund_returns_cache` — brüt + net + reel (CPI) getiriler
 - `fund_scores_cache` — Mehmet Score + dinamik bileşenler
 - `user_personas` — Mehmet Score ağırlıkları (parametrik)
 - `allocation_recommendations` — fon dağılım önerileri
+
+## Sprint-2 — NAV Ingest Altyapısı
+
+**Endpoint:** `/api/tefas-prices` (Python serverless, `tefas-crawler` PyPI).
+- 6h → **24h** edge cache (TEFAS bir defa akşam yayınlar).
+- En fazla 20 fon/istek; üstü chunk'lara bölünür (TS tarafında).
+
+**Cron:** `/api/cron/tefas-prices`, TR 19:00 (UTC 16:00). 155 fonu chunk halinde ingest; chunk başına 2 deneme + exp backoff. Sonuç `tefas_ingest_log`'a yazılır.
+
+**TEFAS erişilemezse:** UPSERT yeni satır yazmaz → mevcut son fiyat korunur. Truncgil v4'ün katılım fonu desteği olmadığından Sprint-2'de NAV fallback kaynağı yok; ileride bulunursa Sprint-3+ olarak ele alınır.
+
+**Monitoring (Ayarlar → TEFAS Fonları → Veri Durumu):**
+- Son ingest özeti (talep / başarılı / upsert / başarısız / süre)
+- Genel sağlık chip'leri (güncel / stale / hiç yok)
+- Stale fonlar tablosu (≥3 gün eski)
+- Son 10 cron çalıştırma geçmişi
 
 ## Stopaj Çözüm Mantığı
 

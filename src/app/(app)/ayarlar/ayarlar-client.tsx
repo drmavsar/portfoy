@@ -9,6 +9,8 @@ import type {
   Fund,
   FundCategory,
   FundTaxRule,
+  TefasFundHealth,
+  TefasIngestLog,
   TrackedFund,
 } from "@/app/(app)/_lib/tefas/types";
 
@@ -174,6 +176,8 @@ interface AyarlarClientProps {
   tefasCategories: FundCategory[];
   tefasTracked: TrackedFund[];
   tefasTaxRules: FundTaxRule[];
+  tefasIngestLog: TefasIngestLog[];
+  tefasFundsHealth: TefasFundHealth[];
 }
 
 export function AyarlarClient({
@@ -188,6 +192,8 @@ export function AyarlarClient({
   tefasCategories,
   tefasTracked,
   tefasTaxRules,
+  tefasIngestLog,
+  tefasFundsHealth,
 }: AyarlarClientProps) {
   const [tab, setTab] = useState<"kisiler" | "kategoriler" | "hesaplar" | "kurallar" | "tefas" | "entegrasyon" | "aktivite" | "erisilebilirlik">("kisiler");
 
@@ -247,6 +253,8 @@ export function AyarlarClient({
           categories={tefasCategories}
           initialTracked={tefasTracked}
           taxRules={tefasTaxRules}
+          ingestLog={tefasIngestLog}
+          fundsHealth={tefasFundsHealth}
           configured={supabaseConfigured}
         />
       )}
