@@ -29,6 +29,7 @@ const NAV: NavEntry[] = [
   { href: "/radar", label: "Piyasa Radarı", icon: "screener", section: "Piyasa" },
   { href: "/tarama", label: "Tarama", icon: "search", section: "Piyasa" },
   { href: "/temel", label: "Temel Analiz", icon: "report", section: "Piyasa" },
+  { href: "/fonlar", label: "TEFAS Fonları", icon: "wallet", section: "Piyasa" },
   { href: "/ayarlar", label: "Ayarlar", icon: "settings", section: "Sistem" },
 ];
 
