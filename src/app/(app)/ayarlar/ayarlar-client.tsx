@@ -5,6 +5,12 @@ import { useState } from "react";
 import { Icon } from "@/components/ui/icon";
 
 import type { AccountRow, BeneficiaryLite, CustodyRow } from "@/app/(app)/hesaplar/actions";
+import type {
+  Fund,
+  FundCategory,
+  FundTaxRule,
+  TrackedFund,
+} from "@/app/(app)/_lib/tefas/types";
 
 import type {
   BeneficiaryRow,
@@ -17,6 +23,7 @@ import { KategorilerTab } from "./kategoriler-tab";
 import { HesaplarSettingsTab } from "./hesaplar-tab";
 import { KisilerTab } from "./kisiler-tab";
 import { KurallarTab } from "./kurallar-tab";
+import { TefasTab } from "./tefas-tab";
 
 interface IntegrationItem {
   name: string;
@@ -163,6 +170,10 @@ interface AyarlarClientProps {
   custodies: CustodyRow[];
   beneficiariesLite: BeneficiaryLite[];
   supabaseConfigured: boolean;
+  tefasFunds: Fund[];
+  tefasCategories: FundCategory[];
+  tefasTracked: TrackedFund[];
+  tefasTaxRules: FundTaxRule[];
 }
 
 export function AyarlarClient({
@@ -173,8 +184,12 @@ export function AyarlarClient({
   custodies,
   beneficiariesLite,
   supabaseConfigured,
+  tefasFunds,
+  tefasCategories,
+  tefasTracked,
+  tefasTaxRules,
 }: AyarlarClientProps) {
-  const [tab, setTab] = useState<"kisiler" | "kategoriler" | "hesaplar" | "kurallar" | "entegrasyon" | "aktivite" | "erisilebilirlik">("kisiler");
+  const [tab, setTab] = useState<"kisiler" | "kategoriler" | "hesaplar" | "kurallar" | "tefas" | "entegrasyon" | "aktivite" | "erisilebilirlik">("kisiler");
 
   return (
     <div>
@@ -192,6 +207,7 @@ export function AyarlarClient({
             ["kategoriler", "Kategoriler"],
             ["hesaplar", "Hesaplar"],
             ["kurallar", "Kurallar"],
+            ["tefas", "TEFAS Fonları"],
             ["entegrasyon", "Entegrasyonlar"],
             ["aktivite", "Aktivite Geçmişi"],
             ["erisilebilirlik", "Erişilebilirlik"],
@@ -222,6 +238,15 @@ export function AyarlarClient({
           initialRules={initialRules}
           categories={initialCategories}
           beneficiaries={beneficiariesLite}
+          configured={supabaseConfigured}
+        />
+      )}
+      {tab === "tefas" && (
+        <TefasTab
+          funds={tefasFunds}
+          categories={tefasCategories}
+          initialTracked={tefasTracked}
+          taxRules={tefasTaxRules}
           configured={supabaseConfigured}
         />
       )}
