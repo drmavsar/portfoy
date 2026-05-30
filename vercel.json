@@ -35,6 +35,10 @@
     {
       "path": "/api/cron/cpi-ingest",
       "schedule": "0 8 5 * *"
+    },
+    {
+      "path": "/api/cron/fund-returns-refresh",
+      "schedule": "0 17 * * *"
     }
   ]
 }
