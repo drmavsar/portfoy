@@ -18,15 +18,45 @@ interface TefasFetchResult {
   error?: string;
 }
 
+interface FetchOptions {
+  start?: string;
+  end?: string;
+  baseUrl?: string;
+  /** Bir chunk başarısızsa toplam kaç deneme yapılır (default 1 = retry yok). */
+  maxAttempts?: number;
+  /** Retry'lar arası bekleme (ms). */
+  retryDelayMs?: number;
+  /** Cache stratejisi: 'revalidate' (cron için 'no-store' daha mantıklı). */
+  cache?: "revalidate" | "no-store";
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchChunk(
+  url: string,
+  cache: "revalidate" | "no-store",
+): Promise<TefasFetchResult | null> {
+  const init: RequestInit & { next?: { revalidate: number } } =
+    cache === "no-store"
+      ? { cache: "no-store" }
+      : { next: { revalidate: 21600 } };
+  const res = await fetch(url, init);
+  if (!res.ok) return null;
+  const data = (await res.json()) as TefasFetchResult;
+  return data.ok ? data : null;
+}
+
 /**
  * `/api/tefas-prices` endpoint'inden bir veya birden çok fonun en son NAV'ını çek.
- * POC: bir tarih aralığı verilirse o aralıktaki son NAV; verilmezse son 5 gün.
  *
  * Birden çok fon `MAX_CODES_PER_REQUEST` ile sınırlı; üstü chunk'lara bölünür.
+ * Bir chunk başarısız olursa `maxAttempts` kadar tekrar denenir (default 1).
  */
 export async function fetchTefasPrices(
   codes: string[],
-  options: { start?: string; end?: string; baseUrl?: string } = {},
+  options: FetchOptions = {},
 ): Promise<TefasFetchResult> {
   if (codes.length === 0) {
     return { ok: true, source: "tefas", succeeded: 0, failed: [], prices: [] };
@@ -38,6 +68,9 @@ export async function fetchTefasPrices(
     process.env.VERCEL_URL ??
     "http://localhost:3000";
   const normalized = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 1);
+  const retryDelayMs = options.retryDelayMs ?? 1000;
+  const cache = options.cache ?? "revalidate";
 
   const chunks: string[][] = [];
   for (let i = 0; i < codes.length; i += MAX_CODES_PER_REQUEST) {
@@ -60,23 +93,23 @@ export async function fetchTefasPrices(
     if (options.start) url.searchParams.set("start", options.start);
     if (options.end) url.searchParams.set("end", options.end);
 
-    try {
-      const res = await fetch(url.toString(), { next: { revalidate: 21600 } });
-      if (!res.ok) {
-        merged.failed!.push(...chunk);
-        continue;
+    let data: TefasFetchResult | null = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        data = await fetchChunk(url.toString(), cache);
+        if (data) break;
+      } catch (err) {
+        console.error(`fetchTefasPrices chunk attempt ${attempt} error`, err);
       }
-      const data = (await res.json()) as TefasFetchResult;
-      if (!data.ok) {
-        merged.failed!.push(...chunk);
-        continue;
-      }
-      merged.prices!.push(...(data.prices ?? []));
-      merged.failed!.push(...(data.failed ?? []));
-    } catch (err) {
-      console.error("fetchTefasPrices chunk error", err);
-      merged.failed!.push(...chunk);
+      if (attempt < maxAttempts) await sleep(retryDelayMs * attempt);
     }
+
+    if (!data) {
+      merged.failed!.push(...chunk);
+      continue;
+    }
+    merged.prices!.push(...(data.prices ?? []));
+    merged.failed!.push(...(data.failed ?? []));
   }
   merged.succeeded = merged.prices!.length;
   return merged;
