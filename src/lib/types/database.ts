@@ -39,6 +39,7 @@ export interface Database {
       tracked_funds: TableShape<TrackedFundRow, TrackedFundInsert>;
       fund_prices: TableShape<FundPriceRow, FundPriceInsert>;
       tefas_ingest_log: TableShape<TefasIngestLogRow, TefasIngestLogInsert>;
+      cpi_monthly: TableShape<CpiMonthlyRow, CpiMonthlyInsert>;
     };
     Views: {
       v_account_balances: { Row: AccountBalanceRow };
@@ -48,6 +49,7 @@ export interface Database {
       v_beneficiary_spend: { Row: BeneficiarySpendRow };
       v_fund_prices_latest: { Row: FundPriceRow };
       v_tefas_fund_prices_health: { Row: TefasFundHealthRow };
+      v_cpi_monthly_yoy: { Row: CpiYoyRow };
     };
     Functions: {
       bootstrap_user_defaults: { Args: Record<string, never>; Returns: void };
@@ -603,4 +605,30 @@ export interface TefasFundHealthRow {
   last_source: string | null;
   last_fetched_at: string | null;
   days_stale: number | null;
+}
+
+export interface CpiMonthlyRow {
+  series_code: string;
+  period_month: string;
+  index_value: number;
+  monthly_change_pct: number | null;
+  source: string;
+  fetched_at: string;
+  is_final: boolean;
+  notes: string | null;
+}
+export type CpiMonthlyInsert = Omit<CpiMonthlyRow, "fetched_at"> & {
+  fetched_at?: string;
+};
+
+export interface CpiYoyRow {
+  series_code: string;
+  period_month: string;
+  index_value: number;
+  monthly_change_pct: number | null;
+  index_12mo_ago: number | null;
+  yoy_change: number | null;
+  is_final: boolean;
+  source: string;
+  fetched_at: string;
 }

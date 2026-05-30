@@ -13,6 +13,8 @@ export type {
   FundPriceRow as FundPrice,
   TefasIngestLogRow as TefasIngestLog,
   TefasFundHealthRow as TefasFundHealth,
+  CpiMonthlyRow as CpiMonthly,
+  CpiYoyRow as CpiYoy,
   FundTaxKind,
   FundInvestmentUniverse,
   FundTaxConfidence,
