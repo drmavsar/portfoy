@@ -89,6 +89,13 @@ export default async function FonlarDashboardPage() {
             <Icon name="report" size={12} /> Fon Komitesi
           </Link>
           <Link
+            href="/fonlar/kalibrasyon"
+            className="chip"
+            style={{ textDecoration: "none", whiteSpace: "nowrap" }}
+          >
+            <Icon name="settings" size={12} /> Kalibrasyon
+          </Link>
+          <Link
             href="/fonlar/karsilastir"
             className="chip"
             style={{ textDecoration: "none", whiteSpace: "nowrap" }}
