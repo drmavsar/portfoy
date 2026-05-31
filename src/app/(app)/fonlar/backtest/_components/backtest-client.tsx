@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import type { BacktestUiSnapshot } from "@/app/(app)/_lib/backtest/snapshot-loader";
@@ -49,6 +50,20 @@ export function BacktestClient({ snapshot }: { snapshot: BacktestUiSnapshot }) {
             {t.label}
           </button>
         ))}
+        <Link
+          href="/fonlar/backtest/forward"
+          style={{
+            fontSize: 12,
+            padding: "6px 14px",
+            borderRadius: 6,
+            border: "1px solid var(--border)",
+            color: "var(--muted)",
+            textDecoration: "none",
+            marginLeft: "auto",
+          }}
+        >
+          → Forward Test
+        </Link>
       </div>
 
       {active === "summary" && <SummaryTab snapshot={snapshot} />}
