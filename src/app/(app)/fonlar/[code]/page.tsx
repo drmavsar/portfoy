@@ -155,8 +155,8 @@ export default async function FonDetayPage({ params }: PageProps) {
 
   return (
     <div>
-      <div className="page-head">
-        <div>
+      <div className="page-head" style={{ display: "flex", alignItems: "flex-end", gap: 16 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <Link
             href="/fonlar"
             style={{ fontSize: 12, color: "var(--muted)", textDecoration: "none" }}
@@ -165,6 +165,11 @@ export default async function FonDetayPage({ params }: PageProps) {
           </Link>
           <FundHeader fund={fund} category={cat} />
         </div>
+        {fund.is_active && (
+          <Link href={`/fonlar/${code}/trade`} className="btn btn-prim">
+            İşlem Kaydet
+          </Link>
+        )}
       </div>
 
       <div style={{ display: "grid", gap: 16 }}>
