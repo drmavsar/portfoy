@@ -9,6 +9,7 @@ import {
   validateFundTrade,
   type FundTradeInput,
 } from "@/app/(app)/_lib/tefas/trade-validation";
+import { processSellTrade } from "@/app/(app)/_lib/tefas/realized-lots-processor";
 
 export interface FundTradeAccountOption {
   id: string;
@@ -125,7 +126,7 @@ export interface CreateFundTradeInput {
 }
 
 export type CreateFundTradeResult =
-  | { ok: true; trade_id: string }
+  | { ok: true; trade_id: string; warning?: string }
   | { ok: false; error: string };
 
 export async function createFundTrade(
@@ -222,11 +223,26 @@ export async function createFundTrade(
 
   if (error) return { ok: false, error: error.message };
 
+  const tradeId = (data as { id: string }).id;
+
+  // Sell ise FIFO processor'ı çağır + realized_lots yaz. Hata trade'i geri
+  // almaz; idempotent processor backfill route ile tekrar denenebilir.
+  let realizedWarning: string | null = null;
+  if (input.side === "sell") {
+    const procResult = await processSellTrade(supabase, tradeId);
+    if (!procResult.ok) {
+      realizedWarning = `Trade kaydedildi ancak realized_lots yazılamadı: ${procResult.error ?? "bilinmeyen hata"}`;
+    }
+  }
+
   revalidatePath("/islemler");
   revalidatePath("/yatirimlar");
   revalidatePath("/ozet");
   revalidatePath("/fonlar");
   revalidatePath(`/fonlar/${code}`);
 
-  return { ok: true, trade_id: (data as { id: string }).id };
+  if (realizedWarning) {
+    return { ok: true, trade_id: tradeId, warning: realizedWarning };
+  }
+  return { ok: true, trade_id: tradeId };
 }
