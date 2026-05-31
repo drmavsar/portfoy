@@ -2,6 +2,7 @@ import { listFunds, listFundCategories } from "@/app/(app)/_lib/tefas/funds-acti
 import { getDefaultPersona } from "@/app/(app)/_lib/tefas/persona-actions";
 import { listLatestFundScores } from "@/app/(app)/_lib/tefas/scoring-actions";
 import { listLatestFundReturns } from "@/app/(app)/_lib/tefas/returns-actions";
+import Link from "next/link";
 import { Icon } from "@/components/ui/icon";
 
 import { KomiteClient } from "./komite-client";
@@ -65,6 +66,15 @@ export default async function FonKomitesiPage() {
             Kategori bazlı sıralı Mehmet Score · <strong>{persona.name}</strong> persona ·{" "}
             {scores.length} fon skorlu
           </div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Link
+            href="/fonlar/komite/arsiv"
+            className="chip"
+            style={{ textDecoration: "none", whiteSpace: "nowrap" }}
+          >
+            <Icon name="calendar" size={12} /> Karar Arşivi
+          </Link>
         </div>
       </div>
 
