@@ -3,10 +3,12 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import type { Database } from "@/lib/types/database";
 
-// `/api/cron` route handler'ları Vercel cron'un gönderdiği Bearer token ile
-// kendileri kimlik doğrular; middleware'in Supabase user kontrolüyle /login'e
-// redirect etmemesi gerekir, aksi halde cron route'a hiç ulaşamaz.
-const PUBLIC_PATHS = ["/login", "/auth", "/api/health", "/api/cron"];
+// `/api/cron` ve `/api/admin` route handler'ları Vercel cron / manuel cron'un
+// gönderdiği Bearer token ile kendileri kimlik doğrular; middleware'in
+// Supabase user kontrolüyle /login'e redirect etmemesi gerekir, aksi halde
+// route'a hiç ulaşamaz. Service-role client RLS bypass etse de auth gate
+// onlardan önce çalışır.
+const PUBLIC_PATHS = ["/login", "/auth", "/api/health", "/api/cron", "/api/admin"];
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
