@@ -49,6 +49,59 @@ export async function getLatestFundScores(
 }
 
 /**
+ * fund_scores_history içinden N gün önceki en son snapshot'ı döner.
+ * "X gün önce" karşılaştırması için (7/30/90 standart kullanım).
+ *
+ * Eğer N gün önce hiç satır yoksa (tablo yeni, daha az birikmişse) null.
+ */
+export interface HistorySnapshot {
+  fund_code: string;
+  computed_at: string;
+  mehmet_score: number | null;
+  components_used: number | null;
+}
+
+export async function getScoreAtNDaysAgo(
+  fundCode: string,
+  personaId: string,
+  days: number,
+): Promise<HistorySnapshot | null> {
+  if (!(await isSupabaseConfigured())) return null;
+  if (!Number.isFinite(days) || days < 0) return null;
+  const supabase = await createClient();
+  const cutoffMs = Date.now() - days * 86_400_000;
+  const cutoffIso = new Date(cutoffMs).toISOString();
+  const { data, error } = await supabase
+    .from("fund_scores_history")
+    .select("fund_code, computed_at, mehmet_score, components_used")
+    .eq("fund_code", fundCode)
+    .eq("persona_id", personaId)
+    .lte("computed_at", cutoffIso)
+    .order("computed_at", { ascending: false })
+    .limit(1);
+  if (error || !data || data.length === 0) return null;
+  return data[0] as HistorySnapshot;
+}
+
+/**
+ * Birden çok periyot için (7/30/90 vb.) tek seferde lookup.
+ * UI'ın N gün karşılaştırma karını render etmesi için.
+ */
+export async function getScoreHistoryCompare(
+  fundCode: string,
+  personaId: string,
+  periodsDays: number[] = [7, 30, 90],
+): Promise<Record<number, HistorySnapshot | null>> {
+  const out: Record<number, HistorySnapshot | null> = {};
+  await Promise.all(
+    periodsDays.map(async (d) => {
+      out[d] = await getScoreAtNDaysAgo(fundCode, personaId, d);
+    }),
+  );
+  return out;
+}
+
+/**
  * Tüm aktif fonlar × tüm aktif persona'lar için skor cache'i hesapla + UPSERT.
  *
  * Akış:
@@ -251,6 +304,38 @@ export async function refreshAllFundScores(): Promise<{
       duration_ms: Date.now() - start,
       error: upsertErr.message,
     };
+  }
+
+  // Append-only history snapshot — kullanıcı 7g/30g/90g karşılaştırması
+  // yapabilsin diye her cron run'unda yeni satır eklenir. PK (fund_code,
+  // persona_id, computed_at) sayesinde aynı saniye iki kez çalışmadıkça
+  // collision yok.
+  type HistoryRow = (typeof payload)[number];
+  const historyPayload = payload.map((p: HistoryRow) => ({
+    fund_code: p.fund_code,
+    persona_id: p.persona_id,
+    computed_at: p.computed_at,
+    as_of: p.as_of,
+    inflation_protection_score: p.inflation_protection_score,
+    tax_advantage_score: p.tax_advantage_score,
+    normalized_risk_score: p.normalized_risk_score,
+    long_term_performance_score: p.long_term_performance_score,
+    diversification_score: p.diversification_score,
+    bist_dependency_score: p.bist_dependency_score,
+    gold_dependency_score: p.gold_dependency_score,
+    volatility_1y: p.volatility_1y,
+    max_drawdown_3y: p.max_drawdown_3y,
+    sharpe_like_1y: p.sharpe_like_1y,
+    mehmet_score: p.mehmet_score,
+    components_used: p.components_used,
+    warnings: p.warnings,
+  }));
+  const { error: histErr } = await supabase
+    .from("fund_scores_history")
+    .insert(historyPayload as never);
+  // History insert best-effort — fail olursa cache zaten dolu, log + devam.
+  if (histErr) {
+    console.error("fund_scores_history insert failed:", histErr.message);
   }
 
   return {
