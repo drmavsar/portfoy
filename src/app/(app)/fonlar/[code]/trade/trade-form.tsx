@@ -57,6 +57,10 @@ interface Props {
   latestNav: { as_of: string; nav: number } | null;
   recentNavRows: Array<{ as_of: string; nav: number }>;
   currentHoldings: Array<{ portfolio_id: string; quantity: number }>;
+  /** Allocation ekranından gelen prefill bilgileri — sadece UI ipucu. */
+  prefillSide?: "buy" | "sell";
+  prefillQuantity?: string | null;
+  prefillPrice?: string | null;
 }
 
 export function TradeForm({
@@ -69,20 +73,25 @@ export function TradeForm({
   latestNav,
   recentNavRows,
   currentHoldings,
+  prefillSide,
+  prefillQuantity,
+  prefillPrice,
 }: Props) {
   const router = useRouter();
   const [busy, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const [side, setSide] = useState<"buy" | "sell">("buy");
+  const [side, setSide] = useState<"buy" | "sell">(prefillSide ?? "buy");
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
   const [portfolioId, setPortfolioId] = useState(
     defaultPortfolioId ?? portfolios[0]?.id ?? "",
   );
   const [executedAt, setExecutedAt] = useState(todayDateInput());
-  const [quantity, setQuantity] = useState("");
-  const [price, setPrice] = useState(latestNav ? String(latestNav.nav) : "");
+  const [quantity, setQuantity] = useState(prefillQuantity ?? "");
+  const [price, setPrice] = useState(
+    prefillPrice ?? (latestNav ? String(latestNav.nav) : ""),
+  );
   const [fees, setFees] = useState("0");
   const [taxes, setTaxes] = useState("");
   const [notes, setNotes] = useState("");
@@ -90,7 +99,9 @@ export function TradeForm({
   // Tarih değiştiğinde NAV default güncellensin (kullanıcı dokunmadıysa).
   // setState-in-effect anti-pattern'i önlemek için price'ı date onChange'inde
   // güncelliyoruz; navForSelectedDate sadece "ipucu" göstermek için memoize.
-  const [priceTouched, setPriceTouched] = useState(false);
+  // Prefill ile gelen price varsa kullanıcı dokunmuş sayılır (tarih değişince
+  // override edilmesin).
+  const [priceTouched, setPriceTouched] = useState(!!prefillPrice);
   const navForSelectedDate = useMemo(
     () => pickNavOnOrBefore(recentNavRows, executedAt),
     [recentNavRows, executedAt],

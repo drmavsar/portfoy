@@ -8,16 +8,28 @@ export const dynamic = "force-dynamic";
 
 interface PageProps {
   params: Promise<{ code: string }>;
+  searchParams: Promise<{
+    side?: string;
+    qty?: string;
+    price?: string;
+  }>;
 }
 
-export default async function FundTradePage({ params }: PageProps) {
+export default async function FundTradePage({ params, searchParams }: PageProps) {
   const { code: rawCode } = await params;
+  const sp = await searchParams;
   const code = decodeURIComponent(rawCode).toUpperCase();
   const ctx = await getFundTradeContext(code);
   if (!ctx) notFound();
 
   const defaultPortfolioId =
     ctx.portfolios.find((p) => p.is_default)?.id ?? ctx.portfolios[0]?.id ?? null;
+
+  // Allocation ekranından prefill: side=buy/sell, qty=adet, price=birim TRY
+  const prefillSide: "buy" | "sell" =
+    sp.side === "sell" ? "sell" : sp.side === "buy" ? "buy" : "buy";
+  const prefillQty = sp.qty && Number.isFinite(Number(sp.qty)) ? sp.qty : null;
+  const prefillPrice = sp.price && Number.isFinite(Number(sp.price)) ? sp.price : null;
 
   return (
     <div>
@@ -69,6 +81,9 @@ export default async function FundTradePage({ params }: PageProps) {
         latestNav={ctx.latestNav}
         recentNavRows={ctx.recentNavRows}
         currentHoldings={ctx.currentHoldings}
+        prefillSide={prefillSide}
+        prefillQuantity={prefillQty}
+        prefillPrice={prefillPrice}
       />
     </div>
   );

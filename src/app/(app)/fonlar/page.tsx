@@ -82,6 +82,13 @@ export default async function FonlarDashboardPage() {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <Link
+            href="/fonlar/allocation"
+            className="chip chip-acc"
+            style={{ textDecoration: "none", whiteSpace: "nowrap", fontWeight: 600 }}
+          >
+            <Icon name="portfolio" size={12} /> Allocation
+          </Link>
+          <Link
             href="/fonlar/komite"
             className="chip"
             style={{ textDecoration: "none", whiteSpace: "nowrap" }}
