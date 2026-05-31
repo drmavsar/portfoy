@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 
 import { getFund, listFundCategories } from "@/app/(app)/_lib/tefas/funds-actions";
+import { getFundPortfolioInfo } from "@/app/(app)/_lib/tefas/fund-portfolio-info";
 import { getDefaultPersona } from "@/app/(app)/_lib/tefas/persona-actions";
 import { getLatestFundReturns } from "@/app/(app)/_lib/tefas/returns-actions";
 import {
@@ -21,6 +22,7 @@ import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
 import type { FundTaxKind } from "@/app/(app)/_lib/tefas/types";
 
 import { FundHeader } from "./_components/fund-header";
+import { PortfolioCard } from "./_components/portfolio-card";
 import { ScoreSummaryCards } from "./_components/score-summary-cards";
 import { NavChart } from "./_components/nav-chart";
 import { ReturnsTable } from "./_components/returns-table";
@@ -95,7 +97,7 @@ export default async function FonDetayPage({ params }: PageProps) {
 
   const cat = categories.find((c) => c.id === fund.category_id);
 
-  const [returns, scores, navSeries, peers, history] = await Promise.all([
+  const [returns, scores, navSeries, peers, history, portfolioInfo] = await Promise.all([
     getLatestFundReturns(code),
     persona ? getLatestFundScores(code, persona.id) : Promise.resolve(null),
     fetchNavSeries(code),
@@ -103,6 +105,7 @@ export default async function FonDetayPage({ params }: PageProps) {
     persona
       ? getScoreHistoryCompare(code, persona.id, [7, 30, 90])
       : Promise.resolve<Record<number, HistorySnapshot | null>>({}),
+    getFundPortfolioInfo(code),
   ]);
   // ensure linter sees unused import is intentional (latest fund_prices unused here)
   void listLatestFundPrices;
@@ -173,6 +176,8 @@ export default async function FonDetayPage({ params }: PageProps) {
       </div>
 
       <div style={{ display: "grid", gap: 16 }}>
+        {portfolioInfo && <PortfolioCard info={portfolioInfo} />}
+
         <ScoreSummaryCards scores={scores} returns={returns} persona={persona} />
 
         <NavChart series={navSeries} fundCode={code} />
