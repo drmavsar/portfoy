@@ -6,6 +6,7 @@ import { BacktestChampionBadge } from "./_components/backtest-champion-badge";
 import { DataQualityFlags } from "./_components/data-quality-flags";
 import { NonFundAssets } from "./_components/non-fund-assets";
 import { NonTargetPositions } from "./_components/non-target-positions";
+import { SnapshotSaveButton } from "./_components/snapshot-save-button";
 import { SummaryCard } from "./_components/summary-card";
 import { TargetTable } from "./_components/target-table";
 
@@ -54,7 +55,10 @@ export default async function AllocationPage() {
             {(a.summary.rebalance_band_pct * 100).toFixed(0)}
           </div>
         </div>
-        <BacktestChampionBadge champion={a.backtest_champion} topN={a.summary.top_n} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+          <BacktestChampionBadge champion={a.backtest_champion} topN={a.summary.top_n} />
+          <SnapshotSaveButton disabled={!a.forbidden_words_safe} />
+        </div>
       </div>
 
       <div style={{ display: "grid", gap: 16 }}>
