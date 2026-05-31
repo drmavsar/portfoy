@@ -5,6 +5,7 @@
 
 import type { NavPoint, CpiByPeriod } from "../tefas/returns-logic";
 import type { FundStatusEntry } from "../benchmark/types";
+import { computeKatFonSepetiSeries } from "../benchmark/kat-fon-sepeti";
 import {
   runBacktestPure,
   type BacktestEngineInput,
@@ -147,6 +148,26 @@ export async function runBacktestWithPersistence(
       cpiSeries[`${period}-15`] = val; // ay ortası proxy
     }
     benchmarks.CPI_TR = cpiSeries;
+  }
+
+  // KAT_FON_SEPETI synthetic basket — runtime hesap (benchmark_points'da yok).
+  // Survivorship-safe: status history kullanır.
+  if (Object.keys(fundPrices).length > 0) {
+    const katPoints = computeKatFonSepetiSeries({
+      startDate: params.start_date,
+      endDate: params.end_date,
+      fundPrices,
+      funds: funds.map((f) => ({ fund_code: f.fund_code, is_participation: f.is_participation })),
+      statusHistory,
+      filterParticipation: true,
+    });
+    if (katPoints.length > 0) {
+      const katSeries: BenchmarkSeriesData = {};
+      for (const p of katPoints) {
+        katSeries[p.as_of] = p.value;
+      }
+      benchmarks.KAT_FON_SEPETI = katSeries;
+    }
   }
 
   // 6. Run engine

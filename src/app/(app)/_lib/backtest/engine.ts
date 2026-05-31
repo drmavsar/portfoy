@@ -296,15 +296,15 @@ function benchmarkValueAt(series: BenchmarkSeriesData | undefined, date: string)
   if (!series) return null;
   // Exact match
   if (series[date] != null) return series[date];
-  // Last available <= date
+  // Last available <= date — en yakın önceki tarih (candidate_date track et)
   let candidate: number | null = null;
+  let candidateDate: string | null = null;
   for (const [d, v] of Object.entries(series)) {
-    if (d <= date && (candidate == null || d > date)) {
+    if (d <= date && (candidateDate == null || d > candidateDate)) {
       candidate = v;
+      candidateDate = d;
     }
   }
-  // Linear scan above is correct but slow; for backtest 1000-day × 5 series,
-  // ~5000 lookups × 1000 series points = 5M ops — OK.
   return candidate;
 }
 
@@ -536,9 +536,19 @@ function buildSummary(
   }
 
   // Vs benchmark metrics
+  // CPI_TR için nav_series field'ı cpi_index (diğerleri *_nav).
+  const BENCH_TO_FIELD: Record<string, keyof NavSeriesPoint> = {
+    XU100: "xu100_nav",
+    XAUTRY: "xau_nav",
+    USDTRY: "usd_nav",
+    EURTRY: "eur_nav",
+    CPI_TR: "cpi_index",
+    KAT_FON_SEPETI: "kat_fon_sepeti_nav",
+    KAT_KATEGORI_MEDIAN: "kat_kategori_median_nav",
+  };
   const vsBench: BacktestSummary["vs_benchmark"] = {};
   for (const key of ["XU100", "XAUTRY", "USDTRY", "EURTRY", "CPI_TR", "KAT_FON_SEPETI", "KAT_KATEGORI_MEDIAN"] as const) {
-    const benchKey = `${snake(key)}_nav` as keyof NavSeriesPoint;
+    const benchKey = BENCH_TO_FIELD[key];
     const benchSeries: number[] = navSeries
       .map((p) => p[benchKey])
       .filter((v): v is number => v != null && Number.isFinite(v));
@@ -580,10 +590,6 @@ function buildSummary(
     vs_benchmark: vsBench,
     warnings: [],
   };
-}
-
-function snake(key: string): string {
-  return key.toLowerCase().replace(/_tr$/, "");
 }
 
 function detectPhase(params: BacktestParams): "phase_1" | "phase_2" {
