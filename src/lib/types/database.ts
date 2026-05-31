@@ -45,6 +45,7 @@ export interface Database {
       user_personas: TableShape<UserPersonaRow, UserPersonaInsert>;
       fund_scores_cache: TableShape<FundScoresRow, FundScoresInsert>;
       fund_scores_ingest_log: TableShape<FundScoresIngestLogRow, FundScoresIngestLogInsert>;
+      risk_flags: TableShape<RiskFlagRow, RiskFlagInsert>;
     };
     Views: {
       v_account_balances: { Row: AccountBalanceRow };
@@ -384,6 +385,27 @@ export interface CatalystRow {
   created_at: string;
 }
 export type CatalystInsert = Omit<CatalystRow, "id" | "created_at"> & {
+  id?: string;
+};
+
+export type RiskFlagKind = "vbts" | "ban" | "spk" | "fin" | "vol" | "manual";
+
+export interface RiskFlagRow {
+  id: string;
+  user_id: string;
+  symbol: string;
+  kind: RiskFlagKind;
+  severity: number;
+  note: string | null;
+  active: boolean;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export type RiskFlagInsert = Omit<
+  RiskFlagRow,
+  "id" | "created_at" | "updated_at"
+> & {
   id?: string;
 };
 
