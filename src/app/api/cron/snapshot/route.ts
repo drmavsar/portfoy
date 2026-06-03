@@ -89,30 +89,45 @@ async function computeUserSnapshot(
   userId: string,
   fxRates: Record<string, number>,
 ) {
-  const { data: accounts = [] } = await supabase
+  // Sorgu hataları sessizce yutulmamalı: hata olursa snapshot'ı YAZMA. upsert
+  // ile boş/0 bir satır yazmak, daha önce alınmış doğru kaydı ezerdi (geçmiş
+  // bozulur). Throw → dış catch → o user atlanır, eski kayıt korunur.
+  const { data: accounts, error: accErr } = await supabase
     .from("accounts")
     .select("id, user_id, currency, balance_try, balance_native, opening_balance, beneficiary_id")
     .eq("user_id", userId)
     .is("archived_at", null);
+  if (accErr) throw new Error(`accounts: ${accErr.message}`);
 
-  const { data: holdings = [] } = await supabase
+  const { data: holdings, error: holdErr } = await supabase
     .from("v_holdings_wac")
     .select("user_id, portfolio_id, asset_id, quantity, cost_basis_try")
     .eq("user_id", userId);
+  if (holdErr) throw new Error(`holdings: ${holdErr.message}`);
+  const holdingRows = (holdings ?? []) as HoldingRow[];
 
-  const { data: assets = [] } = await supabase
-    .from("assets")
-    .select("id, symbol, asset_class")
-    .eq("user_id", userId);
+  // `assets` global bir tablodur — user_id kolonu YOK. Eskiden `.eq("user_id",
+  // userId)` filtresi sorguyu hataya düşürüp assetMap'i boşaltıyordu; o yüzden
+  // her holding `if (!a) continue` ile atlanıp equity_mv=0 yazılıyordu. Holding'-
+  // lerin asset_id'leriyle çek.
+  const assetIds = Array.from(new Set(holdingRows.map((h) => h.asset_id)));
+  let assets: AssetRow[] = [];
+  if (assetIds.length > 0) {
+    const { data: assetData, error: assetErr } = await supabase
+      .from("assets")
+      .select("id, symbol, asset_class")
+      .in("id", assetIds);
+    if (assetErr) throw new Error(`assets: ${assetErr.message}`);
+    assets = (assetData ?? []) as AssetRow[];
+  }
 
-  const { data: trades = [] } = await supabase
+  const { data: trades, error: tradeErr } = await supabase
     .from("trades")
     .select("user_id, portfolio_id, beneficiary_id")
     .eq("user_id", userId);
+  if (tradeErr) throw new Error(`trades: ${tradeErr.message}`);
 
-  const assetMap = new Map<string, AssetRow>(
-    ((assets ?? []) as AssetRow[]).map((a) => [a.id, a]),
-  );
+  const assetMap = new Map<string, AssetRow>(assets.map((a) => [a.id, a]));
 
   // Hesap class kırılımı + tüm hesapların toplamı. accountTotal, ozet
   // sayfasındaki grandTotal ile tutarlı olması için TÜM hesapları içerir
@@ -140,7 +155,7 @@ async function computeUserSnapshot(
 
   // Yatırım MV — BIST sembolleri için Yahoo quote çekilir.
   const bistSymbols: string[] = [];
-  for (const h of ((holdings ?? []) as HoldingRow[])) {
+  for (const h of holdingRows) {
     const a = assetMap.get(h.asset_id);
     if (a && a.asset_class === "equity_tr") bistSymbols.push(a.symbol);
   }
@@ -148,19 +163,27 @@ async function computeUserSnapshot(
 
   // TÜM holding'ler dahil — BIST dışı varlıklar (equity_us, crypto, metal)
   // Yahoo quote'u olmadığından cost_basis ile değerlenir; aksi halde
-  // total_wealth eksik kalırdı.
+  // total_wealth eksik kalırdı. Asset bulunamasa da (ör. is_active=false)
+  // cost ile değerlenir — ozet sayfasıyla aynı; pozisyon sessizce 0'lanmaz.
   let investmentMv = 0;
   const equityByPerson: Record<string, number> = {};
-  for (const h of ((holdings ?? []) as HoldingRow[])) {
+  for (const h of holdingRows) {
     const a = assetMap.get(h.asset_id);
-    if (!a) continue;
     const qty = Number(h.quantity);
     const cost = Number(h.cost_basis_try);
-    const q = quotes[a.symbol];
+    const q = a ? quotes[a.symbol] : undefined;
     const mv = q ? qty * q.price : cost;
     investmentMv += mv;
     const benId = portfolioBen.get(h.portfolio_id);
     if (benId) equityByPerson[benId] = (equityByPerson[benId] ?? 0) + mv;
+  }
+
+  // Açık pozisyon varken equity 0 çıkmamalı (cost fallback var). 0 çıkıyorsa
+  // bir şeyler ters gitmiştir — upsert ile geçmişteki doğru değeri ezme.
+  if (holdingRows.length > 0 && investmentMv <= 0) {
+    throw new Error(
+      `equity_mv=0 with ${holdingRows.length} holdings — snapshot atlandı (geçmiş korunuyor)`,
+    );
   }
 
   const totalWealth = accountTotal + investmentMv;
