@@ -54,6 +54,7 @@ function toDateInput(iso: string): string {
 function qtyDecimals(assetClass: string | undefined, symbol: string | undefined): number {
   if (assetClass === "crypto") return symbol === "BTC" ? 8 : 4;
   if (assetClass === "metal") return 2;
+  if (assetClass === "fund") return 6; // TEFAS pay adetleri kesirli (~6 hane)
   return 0;
 }
 
