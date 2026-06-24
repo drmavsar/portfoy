@@ -10,7 +10,7 @@ export interface StockQuote {
   previous_close: number | null;
   change_pct: number | null;
   currency: string;
-  source: "yahoo" | "fallback";
+  source: "yahoo" | "fallback" | "tefas";
   market_time: number | null; // unix epoch (saniye)
 }
 
