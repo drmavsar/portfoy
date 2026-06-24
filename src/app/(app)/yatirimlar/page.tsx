@@ -41,8 +41,14 @@ function qtyDecimals(assetClass: string | undefined, symbol: string | undefined)
     return 4;
   }
   if (assetClass === "metal") return 2;
-  if (assetClass === "fund") return 6; // TEFAS pay adetleri kesirli (~6 hane)
+  if (assetClass === "fund") return 2; // fon pay adedi — 2 hane yeterli
   return 0;
+}
+
+// Fiyat/maliyet hassasiyeti: fon NAV ve WAC'ı 6 haneye kadar taşır
+// (TEFAS pay fiyatı bu hassasiyette); hisse/diğer için 2 hane.
+function priceDecimals(assetClass: string | undefined): number {
+  return assetClass === "fund" ? 6 : 2;
 }
 
 interface Group {
@@ -407,7 +413,7 @@ export default async function YatirimlarPage() {
                               {h.asset && <div className="hint">{h.asset.name}</div>}
                             </td>
                             <td className="num tabular">
-                              {h.quote ? fmt.tr(h.quote.price, 2) : "—"}
+                              {h.quote ? fmt.tr(h.quote.price, priceDecimals(h.asset?.asset_class)) : "—"}
                             </td>
                             <td className="num tabular" style={{ color: dailyPctColor }}>
                               {h.quote?.change_pct != null
@@ -427,7 +433,7 @@ export default async function YatirimlarPage() {
                             <td className="num tabular">
                               {fmt.tr(Number(h.quantity), qtyDecimals(h.asset?.asset_class, h.asset?.symbol))}
                             </td>
-                            <td className="num tabular">{fmt.tr(Number(h.wac_try), 2)}</td>
+                            <td className="num tabular">{fmt.tr(Number(h.wac_try), priceDecimals(h.asset?.asset_class))}</td>
                             <td className="num tabular" style={{ fontWeight: 600 }}>
                               {fmt.tr(h.market_value, 0)}
                             </td>
