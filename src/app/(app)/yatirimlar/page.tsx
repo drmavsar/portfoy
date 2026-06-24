@@ -10,6 +10,7 @@ import {
   type PortfolioRow,
 } from "@/app/(app)/_lib/wealth-actions";
 import { getStockPrices, getStockTechnicals, type StockQuote, type StockTechnicals } from "@/app/(app)/_lib/stock-prices";
+import { listFundQuotes } from "@/app/(app)/_lib/tefas/prices-actions";
 import { RefreshButton } from "@/app/(app)/_components/refresh-button";
 import { buildTradePlan, type TradePlan } from "@/app/(app)/_lib/trade-plan";
 import {
@@ -85,10 +86,30 @@ export default async function YatirimlarPage() {
     .map((h) => assetMap[h.asset_id])
     .filter((a): a is AssetRow => !!a && a.asset_class === "equity_tr")
     .map((a) => a.symbol);
-  const [quotes, technicals] = await Promise.all([
+  const fundCodes = holdings
+    .map((h) => assetMap[h.asset_id])
+    .filter((a): a is AssetRow => !!a && a.asset_class === "fund")
+    .map((a) => a.symbol);
+  const [stockQuotes, technicals, fundQuotes] = await Promise.all([
     getStockPrices(bistSymbols),
     getStockTechnicals(bistSymbols),
+    listFundQuotes(fundCodes),
   ]);
+
+  // Fon NAV'larını StockQuote şekline sokup hisse fiyatlarıyla aynı haritaya
+  // koy — enrichment/render mantığı fonlar için de değişmeden çalışsın.
+  const quotes: Record<string, StockQuote> = { ...stockQuotes };
+  for (const fq of fundQuotes) {
+    quotes[fq.fund_code] = {
+      symbol: fq.fund_code,
+      price: fq.nav,
+      previous_close: fq.previous_nav,
+      change_pct: fq.change_pct,
+      currency: "TRY",
+      source: "tefas",
+      market_time: null,
+    };
+  }
 
   const enriched: EnrichedHolding[] = holdings.map((h) => {
     const asset = assetMap[h.asset_id];

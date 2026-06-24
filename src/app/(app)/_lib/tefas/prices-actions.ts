@@ -154,3 +154,54 @@ export async function getLatestFundPrice(code: string): Promise<FundPrice | null
   const rows = await listLatestFundPrices([code]);
   return rows[0] ?? null;
 }
+
+export interface FundQuote {
+  fund_code: string;
+  as_of: string;
+  nav: number;
+  previous_nav: number | null;
+  change_pct: number | null;
+}
+
+/**
+ * Holdings/UI için: belirtilen fonların son NAV'ı + bir önceki yayın NAV'ı
+ * (günlük değişim hesaplanabilsin diye). `listLatestFundPrices` yalnızca son
+ * NAV'ı verir; günlük değişim için önceki NAV gerektiğinden bu helper eklendi.
+ *
+ * Tek sorgu ile her fonun son iki NAV satırı çekilir; JS'te kod başına ilk
+ * satır = güncel, ikinci satır = önceki gün.
+ */
+export async function listFundQuotes(codes: string[]): Promise<FundQuote[]> {
+  if (codes.length === 0) return [];
+  if (!(await isSupabaseConfigured())) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("fund_prices")
+    .select("fund_code, as_of, nav")
+    .in("fund_code", codes)
+    .order("fund_code", { ascending: true })
+    .order("as_of", { ascending: false });
+  if (error) {
+    console.error("listFundQuotes error", error);
+    return [];
+  }
+  const rows = (data ?? []) as Array<{ fund_code: string; as_of: string; nav: number }>;
+  const byCode = new Map<string, Array<{ as_of: string; nav: number }>>();
+  for (const r of rows) {
+    const arr = byCode.get(r.fund_code) ?? [];
+    arr.push({ as_of: r.as_of, nav: Number(r.nav) });
+    byCode.set(r.fund_code, arr);
+  }
+  const out: FundQuote[] = [];
+  for (const [fund_code, navs] of byCode) {
+    const latest = navs[0];
+    if (!latest) continue;
+    const previous_nav = navs[1]?.nav ?? null;
+    const change_pct =
+      previous_nav != null && previous_nav !== 0
+        ? ((latest.nav - previous_nav) / previous_nav) * 100
+        : null;
+    out.push({ fund_code, as_of: latest.as_of, nav: latest.nav, previous_nav, change_pct });
+  }
+  return out;
+}
