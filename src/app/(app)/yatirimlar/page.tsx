@@ -41,6 +41,7 @@ function qtyDecimals(assetClass: string | undefined, symbol: string | undefined)
     return 4;
   }
   if (assetClass === "metal") return 2;
+  if (assetClass === "fund") return 6; // TEFAS pay adetleri kesirli (~6 hane)
   return 0;
 }
 
