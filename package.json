@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "tefas:quality": "tsx scripts/tefas-seed-quality-report.ts",
-    "tefas:prices:poc": "tsx scripts/tefas-prices-poc.ts"
+    "tefas:prices:poc": "tsx scripts/tefas-prices-poc.ts",
+    "tefas:prices:ingest": "tsx --env-file=.env.local scripts/tefas-prices-ingest.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",
