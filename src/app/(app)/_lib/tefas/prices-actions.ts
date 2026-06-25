@@ -1,5 +1,7 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
+
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import {
@@ -204,4 +206,53 @@ export async function listFundQuotes(codes: string[]): Promise<FundQuote[]> {
     out.push({ fund_code, as_of: latest.as_of, nav: latest.nav, previous_nav, change_pct });
   }
   return out;
+}
+
+/**
+ * Portföyde tutulan fonların güncel NAV'ını TEFAS'tan canlı çekip fund_prices'a
+ * yazar. "Güncelle" butonu cron'a bağımlı kalmadan anlık tazeleme yapsın diye.
+ *
+ * Best-effort: TEFAS erişilemez / off-hours ise sessizce 0 güncellemeyle döner;
+ * çağıran taraftaki diğer tazelemeleri (hisse) bozmaz.
+ */
+export async function refreshHeldFundPrices(): Promise<{
+  ok: boolean;
+  updated: number;
+  failed: string[];
+  codes: string[];
+}> {
+  if (!(await isSupabaseConfigured())) {
+    return { ok: false, updated: 0, failed: [], codes: [] };
+  }
+  const supabase = await createClient();
+
+  // Portföydeki fon kodları: v_holdings_wac (qty>0) ∩ assets(asset_class='fund')
+  const [{ data: holdings }, { data: fundAssets }] = await Promise.all([
+    supabase.from("v_holdings_wac").select("asset_id, quantity"),
+    supabase.from("assets").select("id, symbol").eq("asset_class", "fund"),
+  ]);
+  const codeById = new Map(
+    ((fundAssets ?? []) as Array<{ id: string; symbol: string }>).map((a) => [a.id, a.symbol]),
+  );
+  const codes = Array.from(
+    new Set(
+      ((holdings ?? []) as Array<{ asset_id: string; quantity: number }>)
+        .filter((h) => Number(h.quantity) > 0 && codeById.has(h.asset_id))
+        .map((h) => codeById.get(h.asset_id) as string),
+    ),
+  );
+  if (codes.length === 0) return { ok: true, updated: 0, failed: [], codes: [] };
+
+  const fetched = await fetchTefasPrices(codes, { maxAttempts: 2 });
+  let updated = 0;
+  if (fetched.prices && fetched.prices.length > 0) {
+    const res = await upsertFundPrices(
+      fetched.prices.map((p) => ({ fund_code: p.code, as_of: p.as_of, nav: p.nav })),
+    );
+    if (res.ok) updated = fetched.prices.length;
+  }
+
+  revalidatePath("/yatirimlar");
+  revalidatePath("/ozet");
+  return { ok: true, updated, failed: fetched.failed ?? [], codes };
 }
