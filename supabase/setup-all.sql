@@ -1402,7 +1402,8 @@ insert into public.assets (symbol, name, asset_class, currency, exchange, sector
   ('PETKM',  'Petkim',                  'equity_tr', 'TRY', 'BIST', 'XKMYA'),
   ('FROTO',  'Ford Otosan',             'equity_tr', 'TRY', 'BIST', 'XUSIN'),
   ('TOASO',  'Tofaş',                   'equity_tr', 'TRY', 'BIST', 'XUSIN'),
-  ('ARCLK',  'Arçelik',                 'equity_tr', 'TRY', 'BIST', 'XUSIN')
+  ('ARCLK',  'Arçelik',                 'equity_tr', 'TRY', 'BIST', 'XUSIN'),
+  ('BINHO',  '1000 Yatırımlar Holding', 'equity_tr', 'TRY', 'BIST', 'XHOLD')
 on conflict (symbol, asset_class) do nothing;
 
 -- ---------- common crypto -------------------------------------------
