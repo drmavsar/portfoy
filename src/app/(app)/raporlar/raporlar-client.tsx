@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 
 import { fmt } from "@/lib/finance/fmt";
 
-import type { RawTxn } from "@/app/(app)/_lib/reports-actions";
+import type { RawRealizedLot, RawTxn } from "@/app/(app)/_lib/reports-actions";
 import type { CategoryRow } from "@/app/(app)/ayarlar/actions";
 import type { BeneficiaryLite } from "@/app/(app)/hesaplar/actions";
 
@@ -68,11 +68,15 @@ interface MonthBucket {
 
 interface Props {
   txns: RawTxn[];
+  realized: RawRealizedLot[];
   categories: CategoryRow[];
   beneficiaries: BeneficiaryLite[];
 }
 
-export function RaporlarClient({ txns, categories, beneficiaries }: Props) {
+type TabKey = "cashflow" | "performance";
+
+export function RaporlarClient({ txns, realized, categories, beneficiaries }: Props) {
+  const [tab, setTab] = useState<TabKey>("cashflow");
   const [rangeKey, setRangeKey] = useState<RangeKey>("ytd");
   const [customFrom, setCustomFrom] = useState<string>(isoStartOfYear());
   const [customTo, setCustomTo] = useState<string>(isoToday());
@@ -259,12 +263,146 @@ export function RaporlarClient({ txns, categories, beneficiaries }: Props) {
   const top10Total = topExpenses.reduce((s, e) => s + e.amount, 0);
   const top10Pct = totalOutflow > 0 ? (top10Total / totalOutflow) * 100 : 0;
 
+  // ---------- Yatırım Performansı hesapları ----------
+  const filteredRealized = useMemo(
+    () =>
+      realized.filter((r) => {
+        const d = r.closed_at.slice(0, 10);
+        return d >= from && d <= to;
+      }),
+    [realized, from, to],
+  );
+
+  const realizedTotals = useMemo(() => {
+    let cost = 0;
+    let proceeds = 0;
+    let pnl = 0;
+    let net = 0;
+    let wht = 0;
+    let holdingSum = 0;
+    let holdingCount = 0;
+    const closedSellIds = new Set<string>();
+    for (const l of filteredRealized) {
+      cost += l.cost_basis_try;
+      proceeds += l.proceeds_try;
+      pnl += l.realized_pnl_try;
+      net += l.net_realized_pnl_try;
+      wht += l.withholding_try;
+      if (l.holding_period_days != null) {
+        holdingSum += l.holding_period_days;
+        holdingCount += 1;
+      }
+      closedSellIds.add(l.sell_trade_id);
+    }
+    const gainers = filteredRealized.filter((l) => l.realized_pnl_try > 0);
+    const losers = filteredRealized.filter((l) => l.realized_pnl_try < 0);
+    return {
+      cost,
+      proceeds,
+      pnl,
+      net,
+      wht,
+      avgHoldingDays: holdingCount > 0 ? holdingSum / holdingCount : null,
+      closedSellCount: closedSellIds.size,
+      lotCount: filteredRealized.length,
+      winCount: gainers.length,
+      lossCount: losers.length,
+      winPnl: gainers.reduce((s, l) => s + l.realized_pnl_try, 0),
+      lossPnl: losers.reduce((s, l) => s + l.realized_pnl_try, 0),
+    };
+  }, [filteredRealized]);
+
+  const bySymbol = useMemo(() => {
+    const m = new Map<string, {
+      symbol: string;
+      name: string;
+      asset_class: string;
+      qty: number;
+      cost: number;
+      proceeds: number;
+      pnl: number;
+      net: number;
+      wht: number;
+      count: number;
+    }>();
+    for (const l of filteredRealized) {
+      const cur = m.get(l.asset_id) ?? {
+        symbol: l.asset_symbol,
+        name: l.asset_name,
+        asset_class: l.asset_class,
+        qty: 0,
+        cost: 0,
+        proceeds: 0,
+        pnl: 0,
+        net: 0,
+        wht: 0,
+        count: 0,
+      };
+      cur.qty += l.quantity;
+      cur.cost += l.cost_basis_try;
+      cur.proceeds += l.proceeds_try;
+      cur.pnl += l.realized_pnl_try;
+      cur.net += l.net_realized_pnl_try;
+      cur.wht += l.withholding_try;
+      cur.count += 1;
+      m.set(l.asset_id, cur);
+    }
+    return Array.from(m.values()).sort((a, b) => b.pnl - a.pnl);
+  }, [filteredRealized]);
+
+  const byPortfolio = useMemo(() => {
+    const m = new Map<string, { name: string; pnl: number; net: number; count: number }>();
+    for (const l of filteredRealized) {
+      const cur = m.get(l.portfolio_id) ?? { name: l.portfolio_name, pnl: 0, net: 0, count: 0 };
+      cur.pnl += l.realized_pnl_try;
+      cur.net += l.net_realized_pnl_try;
+      cur.count += 1;
+      m.set(l.portfolio_id, cur);
+    }
+    return Array.from(m.values()).sort((a, b) => b.pnl - a.pnl);
+  }, [filteredRealized]);
+
+  const byBeneficiary = useMemo(() => {
+    const benMap2 = Object.fromEntries(beneficiaries.map((b) => [b.id, b]));
+    const m = new Map<string, { name: string; color: string; pnl: number; net: number; count: number }>();
+    for (const l of filteredRealized) {
+      const bid = l.beneficiary_id ?? "__none__";
+      const bref = l.beneficiary_id ? benMap2[l.beneficiary_id] : null;
+      const cur = m.get(bid) ?? {
+        name: bid === "__none__" ? "(Atanmamış)" : bref?.name ?? "?",
+        color: bref?.color ?? "#7d8699",
+        pnl: 0,
+        net: 0,
+        count: 0,
+      };
+      cur.pnl += l.realized_pnl_try;
+      cur.net += l.net_realized_pnl_try;
+      cur.count += 1;
+      m.set(bid, cur);
+    }
+    return Array.from(m.values()).sort((a, b) => b.pnl - a.pnl);
+  }, [filteredRealized, beneficiaries]);
+
+  const topLots = useMemo(
+    () => [...filteredRealized].sort((a, b) => b.realized_pnl_try - a.realized_pnl_try).slice(0, 5),
+    [filteredRealized],
+  );
+  const bottomLots = useMemo(
+    () => [...filteredRealized].sort((a, b) => a.realized_pnl_try - b.realized_pnl_try).slice(0, 5),
+    [filteredRealized],
+  );
+
   return (
     <div>
       <div className="page-head">
         <div>
           <div className="page-title">Raporlar</div>
-          <div className="page-sub">{label} · {filtered.length} işlem</div>
+          <div className="page-sub">
+            {label} ·{" "}
+            {tab === "cashflow"
+              ? `${filtered.length} nakit işlem`
+              : `${filteredRealized.length} kapanan lot`}
+          </div>
         </div>
         <div className="page-actions" style={{ flexWrap: "wrap", gap: 6 }}>
           {PRESETS.map((p) => (
@@ -283,6 +421,15 @@ export function RaporlarClient({ txns, categories, beneficiaries }: Props) {
             Özel
           </button>
         </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: "1px solid var(--border-soft)" }}>
+        <TabBtn active={tab === "cashflow"} onClick={() => setTab("cashflow")}>
+          Nakit Akış
+        </TabBtn>
+        <TabBtn active={tab === "performance"} onClick={() => setTab("performance")}>
+          Yatırım Performansı
+        </TabBtn>
       </div>
 
       {rangeKey === "custom" && (
@@ -304,6 +451,19 @@ export function RaporlarClient({ txns, categories, beneficiaries }: Props) {
         </div>
       )}
 
+      {tab === "performance" ? (
+        <PerformanceTab
+          filteredRealized={filteredRealized}
+          totals={realizedTotals}
+          bySymbol={bySymbol}
+          byPortfolio={byPortfolio}
+          byBeneficiary={byBeneficiary}
+          topLots={topLots}
+          bottomLots={bottomLots}
+          label={label}
+        />
+      ) : (
+        <>
       {/* Nakit akış kartı: chart + 4 KPI altta */}
       <div style={{ marginBottom: 18 }}>
         <CashflowCard months={monthly} badgeText={label} />
@@ -440,6 +600,394 @@ export function RaporlarClient({ txns, categories, beneficiaries }: Props) {
             </tbody>
           </table>
         </div>
+      )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function TabBtn({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: "transparent",
+        border: "none",
+        borderBottom: `2px solid ${active ? "var(--primary, #4a86ff)" : "transparent"}`,
+        color: active ? "var(--fg)" : "var(--muted)",
+        padding: "10px 14px",
+        fontSize: 13,
+        fontWeight: active ? 600 : 500,
+        cursor: "pointer",
+        marginBottom: -1,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+interface PerformanceTotals {
+  cost: number;
+  proceeds: number;
+  pnl: number;
+  net: number;
+  wht: number;
+  avgHoldingDays: number | null;
+  closedSellCount: number;
+  lotCount: number;
+  winCount: number;
+  lossCount: number;
+  winPnl: number;
+  lossPnl: number;
+}
+
+interface SymbolAgg {
+  symbol: string;
+  name: string;
+  asset_class: string;
+  qty: number;
+  cost: number;
+  proceeds: number;
+  pnl: number;
+  net: number;
+  wht: number;
+  count: number;
+}
+
+interface PortfolioAgg {
+  name: string;
+  pnl: number;
+  net: number;
+  count: number;
+}
+
+interface BeneficiaryAgg {
+  name: string;
+  color: string;
+  pnl: number;
+  net: number;
+  count: number;
+}
+
+function PerformanceTab({
+  filteredRealized,
+  totals,
+  bySymbol,
+  byPortfolio,
+  byBeneficiary,
+  topLots,
+  bottomLots,
+  label,
+}: {
+  filteredRealized: RawRealizedLot[];
+  totals: PerformanceTotals;
+  bySymbol: SymbolAgg[];
+  byPortfolio: PortfolioAgg[];
+  byBeneficiary: BeneficiaryAgg[];
+  topLots: RawRealizedLot[];
+  bottomLots: RawRealizedLot[];
+  label: string;
+}) {
+  if (filteredRealized.length === 0) {
+    return (
+      <div className="empty">
+        <div className="title">Bu dönemde kapanan pozisyon yok</div>
+        <div style={{ marginTop: 8, lineHeight: 1.6 }}>
+          Sadece satışlar (kapanan lot&apos;lar) burada görünür. Hâlâ elindeki
+          pozisyonların anlık K/Z&apos;sini <b>Portföy</b> sayfasından görebilirsin.
+        </div>
+      </div>
+    );
+  }
+  const pnlPct = totals.cost > 0 ? (totals.pnl / totals.cost) * 100 : null;
+  const netPct = totals.cost > 0 ? (totals.net / totals.cost) * 100 : null;
+
+  return (
+    <div>
+      <div className="grid-base grid-4" style={{ marginBottom: 18, gap: 16 }}>
+        <KpiCard
+          label="Realized K/Z"
+          value={fmt.try(totals.pnl, 0)}
+          sub={pnlPct != null ? fmt.pct(pnlPct, 2) + " maliyete göre" : "—"}
+          color={totals.pnl >= 0 ? "var(--positive)" : "var(--negative)"}
+        />
+        <KpiCard
+          label="Net K/Z (stopaj sonrası)"
+          value={fmt.try(totals.net, 0)}
+          sub={netPct != null ? fmt.pct(netPct, 2) : "—"}
+          color={totals.net >= 0 ? "var(--positive)" : "var(--negative)"}
+        />
+        <KpiCard
+          label="Kapatılan işlem"
+          value={String(totals.closedSellCount)}
+          sub={`${totals.lotCount} lot · ${totals.winCount} kâr / ${totals.lossCount} zarar`}
+        />
+        <KpiCard
+          label="Ort. tutma süresi"
+          value={
+            totals.avgHoldingDays != null
+              ? fmt.tr(totals.avgHoldingDays, 0) + " gün"
+              : "—"
+          }
+          sub={
+            totals.wht > 0
+              ? `Stopaj: ${fmt.tr(totals.wht, 0)} ₺`
+              : "Stopaj hesaplanmadı"
+          }
+        />
+      </div>
+
+      <div className="card" style={{ marginBottom: 18 }}>
+        <div className="card-head">
+          <div className="card-title">Sembol Bazlı Realized K/Z</div>
+          <div className="card-sub">{bySymbol.length} sembol · {label}</div>
+        </div>
+        <table className="dg">
+          <thead>
+            <tr>
+              <th>Sembol</th>
+              <th className="num">Kapatılan adet</th>
+              <th className="num">Maliyet</th>
+              <th className="num">Satış hasıla</th>
+              <th className="num">K/Z</th>
+              <th className="num">K/Z %</th>
+              <th className="num" style={{ width: 60 }}>Lot</th>
+            </tr>
+          </thead>
+          <tbody>
+            {bySymbol.map((r) => {
+              const pct = r.cost > 0 ? (r.pnl / r.cost) * 100 : null;
+              const color = r.pnl >= 0 ? "var(--positive)" : "var(--negative)";
+              return (
+                <tr key={r.symbol}>
+                  <td>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{r.symbol}</div>
+                    <div className="hint" style={{ fontSize: 11 }}>{r.name}</div>
+                  </td>
+                  <td className="num tabular">
+                    {fmt.tr(r.qty, r.asset_class === "crypto" ? 4 : r.asset_class === "fund" ? 4 : 0)}
+                  </td>
+                  <td className="num tabular">{fmt.tr(r.cost, 0)} ₺</td>
+                  <td className="num tabular">{fmt.tr(r.proceeds, 0)} ₺</td>
+                  <td className="num tabular" style={{ fontWeight: 600, color }}>
+                    {r.pnl >= 0 ? "+" : ""}{fmt.tr(r.pnl, 0)} ₺
+                  </td>
+                  <td className="num tabular" style={{ color }}>
+                    {pct != null ? fmt.pct(pct, 1) : "—"}
+                  </td>
+                  <td className="num tabular hint">{r.count}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr style={{ borderTop: "2px solid var(--border)" }}>
+              <td colSpan={2} style={{ fontWeight: 600, padding: "10px 12px" }}>
+                Toplam ({label})
+              </td>
+              <td className="num tabular" style={{ fontWeight: 600 }}>{fmt.tr(totals.cost, 0)} ₺</td>
+              <td className="num tabular" style={{ fontWeight: 600 }}>{fmt.tr(totals.proceeds, 0)} ₺</td>
+              <td
+                className="num tabular"
+                style={{ fontWeight: 700, color: totals.pnl >= 0 ? "var(--positive)" : "var(--negative)" }}
+              >
+                {totals.pnl >= 0 ? "+" : ""}{fmt.tr(totals.pnl, 0)} ₺
+              </td>
+              <td
+                className="num tabular"
+                style={{ color: totals.pnl >= 0 ? "var(--positive)" : "var(--negative)" }}
+              >
+                {pnlPct != null ? fmt.pct(pnlPct, 1) : "—"}
+              </td>
+              <td className="num tabular hint">{totals.lotCount}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div className="grid-base grid-2" style={{ gap: 16, marginBottom: 18, alignItems: "start" }}>
+        <div className="card">
+          <div className="card-head">
+            <div className="card-title">Portföy Bazlı Realized K/Z</div>
+            <div className="card-sub">{byPortfolio.length} portföy · {label}</div>
+          </div>
+          <table className="dg">
+            <thead>
+              <tr>
+                <th>Portföy</th>
+                <th className="num">K/Z</th>
+                <th className="num">Net K/Z</th>
+                <th className="num" style={{ width: 60 }}>Lot</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byPortfolio.map((r) => {
+                const color = r.pnl >= 0 ? "var(--positive)" : "var(--negative)";
+                return (
+                  <tr key={r.name}>
+                    <td style={{ fontSize: 13 }}>{r.name}</td>
+                    <td className="num tabular" style={{ fontWeight: 600, color }}>
+                      {r.pnl >= 0 ? "+" : ""}{fmt.tr(r.pnl, 0)} ₺
+                    </td>
+                    <td className="num tabular" style={{ color }}>
+                      {r.net >= 0 ? "+" : ""}{fmt.tr(r.net, 0)} ₺
+                    </td>
+                    <td className="num tabular hint">{r.count}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="card">
+          <div className="card-head">
+            <div className="card-title">Kişi Bazlı Realized K/Z</div>
+            <div className="card-sub">{byBeneficiary.length} kişi · {label}</div>
+          </div>
+          <table className="dg">
+            <thead>
+              <tr>
+                <th>Kişi</th>
+                <th className="num">K/Z</th>
+                <th className="num">Net K/Z</th>
+                <th className="num" style={{ width: 60 }}>Lot</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byBeneficiary.map((r) => {
+                const color = r.pnl >= 0 ? "var(--positive)" : "var(--negative)";
+                return (
+                  <tr key={r.name}>
+                    <td>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 50, background: r.color }} />
+                        <span style={{ fontSize: 13 }}>{r.name}</span>
+                      </span>
+                    </td>
+                    <td className="num tabular" style={{ fontWeight: 600, color }}>
+                      {r.pnl >= 0 ? "+" : ""}{fmt.tr(r.pnl, 0)} ₺
+                    </td>
+                    <td className="num tabular" style={{ color }}>
+                      {r.net >= 0 ? "+" : ""}{fmt.tr(r.net, 0)} ₺
+                    </td>
+                    <td className="num tabular hint">{r.count}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="grid-base grid-2" style={{ gap: 16, alignItems: "start" }}>
+        <LotListCard
+          title="En İyi 5 Kapanan Lot"
+          lots={topLots}
+          empty="Bu dönemde kârla kapanan lot yok."
+          positive
+        />
+        <LotListCard
+          title="En Kötü 5 Kapanan Lot"
+          lots={bottomLots}
+          empty="Bu dönemde zararla kapanan lot yok."
+          positive={false}
+        />
+      </div>
+    </div>
+  );
+}
+
+function KpiCard({
+  label,
+  value,
+  sub,
+  color,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  color?: string;
+}) {
+  return (
+    <div className="card" style={{ padding: 16 }}>
+      <div className="hint" style={{ fontSize: 11, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+        {label}
+      </div>
+      <div className="tabular" style={{ fontSize: 22, fontWeight: 700, color: color ?? "var(--fg)" }}>
+        {value}
+      </div>
+      {sub && (
+        <div className="hint" style={{ fontSize: 11, marginTop: 6 }}>
+          {sub}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LotListCard({
+  title,
+  lots,
+  empty,
+  positive,
+}: {
+  title: string;
+  lots: RawRealizedLot[];
+  empty: string;
+  positive: boolean;
+}) {
+  return (
+    <div className="card">
+      <div className="card-head">
+        <div className="card-title">{title}</div>
+        <div className="card-sub">{lots.length} lot</div>
+      </div>
+      {lots.length === 0 ? (
+        <div className="empty"><div>{empty}</div></div>
+      ) : (
+        <table className="dg">
+          <thead>
+            <tr>
+              <th style={{ width: 92 }}>Tarih</th>
+              <th>Sembol</th>
+              <th className="num">Adet</th>
+              <th className="num">K/Z</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lots.map((l) => {
+              const color = positive ? "var(--positive)" : "var(--negative)";
+              return (
+                <tr key={l.id}>
+                  <td className="mono" style={{ color: "var(--muted)", fontSize: 11 }}>
+                    {l.closed_at.slice(0, 10)}
+                  </td>
+                  <td>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{l.asset_symbol}</div>
+                    <div className="hint" style={{ fontSize: 11 }}>{l.asset_name}</div>
+                  </td>
+                  <td className="num tabular hint" style={{ fontSize: 12 }}>
+                    {fmt.tr(l.quantity, l.asset_class === "fund" ? 4 : 0)}
+                  </td>
+                  <td className="num tabular" style={{ fontWeight: 600, color }}>
+                    {l.realized_pnl_try >= 0 ? "+" : ""}{fmt.tr(l.realized_pnl_try, 0)} ₺
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       )}
     </div>
   );

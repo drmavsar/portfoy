@@ -4,6 +4,56 @@ import { revalidatePath } from "next/cache";
 
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
 import { createClient } from "@/lib/supabase/server";
+import { processSellTrade } from "@/app/(app)/_lib/tefas/realized-lots-processor";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/lib/types/database";
+
+type DbClient = SupabaseClient<Database>;
+
+/**
+ * Bir (user, portfolio, asset) scope'undaki tüm sell'lerin realized_lots
+ * kayıtlarını sil ve chronological olarak yeniden hesaplat. Buy backdate,
+ * buy edit/delete veya sell edit/delete sonrasında FIFO chain'in bütünlüğünü
+ * korur. Idempotent. processSellTrade hatasını yutar (raporlar boş görünür
+ * ama trade yazımı bloklanmaz).
+ */
+async function reprocessRealizedLotsForScope(
+  supabase: DbClient,
+  userId: string,
+  portfolioId: string,
+  assetId: string,
+): Promise<void> {
+  const { data: sells, error } = await supabase
+    .from("trades")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("portfolio_id", portfolioId)
+    .eq("asset_id", assetId)
+    .eq("side", "sell")
+    .order("executed_at", { ascending: true });
+  if (error) {
+    console.error("reprocessRealizedLotsForScope list error", error);
+    return;
+  }
+  const sellIds = (sells ?? []).map((s: { id: string }) => s.id);
+  if (sellIds.length === 0) return;
+
+  const { error: delErr } = await supabase
+    .from("realized_lots")
+    .delete()
+    .in("sell_trade_id", sellIds);
+  if (delErr) {
+    console.error("reprocessRealizedLotsForScope delete error", delErr);
+    return;
+  }
+
+  for (const sellId of sellIds) {
+    const r = await processSellTrade(supabase, sellId);
+    if (!r.ok) {
+      console.error("processSellTrade error", sellId, r.error);
+    }
+  }
+}
 
 export interface AssetRow {
   id: string;
@@ -155,9 +205,13 @@ export async function createTrade(input: {
     .single();
 
   if (error) return { ok: false, error: error.message };
+
+  await reprocessRealizedLotsForScope(supabase, user.id, input.portfolio_id, input.asset_id);
+
   revalidatePath("/islemler");
   revalidatePath("/yatirimlar");
   revalidatePath("/ozet");
+  revalidatePath("/raporlar");
   return { ok: true, row: data as unknown as TradeRow };
 }
 
@@ -182,6 +236,12 @@ export async function updateTrade(input: {
   if (!input.asset_id) return { ok: false, error: "Sembol seç." };
   if (!(input.quantity > 0)) return { ok: false, error: "Adet pozitif olmalı." };
 
+  const { data: prev } = await supabase
+    .from("trades")
+    .select("user_id, portfolio_id, asset_id")
+    .eq("id", input.id)
+    .maybeSingle();
+
   const { data, error } = await supabase
     .from("trades")
     .update({
@@ -203,9 +263,21 @@ export async function updateTrade(input: {
     .single();
 
   if (error) return { ok: false, error: error.message };
+
+  const prevRow = prev as { user_id: string; portfolio_id: string; asset_id: string } | null;
+  if (prevRow) {
+    await reprocessRealizedLotsForScope(supabase, prevRow.user_id, prevRow.portfolio_id, prevRow.asset_id);
+    const movedScope =
+      prevRow.portfolio_id !== input.portfolio_id || prevRow.asset_id !== input.asset_id;
+    if (movedScope) {
+      await reprocessRealizedLotsForScope(supabase, prevRow.user_id, input.portfolio_id, input.asset_id);
+    }
+  }
+
   revalidatePath("/islemler");
   revalidatePath("/yatirimlar");
   revalidatePath("/ozet");
+  revalidatePath("/raporlar");
   return { ok: true, row: data as unknown as TradeRow };
 }
 
@@ -214,10 +286,24 @@ export async function deleteTrade(id: string): Promise<{ ok: boolean; error?: st
     return { ok: false, error: "Supabase yapılandırılmamış." };
   }
   const supabase = await createClient();
+
+  const { data: scope } = await supabase
+    .from("trades")
+    .select("user_id, portfolio_id, asset_id")
+    .eq("id", id)
+    .maybeSingle();
+
   const { error } = await supabase.from("trades").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
+
+  const row = scope as { user_id: string; portfolio_id: string; asset_id: string } | null;
+  if (row) {
+    await reprocessRealizedLotsForScope(supabase, row.user_id, row.portfolio_id, row.asset_id);
+  }
+
   revalidatePath("/islemler");
   revalidatePath("/yatirimlar");
   revalidatePath("/ozet");
+  revalidatePath("/raporlar");
   return { ok: true };
 }
