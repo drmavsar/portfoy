@@ -3,9 +3,11 @@ import { fmt } from "@/lib/finance/fmt";
 import {
   listAssets,
   listHoldings,
+  listHoldingsByCustody,
   listPortfolios,
   listTrades,
   type AssetRow,
+  type HoldingCustodyRow,
   type HoldingRow,
   type PortfolioRow,
 } from "@/app/(app)/_lib/wealth-actions";
@@ -19,7 +21,7 @@ import {
   topPositionsBreakdown,
   type PortfolioWarning,
 } from "@/app/(app)/_lib/portfolio-risk";
-import { listBeneficiariesLite } from "@/app/(app)/hesaplar/actions";
+import { listBeneficiariesLite, listCustodyLocations, type CustodyRow } from "@/app/(app)/hesaplar/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +53,19 @@ function priceDecimals(assetClass: string | undefined): number {
   return assetClass === "fund" ? 6 : 2;
 }
 
+interface CustodySlice {
+  custody_id: string | null;
+  name: string;
+  color: string | null;
+  mv: number;
+  cost: number;
+  pnl: number;
+  pnl_pct: number | null;
+  day_change: number;
+  day_change_pct: number | null;
+  positions: number;
+}
+
 interface Group {
   portfolio: PortfolioRow;
   rows: EnrichedHolding[];
@@ -61,6 +76,7 @@ interface Group {
   day_change: number;
   day_change_pct: number | null;
   beneficiary_id: string | null;
+  custody_slices: CustodySlice[];
 }
 
 interface PersonSummary {
@@ -73,21 +89,35 @@ interface PersonSummary {
   pnl_pct: number | null;
   day_change: number;
   day_change_pct: number | null;
+  custody_slices: CustodySlice[];
 }
 
 export default async function YatirimlarPage() {
-  const [holdings, assets, portfolios, trades, beneficiaries] = await Promise.all([
+  const [holdings, assets, portfolios, trades, beneficiaries, custodies, custodyHoldings] = await Promise.all([
     listHoldings(),
     listAssets(),
     listPortfolios(),
     listTrades(),
     listBeneficiariesLite(),
+    listCustodyLocations(),
+    listHoldingsByCustody(),
   ]);
 
   const assetMap: Record<string, AssetRow> = Object.fromEntries(
     assets.map((a) => [a.id, a]),
   );
   const benMap = Object.fromEntries(beneficiaries.map((b) => [b.id, b]));
+  const custodyMap: Record<string, CustodyRow> = Object.fromEntries(
+    custodies.map((c) => [c.id, c]),
+  );
+  // (portfolio_id, asset_id) → per-custody net qty listesi
+  const custodyIndex = new Map<string, HoldingCustodyRow[]>();
+  for (const r of custodyHoldings) {
+    const key = `${r.portfolio_id}|${r.asset_id}`;
+    const arr = custodyIndex.get(key) ?? [];
+    arr.push(r);
+    custodyIndex.set(key, arr);
+  }
 
   const bistSymbols = holdings
     .map((h) => assetMap[h.asset_id])
@@ -160,6 +190,76 @@ export default async function YatirimlarPage() {
     }
   }
 
+  function buildCustodySlices(rows: EnrichedHolding[]): CustodySlice[] {
+    const slices = new Map<string, CustodySlice>();
+    const getSlice = (id: string | null) => {
+      const key = id ?? "__unset__";
+      let s = slices.get(key);
+      if (!s) {
+        const meta = id ? custodyMap[id] : null;
+        s = {
+          custody_id: id,
+          name: meta?.name ?? "Kurum belirtilmemiş",
+          color: meta?.color ?? null,
+          mv: 0,
+          cost: 0,
+          pnl: 0,
+          pnl_pct: null,
+          day_change: 0,
+          day_change_pct: null,
+          positions: 0,
+        };
+        slices.set(key, s);
+      }
+      return s;
+    };
+
+    for (const h of rows) {
+      const totalQty = Number(h.quantity);
+      if (totalQty <= 0) continue;
+      const perCustody = custodyIndex.get(`${h.portfolio_id}|${h.asset_id}`) ?? [];
+      const price = h.quote?.price ?? Number(h.wac_try);
+      const prevClose = h.quote?.previous_close ?? price;
+      const wac = Number(h.wac_try);
+
+      if (perCustody.length === 0) {
+        const slice = getSlice(null);
+        slice.mv += h.market_value;
+        slice.cost += Number(h.cost_basis_try);
+        slice.pnl += h.pnl;
+        slice.day_change += h.day_change_try;
+        slice.positions += 1;
+        continue;
+      }
+
+      // Trade tabanlı per-custody qty toplamı v_holdings_wac'ın qty'siyle
+      // rounding/edit hataları yüzünden ufak farklı olabilir. Payları
+      // holdings qty'sine göre ölçeklendir ki toplam eşleşsin.
+      const custodyQtySum = perCustody.reduce((s, r) => s + r.quantity, 0);
+      const scale = custodyQtySum > 0 ? totalQty / custodyQtySum : 0;
+      for (const r of perCustody) {
+        const q = r.quantity * scale;
+        if (q <= 1e-9) continue;
+        const slice = getSlice(r.custody_id);
+        const mv = q * price;
+        const cost = q * wac;
+        const dayChg = q * (price - prevClose);
+        slice.mv += mv;
+        slice.cost += cost;
+        slice.pnl += mv - cost;
+        slice.day_change += dayChg;
+        slice.positions += 1;
+      }
+    }
+
+    for (const s of slices.values()) {
+      s.pnl_pct = s.cost > 0 ? (s.pnl / s.cost) * 100 : null;
+      const dayOpen = s.mv - s.day_change;
+      s.day_change_pct = dayOpen > 0 ? (s.day_change / dayOpen) * 100 : null;
+    }
+    return Array.from(slices.values()).sort((a, b) => b.mv - a.mv);
+  }
+
   const groups: Group[] = portfolios
     .map((p) => {
       const rows = enriched
@@ -182,6 +282,7 @@ export default async function YatirimlarPage() {
         day_change,
         day_change_pct,
         beneficiary_id: portfolioBeneficiary.get(p.id) ?? null,
+        custody_slices: buildCustodySlices(rows),
       };
     })
     .filter((g) => g.rows.length > 0)
@@ -189,6 +290,7 @@ export default async function YatirimlarPage() {
 
   // Kişi bazlı özet
   const personMap = new Map<string, PersonSummary>();
+  const personSlices = new Map<string, Map<string, CustodySlice>>();
   for (const g of groups) {
     if (!g.beneficiary_id) continue;
     const ben = benMap[g.beneficiary_id];
@@ -203,19 +305,89 @@ export default async function YatirimlarPage() {
       pnl_pct: null,
       day_change: 0,
       day_change_pct: null,
+      custody_slices: [],
     };
     cur.mv += g.mv;
     cur.cost += g.cost;
     cur.pnl += g.pnl;
     cur.day_change += g.day_change;
     personMap.set(g.beneficiary_id, cur);
+
+    const pSlices = personSlices.get(g.beneficiary_id) ?? new Map<string, CustodySlice>();
+    for (const s of g.custody_slices) {
+      const key = s.custody_id ?? "__unset__";
+      const cur2 = pSlices.get(key) ?? {
+        custody_id: s.custody_id,
+        name: s.name,
+        color: s.color,
+        mv: 0,
+        cost: 0,
+        pnl: 0,
+        pnl_pct: null,
+        day_change: 0,
+        day_change_pct: null,
+        positions: 0,
+      };
+      cur2.mv += s.mv;
+      cur2.cost += s.cost;
+      cur2.pnl += s.pnl;
+      cur2.day_change += s.day_change;
+      cur2.positions += s.positions;
+      pSlices.set(key, cur2);
+    }
+    personSlices.set(g.beneficiary_id, pSlices);
   }
-  for (const p of personMap.values()) {
+  for (const [id, p] of personMap) {
     p.pnl_pct = p.cost > 0 ? (p.pnl / p.cost) * 100 : null;
     const dayOpen = p.mv - p.day_change;
     p.day_change_pct = dayOpen > 0 ? (p.day_change / dayOpen) * 100 : null;
+    const pSlices = personSlices.get(id);
+    if (pSlices) {
+      const arr = Array.from(pSlices.values());
+      for (const s of arr) {
+        s.pnl_pct = s.cost > 0 ? (s.pnl / s.cost) * 100 : null;
+        const so = s.mv - s.day_change;
+        s.day_change_pct = so > 0 ? (s.day_change / so) * 100 : null;
+      }
+      p.custody_slices = arr.sort((a, b) => b.mv - a.mv);
+    }
   }
   const personCards = Array.from(personMap.values()).sort((a, b) => b.mv - a.mv);
+
+  // Toplam kurum kırılımı (tüm portföyleri kapsar) — sayfa üstünde özet chip'ler
+  const totalCustodySlices: CustodySlice[] = (() => {
+    const m = new Map<string, CustodySlice>();
+    for (const g of groups) {
+      for (const s of g.custody_slices) {
+        const key = s.custody_id ?? "__unset__";
+        const cur = m.get(key) ?? {
+          custody_id: s.custody_id,
+          name: s.name,
+          color: s.color,
+          mv: 0,
+          cost: 0,
+          pnl: 0,
+          pnl_pct: null,
+          day_change: 0,
+          day_change_pct: null,
+          positions: 0,
+        };
+        cur.mv += s.mv;
+        cur.cost += s.cost;
+        cur.pnl += s.pnl;
+        cur.day_change += s.day_change;
+        cur.positions += s.positions;
+        m.set(key, cur);
+      }
+    }
+    const arr = Array.from(m.values());
+    for (const s of arr) {
+      s.pnl_pct = s.cost > 0 ? (s.pnl / s.cost) * 100 : null;
+      const so = s.mv - s.day_change;
+      s.day_change_pct = so > 0 ? (s.day_change / so) * 100 : null;
+    }
+    return arr.sort((a, b) => b.mv - a.mv);
+  })();
 
   const totalCost = groups.reduce((s, g) => s + g.cost, 0);
   const totalMv = groups.reduce((s, g) => s + g.mv, 0);
@@ -304,6 +476,7 @@ export default async function YatirimlarPage() {
                 pnl_pct={p.pnl_pct}
                 day_change={p.day_change}
                 day_change_pct={p.day_change_pct}
+                custodySlices={p.custody_slices}
               />
             ))}
             <PortfolioStatCard
@@ -314,9 +487,32 @@ export default async function YatirimlarPage() {
               pnl_pct={totalPnlPct}
               day_change={totalDayChange}
               day_change_pct={totalDayChangePct}
+              custodySlices={totalCustodySlices}
               highlight
             />
           </div>
+
+          {totalCustodySlices.length > 1 && (
+            <div className="card" style={{ padding: 16, marginBottom: 18 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 12,
+                }}
+              >
+                <Icon name="bank" size={14} />
+                <div className="hint" style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.3 }}>
+                  KURUM BAZINDA TOPLAM
+                </div>
+                <span className="hint" style={{ marginLeft: "auto", fontSize: 11 }}>
+                  {totalCustodySlices.length} kurum
+                </span>
+              </div>
+              <CustodyBreakdown slices={totalCustodySlices} totalMv={totalMv} />
+            </div>
+          )}
 
           <div style={{ display: "grid", gap: 18 }}>
             {groups.map((g) => {
@@ -480,6 +676,31 @@ export default async function YatirimlarPage() {
                       </tr>
                     </tfoot>
                   </table>
+
+                  {g.custody_slices.length > 0 && (
+                    <div
+                      style={{
+                        padding: "12px 16px 16px",
+                        borderTop: "1px solid var(--border-soft)",
+                      }}
+                    >
+                      <div
+                        className="hint"
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          letterSpacing: 0.3,
+                          marginBottom: 8,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        <Icon name="bank" size={12} /> KURUM KIRILIMI
+                      </div>
+                      <CustodyBreakdown slices={g.custody_slices} totalMv={g.mv} />
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -780,6 +1001,7 @@ function PortfolioStatCard({
   day_change,
   day_change_pct,
   highlight,
+  custodySlices,
 }: {
   title: string;
   accentColor: string;
@@ -789,6 +1011,7 @@ function PortfolioStatCard({
   day_change: number;
   day_change_pct: number | null;
   highlight?: boolean;
+  custodySlices?: CustodySlice[];
 }) {
   const dayColor = day_change >= 0 ? "var(--positive)" : "var(--negative)";
   const pnlColor = pnl >= 0 ? "var(--positive)" : "var(--negative)";
@@ -851,6 +1074,149 @@ function PortfolioStatCard({
           {pnl_pct.toFixed(2)}%
         </div>
       )}
+      {custodySlices && custodySlices.length > 1 && (
+        <div
+          style={{
+            marginTop: 10,
+            paddingTop: 10,
+            borderTop: "1px dashed var(--border-soft)",
+            display: "grid",
+            gap: 4,
+          }}
+        >
+          {custodySlices.map((s) => {
+            const share = mv > 0 ? (s.mv / mv) * 100 : 0;
+            return (
+              <div
+                key={s.custody_id ?? "__unset__"}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 11,
+                }}
+                title={
+                  s.pnl_pct != null
+                    ? `${s.name} · Top. K/Z ${s.pnl >= 0 ? "+" : ""}${fmt.tr(s.pnl, 0)} ₺ (${s.pnl >= 0 ? "+" : ""}${s.pnl_pct.toFixed(2)}%)`
+                    : s.name
+                }
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: 50,
+                    background: s.color ?? "var(--muted)",
+                    flexShrink: 0,
+                  }}
+                />
+                <span
+                  style={{
+                    color: "var(--fg-soft)",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    flex: 1,
+                    minWidth: 0,
+                  }}
+                >
+                  {s.name}
+                </span>
+                <span className="tabular hint" style={{ fontSize: 11 }}>
+                  {fmt.tr(s.mv, 0)} ₺ · %{share.toFixed(1)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CustodyBreakdown({
+  slices,
+  totalMv,
+}: {
+  slices: CustodySlice[];
+  totalMv: number;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gap: 10,
+        gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+      }}
+    >
+      {slices.map((s) => {
+        const share = totalMv > 0 ? (s.mv / totalMv) * 100 : 0;
+        const dayColor =
+          s.day_change >= 0 ? "var(--positive)" : "var(--negative)";
+        const pnlColor = s.pnl >= 0 ? "var(--positive)" : "var(--negative)";
+        return (
+          <div
+            key={s.custody_id ?? "__unset__"}
+            style={{
+              padding: "10px 12px",
+              background: "var(--surface-2)",
+              borderRadius: 8,
+              borderLeft: `3px solid ${s.color ?? "var(--muted)"}`,
+              display: "grid",
+              gap: 4,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {s.name}
+              </span>
+              <span className="tabular hint" style={{ fontSize: 11, fontWeight: 500 }}>
+                %{share.toFixed(1)}
+              </span>
+            </div>
+            <div className="tabular" style={{ fontSize: 14, fontWeight: 700 }}>
+              {fmt.trydp(s.mv)}
+            </div>
+            <div
+              className="tabular"
+              style={{ fontSize: 11, color: dayColor }}
+            >
+              Bugün {s.day_change >= 0 ? "+" : ""}
+              {fmt.tr(s.day_change, 0)} ₺
+              {s.day_change_pct != null && (
+                <>
+                  {" · "}
+                  {s.day_change >= 0 ? "+" : ""}
+                  {s.day_change_pct.toFixed(2)}%
+                </>
+              )}
+            </div>
+            {s.pnl_pct != null && (
+              <div
+                className="tabular"
+                style={{ fontSize: 11, color: pnlColor }}
+              >
+                Top. {s.pnl >= 0 ? "+" : ""}
+                {fmt.tr(s.pnl, 0)} ₺
+                {" · "}
+                {s.pnl >= 0 ? "+" : ""}
+                {s.pnl_pct.toFixed(2)}%
+              </div>
+            )}
+            <div className="hint" style={{ fontSize: 10 }}>
+              {s.positions} pozisyon
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
