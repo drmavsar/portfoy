@@ -159,6 +159,65 @@ export async function listHoldings(): Promise<HoldingRow[]> {
   return (data ?? []) as unknown as HoldingRow[];
 }
 
+export interface HoldingCustodyRow {
+  portfolio_id: string;
+  asset_id: string;
+  custody_id: string | null;
+  quantity: number;
+}
+
+/**
+ * Trades'i (portfolio, asset, custody) bazında net'leyip pozitif kalanları
+ * döner. v_holdings_wac custody-agnostik olduğu için (WAC portfolio+asset
+ * seviyesinde tutuluyor) — kurum kırılımı burada trades'ten türetilir.
+ * Tüm trade'ler taranır (listTrades'in 500 limiti burada uygulanmaz);
+ * postgrest default 1000 satır cap'ini aşmak için sayfalama yapılır.
+ */
+export async function listHoldingsByCustody(): Promise<HoldingCustodyRow[]> {
+  if (!(await isSupabaseConfigured())) return [];
+  const supabase = await createClient();
+
+  const pageSize = 1000;
+  const rows: Array<{
+    portfolio_id: string;
+    asset_id: string;
+    custody_id: string | null;
+    side: "buy" | "sell";
+    quantity: number | string;
+  }> = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from("trades")
+      .select("portfolio_id, asset_id, custody_id, side, quantity")
+      .range(from, from + pageSize - 1);
+    if (error) {
+      console.error("listHoldingsByCustody error", error);
+      return [];
+    }
+    const batch = (data ?? []) as typeof rows;
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+
+  const acc = new Map<string, HoldingCustodyRow>();
+  for (const r of rows) {
+    const key = `${r.portfolio_id}|${r.asset_id}|${r.custody_id ?? ""}`;
+    const q = Number(r.quantity) * (r.side === "buy" ? 1 : -1);
+    const cur = acc.get(key);
+    if (cur) {
+      cur.quantity += q;
+    } else {
+      acc.set(key, {
+        portfolio_id: r.portfolio_id,
+        asset_id: r.asset_id,
+        custody_id: r.custody_id ?? null,
+        quantity: q,
+      });
+    }
+  }
+  return Array.from(acc.values()).filter((r) => r.quantity > 1e-9);
+}
+
 export async function createTrade(input: {
   portfolio_id: string;
   custody_id: string | null;
