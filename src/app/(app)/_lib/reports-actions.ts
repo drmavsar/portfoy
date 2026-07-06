@@ -15,7 +15,13 @@ export interface RawTxn {
   merchant_raw: string | null;
 }
 
-/** Raporlar için ham transactions (son N ay, committed, transfer hariç). */
+/**
+ * Raporlar için ham transactions (son N ay, committed, transfer hariç).
+ *
+ * PostgREST default 1000 satır cap'ini aşmak için range() ile sayfalama
+ * yapılır — ASC + no-limit varyantı en yeni ayları sessizce düşürüyordu
+ * (aktif kullanıcıda 24 ay > 1000 satır).
+ */
 export async function listTransactionsForReports(sinceMonths: number = 24): Promise<RawTxn[]> {
   if (!(await isSupabaseConfigured())) return [];
   const supabase = await createClient();
@@ -24,19 +30,26 @@ export async function listTransactionsForReports(sinceMonths: number = 24): Prom
   since.setDate(1);
   const sinceIso = since.toISOString().slice(0, 10);
 
-  const { data, error } = await supabase
-    .from("transactions")
-    .select("occurred_on, direction, amount, currency, category_id, beneficiary_id, description, merchant_raw")
-    .eq("status", "committed")
-    .eq("is_transfer", false)
-    .gte("occurred_on", sinceIso)
-    .order("occurred_on", { ascending: true });
-
-  if (error) {
-    console.error("listTransactionsForReports error", error);
-    return [];
+  const pageSize = 1000;
+  const out: RawTxn[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("occurred_on, direction, amount, currency, category_id, beneficiary_id, description, merchant_raw")
+      .eq("status", "committed")
+      .eq("is_transfer", false)
+      .gte("occurred_on", sinceIso)
+      .order("occurred_on", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) {
+      console.error("listTransactionsForReports error", error);
+      return [];
+    }
+    const batch = (data ?? []) as unknown as RawTxn[];
+    out.push(...batch);
+    if (batch.length < pageSize) break;
   }
-  return (data ?? []) as unknown as RawTxn[];
+  return out;
 }
 
 export interface RawRealizedLot {
