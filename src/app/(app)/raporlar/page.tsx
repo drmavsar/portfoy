@@ -4,6 +4,7 @@ import {
   listRealizedForReport,
   listTransactionsForReports,
 } from "@/app/(app)/_lib/reports-actions";
+import { listRealValueSeries } from "@/app/(app)/_lib/wealth-snapshots-actions";
 import { Icon } from "@/components/ui/icon";
 
 import { RaporlarClient } from "./raporlar-client";
@@ -12,14 +13,15 @@ export const dynamic = "force-dynamic";
 
 export default async function RaporlarPage() {
   // Son 24 ay veri çekiyoruz — client tarafı tarih aralığı filtresi uygular
-  const [txns, realized, categories, beneficiaries] = await Promise.all([
+  const [txns, realized, categories, beneficiaries, realValue] = await Promise.all([
     listTransactionsForReports(24),
     listRealizedForReport(24),
     listCategories(),
     listBeneficiariesLite(),
+    listRealValueSeries(),
   ]);
 
-  if (txns.length === 0 && realized.length === 0) {
+  if (txns.length === 0 && realized.length === 0 && realValue.length === 0) {
     return (
       <div>
         <div className="page-head">
@@ -46,6 +48,7 @@ export default async function RaporlarPage() {
       realized={realized}
       categories={categories}
       beneficiaries={beneficiaries}
+      realValue={realValue}
     />
   );
 }
