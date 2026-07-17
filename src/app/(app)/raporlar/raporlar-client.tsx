@@ -6,6 +6,11 @@ import { fmt } from "@/lib/finance/fmt";
 
 import type { RawRealizedLot, RawTxn } from "@/app/(app)/_lib/reports-actions";
 import type { RealValueRow } from "@/app/(app)/_lib/wealth-snapshots-actions";
+import {
+  BENCH_META,
+  type BenchmarkCompareResult,
+  type SymbolCompare,
+} from "@/app/(app)/_lib/benchmark-compare-types";
 import type { CategoryRow } from "@/app/(app)/ayarlar/actions";
 import type { BeneficiaryLite } from "@/app/(app)/hesaplar/actions";
 
@@ -73,11 +78,12 @@ interface Props {
   categories: CategoryRow[];
   beneficiaries: BeneficiaryLite[];
   realValue: RealValueRow[];
+  benchmark: BenchmarkCompareResult | null;
 }
 
-type TabKey = "cashflow" | "performance" | "realvalue";
+type TabKey = "cashflow" | "performance" | "realvalue" | "benchmark";
 
-export function RaporlarClient({ txns, realized, categories, beneficiaries, realValue }: Props) {
+export function RaporlarClient({ txns, realized, categories, beneficiaries, realValue, benchmark }: Props) {
   const [tab, setTab] = useState<TabKey>("cashflow");
   const [rangeKey, setRangeKey] = useState<RangeKey>("ytd");
   const [customFrom, setCustomFrom] = useState<string>(isoStartOfYear());
@@ -406,7 +412,7 @@ export function RaporlarClient({ txns, realized, categories, beneficiaries, real
               : `${filteredRealized.length} kapanan lot`}
           </div>
         </div>
-        {tab !== "realvalue" && (
+        {tab !== "realvalue" && tab !== "benchmark" && (
           <div className="page-actions" style={{ flexWrap: "wrap", gap: 6 }}>
             {PRESETS.map((p) => (
               <button
@@ -439,9 +445,14 @@ export function RaporlarClient({ txns, realized, categories, beneficiaries, real
             Reel Değer
           </TabBtn>
         )}
+        {benchmark && (
+          <TabBtn active={tab === "benchmark"} onClick={() => setTab("benchmark")}>
+            Benchmark
+          </TabBtn>
+        )}
       </div>
 
-      {rangeKey === "custom" && tab !== "realvalue" && (
+      {rangeKey === "custom" && tab !== "realvalue" && tab !== "benchmark" && (
         <div className="card card-pad" style={{ marginBottom: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <span style={{ fontSize: 12, color: "var(--muted)" }}>Başlangıç</span>
           <input
@@ -460,7 +471,9 @@ export function RaporlarClient({ txns, realized, categories, beneficiaries, real
         </div>
       )}
 
-      {tab === "realvalue" ? (
+      {tab === "benchmark" ? (
+        benchmark ? <BenchmarkTab data={benchmark} /> : null
+      ) : tab === "realvalue" ? (
         <RealValueTab rows={realValue} />
       ) : tab === "performance" ? (
         <PerformanceTab
@@ -914,6 +927,167 @@ function PerformanceTab({
           empty="Bu dönemde zararla kapanan lot yok."
           positive={false}
         />
+      </div>
+    </div>
+  );
+}
+
+// ============================ Benchmark ==============================
+
+function signedTry(n: number): string {
+  return (n >= 0 ? "+" : "") + fmt.tr(n, 0) + " ₺";
+}
+
+/** "hisse − benchmark" avantajı (pozitif = hisse kazandı). */
+function edgeOf(actualProfit: number, benchProfit: number): number {
+  return actualProfit - benchProfit;
+}
+
+function BenchmarkTab({ data }: { data: BenchmarkCompareResult }) {
+  const { symbols, total, asOf, tradeCount } = data;
+  const codes = total.benches.map((b) => b.code);
+
+  const actualRetPct = total.buyTry > 0 ? (total.actualProfit / total.buyTry) * 100 : null;
+
+  return (
+    <div>
+      {/* Özet hero */}
+      <div className="grid-base grid-2" style={{ gap: 16, marginBottom: 18, alignItems: "stretch" }}>
+        <div className="card" style={{ padding: 18 }}>
+          <div className="hint" style={{ fontSize: 11, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            Yatırımının Gerçek K/Z&apos;si
+          </div>
+          <div
+            className="tabular"
+            style={{ fontSize: 26, fontWeight: 800, color: total.actualProfit >= 0 ? "var(--positive)" : "var(--negative)" }}
+          >
+            {signedTry(total.actualProfit)}
+          </div>
+          <div className="hint" style={{ fontSize: 12, marginTop: 8, lineHeight: 1.6 }}>
+            Net yatırım {fmt.tr(total.netInvested, 0)} ₺ · güncel değer {fmt.tr(total.currentMv, 0)} ₺
+            {actualRetPct != null && <> · {fmt.pct(actualRetPct, 1)} (yatırılana göre)</>}
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: 18 }}>
+          <div className="hint" style={{ fontSize: 11, marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            Aynı parayı şuna koysaydın
+          </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {total.benches.map((b) => {
+              const edge = edgeOf(total.actualProfit, b.profit);
+              const edgeColor = edge >= 0 ? "var(--positive)" : "var(--negative)";
+              return (
+                <div key={b.code} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+                  <span style={{ width: 92, fontWeight: 600 }}>{BENCH_META[b.code].label}</span>
+                  <span className="tabular" style={{ width: 120, textAlign: "right", color: b.profit >= 0 ? "var(--positive)" : "var(--negative)" }}>
+                    {signedTry(b.profit)}
+                  </span>
+                  <span
+                    className="tabular"
+                    style={{ marginLeft: "auto", fontWeight: 700, color: edgeColor }}
+                    title="Hisse yatırımın bu benchmark'a göre farkı"
+                  >
+                    {edge >= 0 ? "hisse " : "benchmark "}
+                    {edge >= 0 ? "+" : ""}
+                    {fmt.tr(Math.abs(edge), 0)} ₺
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Sembol bazlı karşılaştırma */}
+      <div className="card" style={{ marginBottom: 18 }}>
+        <div className="card-head">
+          <div className="card-title">Sembol Bazlı Benchmark Karşılaştırması</div>
+          <div className="card-sub">{symbols.length} sembol · {tradeCount} işlem</div>
+        </div>
+        <table className="dg">
+          <thead>
+            <tr>
+              <th>Sembol</th>
+              <th className="num">Net Yatırım</th>
+              <th className="num">Güncel Değer</th>
+              <th className="num">K/Z</th>
+              {codes.map((c) => (
+                <th key={c} className="num" title={`Hisse − ${BENCH_META[c].label} (pozitif = hisse kazandı)`}>
+                  vs {BENCH_META[c].label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {symbols.map((s: SymbolCompare) => {
+              const pnlColor = s.actualProfit >= 0 ? "var(--positive)" : "var(--negative)";
+              return (
+                <tr key={s.asset_id}>
+                  <td>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>
+                      {s.symbol}
+                      {!s.priced && <span className="hint" title="Güncel fiyat bulunamadı — maliyet bazı kullanıldı"> ⚠</span>}
+                    </div>
+                    <div className="hint">{s.name}</div>
+                  </td>
+                  <td className="num tabular">{fmt.tr(s.netInvested, 0)} ₺</td>
+                  <td className="num tabular">{fmt.tr(s.currentMv, 0)} ₺</td>
+                  <td className="num tabular" style={{ fontWeight: 600, color: pnlColor }}>{signedTry(s.actualProfit)}</td>
+                  {s.benches.map((b) => {
+                    const edge = edgeOf(s.actualProfit, b.profit);
+                    const color = edge >= 0 ? "var(--positive)" : "var(--negative)";
+                    return (
+                      <td key={b.code} className="num tabular" style={{ color }}>
+                        {signedTry(edge)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr style={{ borderTop: "2px solid var(--border)" }}>
+              <td style={{ fontWeight: 700 }}>Toplam</td>
+              <td className="num tabular" style={{ fontWeight: 700 }}>{fmt.tr(total.netInvested, 0)} ₺</td>
+              <td className="num tabular" style={{ fontWeight: 700 }}>{fmt.tr(total.currentMv, 0)} ₺</td>
+              <td className="num tabular" style={{ fontWeight: 700, color: total.actualProfit >= 0 ? "var(--positive)" : "var(--negative)" }}>
+                {signedTry(total.actualProfit)}
+              </td>
+              {total.benches.map((b) => {
+                const edge = edgeOf(total.actualProfit, b.profit);
+                const color = edge >= 0 ? "var(--positive)" : "var(--negative)";
+                return (
+                  <td key={b.code} className="num tabular" style={{ fontWeight: 700, color }}>
+                    {signedTry(edge)}
+                  </td>
+                );
+              })}
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div
+        style={{
+          padding: "12px 16px",
+          fontSize: 11,
+          color: "var(--muted)",
+          lineHeight: 1.7,
+          background: "var(--surface-2)",
+          borderRadius: 8,
+        }}
+      >
+        <b>Nasıl hesaplanır.</b> Her alışta harcadığın TL&apos;yi o günkü benchmark fiyatına (altın/USD/EUR/BIST)
+        bölerek &quot;o gün bunu almış olsaydın&quot; senaryosunu kurar; her satışta çıkan TL&apos;yi de aynı gün
+        fiyatından düşer. Kalan benchmark pozisyonu bugünün fiyatıyla değerlenip senin gerçek sonucunla
+        karşılaştırılır. <b>vs</b> sütunu = hisse K/Z − benchmark K/Z; pozitif (yeşil) ise hisse o benchmark&apos;ı
+        geçmiş demektir.
+        <br />
+        <br />
+        Güncel hisse fiyatı Yahoo Finance, fon NAV&apos;ı TEFAS. Benchmark fiyatları {asOf} tarihine kadar günlük.
+        Fiyatı çekilemeyen sembollerde (⚠) maliyet bazı kullanılır.
       </div>
     </div>
   );
