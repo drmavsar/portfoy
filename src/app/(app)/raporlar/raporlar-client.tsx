@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { fmt } from "@/lib/finance/fmt";
 
 import type { RawRealizedLot, RawTxn } from "@/app/(app)/_lib/reports-actions";
+import type { RealValueRow } from "@/app/(app)/_lib/wealth-snapshots-actions";
 import type { CategoryRow } from "@/app/(app)/ayarlar/actions";
 import type { BeneficiaryLite } from "@/app/(app)/hesaplar/actions";
 
@@ -71,11 +72,12 @@ interface Props {
   realized: RawRealizedLot[];
   categories: CategoryRow[];
   beneficiaries: BeneficiaryLite[];
+  realValue: RealValueRow[];
 }
 
-type TabKey = "cashflow" | "performance";
+type TabKey = "cashflow" | "performance" | "realvalue";
 
-export function RaporlarClient({ txns, realized, categories, beneficiaries }: Props) {
+export function RaporlarClient({ txns, realized, categories, beneficiaries, realValue }: Props) {
   const [tab, setTab] = useState<TabKey>("cashflow");
   const [rangeKey, setRangeKey] = useState<RangeKey>("ytd");
   const [customFrom, setCustomFrom] = useState<string>(isoStartOfYear());
@@ -404,35 +406,42 @@ export function RaporlarClient({ txns, realized, categories, beneficiaries }: Pr
               : `${filteredRealized.length} kapanan lot`}
           </div>
         </div>
-        <div className="page-actions" style={{ flexWrap: "wrap", gap: 6 }}>
-          {PRESETS.map((p) => (
+        {tab !== "realvalue" && (
+          <div className="page-actions" style={{ flexWrap: "wrap", gap: 6 }}>
+            {PRESETS.map((p) => (
+              <button
+                key={p.key}
+                className={`btn btn-sm ${rangeKey === p.key ? "btn-prim" : ""}`}
+                onClick={() => setRangeKey(p.key)}
+              >
+                {p.label}
+              </button>
+            ))}
             <button
-              key={p.key}
-              className={`btn btn-sm ${rangeKey === p.key ? "btn-prim" : ""}`}
-              onClick={() => setRangeKey(p.key)}
+              className={`btn btn-sm ${rangeKey === "custom" ? "btn-prim" : ""}`}
+              onClick={() => setRangeKey("custom")}
             >
-              {p.label}
+              Özel
             </button>
-          ))}
-          <button
-            className={`btn btn-sm ${rangeKey === "custom" ? "btn-prim" : ""}`}
-            onClick={() => setRangeKey("custom")}
-          >
-            Özel
-          </button>
-        </div>
+          </div>
+        )}
       </div>
 
-      <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: "1px solid var(--border-soft)" }}>
+      <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: "1px solid var(--border-soft)", flexWrap: "wrap" }}>
         <TabBtn active={tab === "cashflow"} onClick={() => setTab("cashflow")}>
           Nakit Akış
         </TabBtn>
         <TabBtn active={tab === "performance"} onClick={() => setTab("performance")}>
           Yatırım Performansı
         </TabBtn>
+        {realValue.length > 0 && (
+          <TabBtn active={tab === "realvalue"} onClick={() => setTab("realvalue")}>
+            Reel Değer
+          </TabBtn>
+        )}
       </div>
 
-      {rangeKey === "custom" && (
+      {rangeKey === "custom" && tab !== "realvalue" && (
         <div className="card card-pad" style={{ marginBottom: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <span style={{ fontSize: 12, color: "var(--muted)" }}>Başlangıç</span>
           <input
@@ -451,7 +460,9 @@ export function RaporlarClient({ txns, realized, categories, beneficiaries }: Pr
         </div>
       )}
 
-      {tab === "performance" ? (
+      {tab === "realvalue" ? (
+        <RealValueTab rows={realValue} />
+      ) : tab === "performance" ? (
         <PerformanceTab
           filteredRealized={filteredRealized}
           totals={realizedTotals}
@@ -903,6 +914,302 @@ function PerformanceTab({
           empty="Bu dönemde zararla kapanan lot yok."
           positive={false}
         />
+      </div>
+    </div>
+  );
+}
+
+// ============================ Reel Değer =============================
+
+type RvUnitKey = "try" | "realtry" | "usd" | "eur" | "gold";
+
+interface RvUnit {
+  key: RvUnitKey;
+  label: string;
+  fmt: (v: number) => string;
+  /** Satırı bu birime çevir; veri eksikse null. */
+  value: (r: RealValueRow, cpiLatest: number | null) => number | null;
+}
+
+const RV_UNITS: RvUnit[] = [
+  {
+    key: "try",
+    label: "Nominal ₺",
+    fmt: (v) => fmt.tr(v, 0) + " ₺",
+    value: (r) => r.total_try,
+  },
+  {
+    key: "realtry",
+    label: "Reel ₺ (enflasyon)",
+    fmt: (v) => fmt.tr(v, 0) + " ₺",
+    value: (r, cpiLatest) =>
+      r.cpi_index && cpiLatest ? r.total_try * (cpiLatest / r.cpi_index) : null,
+  },
+  {
+    key: "usd",
+    label: "USD",
+    fmt: (v) => "$" + fmt.tr(v, 0),
+    value: (r) => (r.usd_try ? r.total_try / r.usd_try : null),
+  },
+  {
+    key: "eur",
+    label: "EUR",
+    fmt: (v) => "€" + fmt.tr(v, 0),
+    value: (r) => (r.eur_try ? r.total_try / r.eur_try : null),
+  },
+  {
+    key: "gold",
+    label: "Gram Altın",
+    fmt: (v) => fmt.tr(v, 0) + " gr",
+    value: (r) => (r.gram_gold ? r.total_try / r.gram_gold : null),
+  },
+];
+
+function rvChange(
+  rows: RealValueRow[],
+  unit: RvUnit,
+  cpiLatest: number | null,
+): { first: number; last: number; pct: number | null } | null {
+  const vals = rows
+    .map((r) => unit.value(r, cpiLatest))
+    .filter((v): v is number => v != null);
+  if (vals.length < 1) return null;
+  const first = vals[0];
+  const last = vals[vals.length - 1];
+  const pct = first !== 0 ? (last / first - 1) * 100 : null;
+  return { first, last, pct };
+}
+
+function RealValueTab({ rows }: { rows: RealValueRow[] }) {
+  const [unitKey, setUnitKey] = useState<RvUnitKey>("gold");
+
+  if (rows.length === 0) {
+    return (
+      <div className="empty">
+        <div className="title">Servet snapshot&apos;ı yok</div>
+        <div style={{ marginTop: 8, lineHeight: 1.6 }}>
+          Reel değer, yıllık net servet kayıtlarını (Varlık → Servet snapshot)
+          o yılın kur ve enflasyon verisiyle karşılaştırır. Önce en az bir
+          yıllık servet kaydı gir.
+        </div>
+      </div>
+    );
+  }
+
+  const cpiLatest = (() => {
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i].cpi_index != null) return rows[i].cpi_index;
+    }
+    return null;
+  })();
+
+  const selected = RV_UNITS.find((u) => u.key === unitKey) ?? RV_UNITS[0];
+  const firstYear = rows[0].period;
+  const lastYear = rows[rows.length - 1].period;
+
+  // KPI kartları: ilk→son dönem toplam değişimi
+  const kpiUnits = RV_UNITS.filter((u) =>
+    ["try", "realtry", "usd", "gold"].includes(u.key),
+  );
+
+  // Seçili birim serisi (bar chart)
+  const series = rows.map((r) => ({
+    period: r.period,
+    value: selected.value(r, cpiLatest),
+  }));
+  const maxVal = Math.max(...series.map((s) => s.value ?? 0), 1);
+
+  // İçgörü metni: nominal vs altın vs reel TL
+  const nominalCh = rvChange(rows, RV_UNITS[0], cpiLatest);
+  const realCh = rvChange(rows, RV_UNITS[1], cpiLatest);
+  const goldCh = rvChange(rows, RV_UNITS[4], cpiLatest);
+
+  return (
+    <div>
+      <div className="grid-base grid-4" style={{ marginBottom: 18, gap: 16 }}>
+        {kpiUnits.map((u) => {
+          const ch = rvChange(rows, u, cpiLatest);
+          if (!ch) {
+            return <KpiCard key={u.key} label={u.label} value="—" sub="veri yok" />;
+          }
+          const color =
+            ch.pct == null
+              ? undefined
+              : ch.pct >= 0
+              ? "var(--positive)"
+              : "var(--negative)";
+          return (
+            <KpiCard
+              key={u.key}
+              label={u.label}
+              value={u.fmt(ch.last)}
+              sub={
+                ch.pct != null
+                  ? `${fmt.pct(ch.pct, 1)} · ${firstYear}→${lastYear}`
+                  : `${firstYear}→${lastYear}`
+              }
+              color={color}
+            />
+          );
+        })}
+      </div>
+
+      {nominalCh && goldCh && realCh && (
+        <div
+          className="card card-pad"
+          style={{ marginBottom: 18, lineHeight: 1.7, fontSize: 13 }}
+        >
+          <b>Özet.</b> {firstYear}–{lastYear} arasında net servetin nominal ₺
+          bazında{" "}
+          <b style={{ color: "var(--positive)" }}>
+            {nominalCh.pct != null ? fmt.pct(nominalCh.pct, 0) : "—"}
+          </b>{" "}
+          arttı. Ama enflasyondan arındırılınca reel artış{" "}
+          <b
+            style={{
+              color:
+                (realCh.pct ?? 0) >= 0 ? "var(--positive)" : "var(--negative)",
+            }}
+          >
+            {realCh.pct != null ? fmt.pct(realCh.pct, 0) : "—"}
+          </b>
+          , gram altın cinsinden ise{" "}
+          <b
+            style={{
+              color:
+                (goldCh.pct ?? 0) >= 0 ? "var(--positive)" : "var(--negative)",
+            }}
+          >
+            {goldCh.pct != null ? fmt.pct(goldCh.pct, 0) : "—"}
+          </b>
+          {(goldCh.pct ?? 0) >= 0 ? " oldu" : " geriledi"}. Yani nominal büyümenin
+          önemli kısmı TL&apos;nin değer kaybını telafi etmekten geliyor.
+        </div>
+      )}
+
+      <div className="card" style={{ marginBottom: 18 }}>
+        <div className="card-head" style={{ flexWrap: "wrap", gap: 10 }}>
+          <div className="card-title">Yıllara Göre Reel Değer</div>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {RV_UNITS.map((u) => (
+              <button
+                key={u.key}
+                className={`btn btn-sm ${unitKey === u.key ? "btn-prim" : ""}`}
+                onClick={() => setUnitKey(u.key)}
+              >
+                {u.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Seçili birim bar görünümü */}
+        <div style={{ padding: "4px 16px 14px" }}>
+          {series.map((s) => {
+            const pct = s.value != null ? (s.value / maxVal) * 100 : 0;
+            return (
+              <div
+                key={s.period}
+                style={{ display: "flex", alignItems: "center", gap: 12, padding: "6px 0" }}
+              >
+                <div style={{ width: 48, fontSize: 12, color: "var(--muted)" }}>
+                  {s.period}
+                </div>
+                <div style={{ flex: 1, background: "var(--surface-2)", borderRadius: 4, height: 22, position: "relative", overflow: "hidden" }}>
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      width: `${Math.max(2, pct)}%`,
+                      background: "var(--accent)",
+                      opacity: 0.35,
+                      borderRadius: 4,
+                    }}
+                  />
+                </div>
+                <div className="tabular" style={{ width: 130, textAlign: "right", fontSize: 13, fontWeight: 600 }}>
+                  {s.value != null ? selected.fmt(s.value) : "—"}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Tüm birimler tablo */}
+      <div className="card" style={{ marginBottom: 18 }}>
+        <div className="card-head">
+          <div className="card-title">Birim Karşılaştırma Tablosu</div>
+          <div className="card-sub">{rows.length} dönem</div>
+        </div>
+        <table className="dg">
+          <thead>
+            <tr>
+              <th>Yıl</th>
+              {RV_UNITS.map((u) => (
+                <th key={u.key} className="num">{u.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.period}>
+                <td style={{ fontWeight: 600 }}>{r.period}</td>
+                {RV_UNITS.map((u) => {
+                  const v = u.value(r, cpiLatest);
+                  return (
+                    <td key={u.key} className="num tabular">
+                      {v != null ? u.fmt(v) : <span className="hint">—</span>}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr style={{ borderTop: "2px solid var(--border)" }}>
+              <td style={{ fontWeight: 700 }}>Değişim</td>
+              {RV_UNITS.map((u) => {
+                const ch = rvChange(rows, u, cpiLatest);
+                const color =
+                  ch?.pct == null
+                    ? undefined
+                    : ch.pct >= 0
+                    ? "var(--positive)"
+                    : "var(--negative)";
+                return (
+                  <td key={u.key} className="num tabular" style={{ fontWeight: 700, color }}>
+                    {ch?.pct != null ? fmt.pct(ch.pct, 1) : "—"}
+                  </td>
+                );
+              })}
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div
+        style={{
+          padding: "12px 16px",
+          fontSize: 11,
+          color: "var(--muted)",
+          lineHeight: 1.7,
+          background: "var(--surface-2)",
+          borderRadius: 8,
+        }}
+      >
+        <b>Nasıl okunur.</b> Her yılın net serveti, o yıl sonundaki USD/EUR/gram
+        altın kuru ve TÜFE endeksi ile birime çevrilir. <b>Reel ₺</b>, geçmiş
+        serveti bugünün alım gücüne getirir (enflasyondan arındırır). Bir birimde
+        değer artıyorsa servetin o cinsten <i>gerçekten</i> büyümüş demektir;
+        sabit veya azalıyorsa nominal ₺ büyümesi çoğunlukla değer kaybını telafi
+        ediyordur.
+        <br />
+        <br />
+        Not: Bu tablo <b>toplam net serveti</b> baz alır — maaş/kira/emekli gibi
+        gelirlerden gelen birikim ile yatırım getirisi burada birleşiktir.
+        Yalnızca borsa/yatırım getirisini izole görmek için{" "}
+        <b>Yatırım Performansı</b> sekmesini kullan.
       </div>
     </div>
   );
