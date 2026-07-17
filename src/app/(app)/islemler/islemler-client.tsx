@@ -59,8 +59,14 @@ function qtyDecimals(assetClass: string | undefined, symbol: string | undefined)
 }
 
 type RangeKey = "month" | "ytd" | "last30" | "last90" | "all" | "custom";
-type SortCol = "date" | "symbol" | "side" | "qty" | "price" | "ben" | "cust";
+type SortCol = "date" | "symbol" | "side" | "qty" | "price" | "amount" | "ben" | "cust";
 type SortDir = "asc" | "desc";
+
+function tradeAmount(t: TradeRow): number {
+  const gross = Number(t.quantity) * Number(t.price);
+  const fees = Number(t.fees);
+  return t.side === "buy" ? gross + fees : gross - fees;
+}
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -152,6 +158,9 @@ export function IslemlerClient({
         case "price":
           cmp = Number(a.price) - Number(b.price);
           break;
+        case "amount":
+          cmp = tradeAmount(a) - tradeAmount(b);
+          break;
         case "ben": {
           const an = a.beneficiary_id ? benMap[a.beneficiary_id]?.name ?? "" : "";
           const bn = b.beneficiary_id ? benMap[b.beneficiary_id]?.name ?? "" : "";
@@ -174,6 +183,68 @@ export function IslemlerClient({
     (s, t) => s + Number(t.quantity) * Number(t.price) + Number(t.fees),
     0,
   );
+
+  const symbolSummary = useMemo(() => {
+    interface Row {
+      asset_id: string;
+      symbol: string;
+      name: string;
+      asset_class: string;
+      buyQty: number;
+      buyGross: number;
+      sellQty: number;
+      sellGross: number;
+    }
+    const map = new Map<string, Row>();
+    for (const t of filtered) {
+      const a = assetMap[t.asset_id];
+      if (!a) continue;
+      let row = map.get(t.asset_id);
+      if (!row) {
+        row = {
+          asset_id: t.asset_id,
+          symbol: a.symbol,
+          name: a.name,
+          asset_class: a.asset_class,
+          buyQty: 0,
+          buyGross: 0,
+          sellQty: 0,
+          sellGross: 0,
+        };
+        map.set(t.asset_id, row);
+      }
+      const qty = Number(t.quantity);
+      const gross = qty * Number(t.price);
+      const fees = Number(t.fees);
+      if (t.side === "buy") {
+        row.buyQty += qty;
+        row.buyGross += gross + fees;
+      } else {
+        row.sellQty += qty;
+        row.sellGross += gross - fees;
+      }
+    }
+    return Array.from(map.values()).sort((a, b) =>
+      a.symbol.localeCompare(b.symbol, "tr"),
+    );
+  }, [filtered, assetMap]);
+
+  const summaryTotals = useMemo(() => {
+    let buyGross = 0;
+    let sellGross = 0;
+    let realized = 0;
+    let realizedBasis = 0;
+    for (const r of symbolSummary) {
+      buyGross += r.buyGross;
+      sellGross += r.sellGross;
+      if (r.buyQty > 0 && r.sellQty > 0) {
+        const buyWac = r.buyGross / r.buyQty;
+        realized += r.sellGross - r.sellQty * buyWac;
+        realizedBasis += r.sellQty * buyWac;
+      }
+    }
+    return { buyGross, sellGross, realized, realizedBasis };
+  }, [symbolSummary]);
 
   const toggleSort = (col: SortCol) => {
     if (sortCol === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -310,9 +381,9 @@ export function IslemlerClient({
                 <SortHeader col="qty"    label="Adet"   sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} num />
                 <SortHeader col="price"  label="Fiyat"  sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} num />
                 <th className="num">Komisyon</th>
+                <SortHeader col="amount" label="Tutar"  sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} num />
                 <SortHeader col="ben"    label="Kişi"   sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} />
                 <SortHeader col="cust"   label="Kurum"  sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} />
-                <th>Not</th>
                 <th style={{ width: 76 }} />
               </tr>
             </thead>
@@ -337,6 +408,9 @@ export function IslemlerClient({
                     <td className="num tabular">{fmt.tr(Number(t.quantity), qtyDecimals(a?.asset_class, a?.symbol))}</td>
                     <td className="num tabular">{fmt.tr(Number(t.price), 2)} ₺</td>
                     <td className="num tabular hint">{Number(t.fees) > 0 ? fmt.tr(Number(t.fees), 2) : "—"}</td>
+                    <td className="num tabular" style={{ fontWeight: 600 }} title={t.notes ?? undefined}>
+                      {fmt.try(tradeAmount(t), 2)}
+                    </td>
                     <td style={{ fontSize: 12 }}>
                       {b ? (
                         <span>
@@ -346,7 +420,6 @@ export function IslemlerClient({
                       ) : <span className="hint">—</span>}
                     </td>
                     <td style={{ fontSize: 12, color: "var(--muted)" }}>{c?.name ?? "—"}</td>
-                    <td style={{ fontSize: 12, color: "var(--muted)", maxWidth: 220 }}>{t.notes ?? "—"}</td>
                     <td>
                       <div style={{ display: "flex", gap: 4 }}>
                         <button className="icon-btn" onClick={() => setEditing(t)} disabled={!configured || busy} title="Düzenle">
@@ -364,6 +437,125 @@ export function IslemlerClient({
           </table>
         )}
       </div>
+
+      {symbolSummary.length > 0 && (
+        <div className="card" style={{ marginTop: 18 }}>
+          <div className="card-head">
+            <div className="card-title">Sembol Bazlı Özet</div>
+            <div className="card-sub">Filtreli dönem · {symbolSummary.length} sembol</div>
+          </div>
+          <table className="dg">
+            <thead>
+              <tr>
+                <th>Sembol</th>
+                <th className="num">Alış Adet</th>
+                <th className="num">Alış Ort.</th>
+                <th className="num">Alış Tutar</th>
+                <th className="num">Satış Adet</th>
+                <th className="num">Satış Ort.</th>
+                <th className="num">Satış Tutar</th>
+                <th className="num">Kar/Zarar</th>
+                <th className="num">%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {symbolSummary.map((r) => {
+                const buyWac = r.buyQty > 0 ? r.buyGross / r.buyQty : null;
+                const sellWac = r.sellQty > 0 ? r.sellGross / r.sellQty : null;
+                const hasBoth = r.buyQty > 0 && r.sellQty > 0;
+                const pnl = hasBoth ? r.sellGross - r.sellQty * (buyWac as number) : null;
+                const basis = hasBoth ? r.sellQty * (buyWac as number) : null;
+                const pct = pnl != null && basis != null && basis !== 0 ? (pnl / basis) * 100 : null;
+                const qtyD = qtyDecimals(r.asset_class, r.symbol);
+                const pnlColor = pnl == null ? undefined : pnl >= 0 ? "var(--positive)" : "var(--negative)";
+                return (
+                  <tr key={r.asset_id}>
+                    <td>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{r.symbol}</div>
+                      <div className="hint">{r.name}</div>
+                    </td>
+                    <td className="num tabular">
+                      {r.buyQty > 0 ? fmt.tr(r.buyQty, qtyD) : <span className="hint">—</span>}
+                    </td>
+                    <td className="num tabular hint">
+                      {buyWac != null ? `${fmt.tr(buyWac, 2)} ₺` : "—"}
+                    </td>
+                    <td className="num tabular">
+                      {r.buyQty > 0 ? fmt.try(r.buyGross, 2) : <span className="hint">—</span>}
+                    </td>
+                    <td className="num tabular">
+                      {r.sellQty > 0 ? fmt.tr(r.sellQty, qtyD) : <span className="hint">—</span>}
+                    </td>
+                    <td className="num tabular hint">
+                      {sellWac != null ? `${fmt.tr(sellWac, 2)} ₺` : "—"}
+                    </td>
+                    <td className="num tabular">
+                      {r.sellQty > 0 ? fmt.try(r.sellGross, 2) : <span className="hint">—</span>}
+                    </td>
+                    <td className="num tabular" style={{ color: pnlColor, fontWeight: 600 }}>
+                      {pnl != null ? fmt.try(pnl, 2) : <span className="hint">—</span>}
+                    </td>
+                    <td className="num tabular" style={{ color: pnlColor, fontWeight: 600 }}>
+                      {pct != null ? fmt.pct(pct, 2) : <span className="hint">—</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr style={{ borderTop: "1px solid var(--border)" }}>
+                <td style={{ fontWeight: 700 }}>Toplam</td>
+                <td />
+                <td />
+                <td className="num tabular" style={{ fontWeight: 700 }}>
+                  {fmt.try(summaryTotals.buyGross, 2)}
+                </td>
+                <td />
+                <td />
+                <td className="num tabular" style={{ fontWeight: 700 }}>
+                  {fmt.try(summaryTotals.sellGross, 2)}
+                </td>
+                <td
+                  className="num tabular"
+                  style={{
+                    fontWeight: 700,
+                    color:
+                      summaryTotals.realized === 0
+                        ? undefined
+                        : summaryTotals.realized > 0
+                        ? "var(--positive)"
+                        : "var(--negative)",
+                  }}
+                >
+                  {summaryTotals.realizedBasis > 0
+                    ? fmt.try(summaryTotals.realized, 2)
+                    : "—"}
+                </td>
+                <td
+                  className="num tabular"
+                  style={{
+                    fontWeight: 700,
+                    color:
+                      summaryTotals.realized === 0
+                        ? undefined
+                        : summaryTotals.realized > 0
+                        ? "var(--positive)"
+                        : "var(--negative)",
+                  }}
+                >
+                  {summaryTotals.realizedBasis > 0
+                    ? fmt.pct((summaryTotals.realized / summaryTotals.realizedBasis) * 100, 2)
+                    : "—"}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+          <div style={{ padding: "10px 16px", fontSize: 11, color: "var(--muted)", borderTop: "1px solid var(--border-soft)" }}>
+            Kar/Zarar hesabı, seçili dönemdeki alış ortalaması ile satış tutarı arasındaki farka dayanır. Dönem
+            dışındaki eski alışlar dikkate alınmaz — bu nedenle yalnızca satış olan sembollerde kar/zarar boş bırakılır.
+          </div>
+        </div>
+      )}
 
       {modalOpen && (
         <TradeModal
