@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Icon } from "@/components/ui/icon";
+import { ModalPortal } from "@/components/ui/modal-portal";
 
 import type { AccountRow, BeneficiaryLite, CustodyRow } from "./actions";
 import { createAccount, updateAccount } from "./actions";
@@ -149,6 +150,7 @@ export function NewAccountModal({ custodies, beneficiaries, initial, onClose }: 
   };
 
   return (
+    <ModalPortal>
     <div className="modal-back" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div
@@ -301,5 +303,6 @@ export function NewAccountModal({ custodies, beneficiaries, initial, onClose }: 
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

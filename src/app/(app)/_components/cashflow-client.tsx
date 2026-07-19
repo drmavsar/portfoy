@@ -14,6 +14,7 @@ import {
   updateTransaction,
 } from "@/app/(app)/_lib/cashflow-actions";
 import { Icon } from "@/components/ui/icon";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { fmt } from "@/lib/finance/fmt";
 
 const inp: React.CSSProperties = {
@@ -666,6 +667,7 @@ function TransactionModal({
   };
 
   return (
+    <ModalPortal>
     <div className="modal-back" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border-soft)", display: "flex", alignItems: "center", gap: 10 }}>
@@ -747,5 +749,6 @@ function TransactionModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

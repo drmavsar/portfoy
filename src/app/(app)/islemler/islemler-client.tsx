@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 
 import { Icon } from "@/components/ui/icon";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { fmt } from "@/lib/finance/fmt";
 
 import type { BeneficiaryLite, CustodyRow } from "@/app/(app)/hesaplar/actions";
@@ -678,6 +679,7 @@ function TradeModal({
   };
 
   return (
+    <ModalPortal>
     <div className="modal-back" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border-soft)", display: "flex", alignItems: "center", gap: 10 }}>
@@ -780,5 +782,6 @@ function TradeModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
