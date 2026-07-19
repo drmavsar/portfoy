@@ -81,10 +81,20 @@
 /* ============================================================
    Font ölçeği — yakın görme için. .shell'e zoom uygulanır,
    tüm iç içerik (px tabanlı inline style'lar dahil) orantılı büyür.
+
+   Modallar portal ile body altında render edildiğinden (.shell dışı,
+   bkz. ModalPortal) zoom onlara .modal üzerinden ayrıca uygulanır.
+   Kasıtlı olarak .modal-back'e DEĞİL .modal'a: position:fixed öğenin
+   kendisi zoom'suz kalınca iOS Safari'nin zoom+fixed konumlama
+   tuhaflıkları devreden çıkar; .modal'ın geometrisi ise yüzde tabanlı
+   olduğundan zoom'dan etkilenmez, sadece içerik büyür.
    ============================================================ */
 [data-fontscale="normal"] .shell { zoom: 1; }
 [data-fontscale="buyuk"] .shell  { zoom: 1.15; }
 [data-fontscale="cokbuyuk"] .shell { zoom: 1.32; }
+[data-fontscale="normal"] .modal { zoom: 1; }
+[data-fontscale="buyuk"] .modal  { zoom: 1.15; }
+[data-fontscale="cokbuyuk"] .modal { zoom: 1.32; }
 
 * { box-sizing: border-box; }
 html, body, #__next {
@@ -507,8 +517,8 @@ input, select, textarea { font-family: inherit; }
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 12px;
-  width: 640px; max-width: 95vw;
-  max-height: 90%; overflow: auto; /* 90vh değil: fontscale zoom'u vh'ı çarpıp taşırıyor */
+  width: 640px; max-width: 95%;   /* vw değil %: fontscale zoom'u vw/vh'ı çarpıp taşırıyor */
+  max-height: 90%; overflow: auto;
   box-shadow: 0 30px 80px rgba(0,0,0,0.6);
 }
 

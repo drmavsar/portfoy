@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 
 import { Icon } from "@/components/ui/icon";
+import { ModalPortal } from "@/components/ui/modal-portal";
 
 import type { BeneficiaryLite } from "@/app/(app)/hesaplar/actions";
 
@@ -238,6 +239,7 @@ function RuleModal({
   };
 
   return (
+    <ModalPortal>
     <div className="modal-back" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div
@@ -366,5 +368,6 @@ function RuleModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
