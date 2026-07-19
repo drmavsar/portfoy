@@ -488,7 +488,9 @@ input, select, textarea { font-family: inherit; }
   width: 720px; max-width: 95vw;
   background: var(--bg-elev);
   border-left: 1px solid var(--border);
-  height: 100vh;
+  /* %100: vh birimleri fontscale zoom'uyla çarpılıp taşıyor; ebeveyn
+     (.drawer-back, inset:0) zaten viewport'u kapladığından yüzde güvenli */
+  height: 100%;
   overflow-y: auto;
   box-shadow: -20px 0 60px rgba(0,0,0,0.4);
 }
@@ -506,7 +508,7 @@ input, select, textarea { font-family: inherit; }
   border: 1px solid var(--border);
   border-radius: 12px;
   width: 640px; max-width: 95vw;
-  max-height: 90vh; overflow: auto;
+  max-height: 90%; overflow: auto; /* 90vh değil: fontscale zoom'u vh'ı çarpıp taşırıyor */
   box-shadow: 0 30px 80px rgba(0,0,0,0.6);
 }
 
@@ -849,35 +851,27 @@ input, select, textarea { font-family: inherit; }
   .card-pad { padding: 12px 14px; }
 
   /* Modal full-width — header/footer sabit, gövde içeriden kayar.
-     Yükseklik fallback zinciri (eski→yeni sırayla, sonraki geçerliyi ezer):
-       100vh                  → en eski, toolbar'ı hesaba KATMAZ
-       -webkit-fill-available → iOS Safari: görünür alan (toolbar hariç)
-       100dvh                 → modern: dinamik viewport
-     dvh desteklenmeyen iOS sürümlerinde -webkit-fill-available devreye girer;
-     böylece footer (Kaydet) her zaman toolbar'ın üstünde kalır. */
+     ÖNEMLİ: yükseklik için 100vh/100dvh KULLANMA. Modallar .shell içinde
+     render ediliyor ve fontscale zoom'u (ör. [data-fontscale="buyuk"] → 1.15)
+     viewport uzunluklarını da çarptığından modal ekrandan ~%15 taşıyor,
+     footer (Kaydet) ekran dışında kalıyordu. Zoom'a dayanıklı yöntem:
+       .modal-back → inset: 0 kenar sabitleme (base kuraldan gelir); zoom'dan
+                     bağımsız olarak görünür viewport'u birebir kaplar
+       .modal      → %100 yükseklik; ebeveynin gerçek yüksekliğine göre çözülür */
   .modal-back {
     padding: 0;
     place-items: stretch;
-    height: 100vh;
-    height: -webkit-fill-available;
-    height: 100dvh;
   }
   .modal {
     width: 100%;
-    max-width: 100vw;
-    height: 100vh;
-    height: -webkit-fill-available;
-    height: 100dvh;
-    max-height: 100vh;
-    max-height: -webkit-fill-available;
-    max-height: 100dvh;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
     border-radius: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    /* Alt kenar: home indicator / güvenli alan kadar boşluk bırak ki
-       toolbar gizlendiğinde footer (Kaydet) çentiğin/indicator'ın altında kalmasın.
-       box-sizing: border-box olduğu için 100dvh yüksekliği aşmaz. */
+    /* Home indicator / güvenli alan boşluğu (border-box: yüksekliği aşmaz) */
     padding-bottom: env(safe-area-inset-bottom);
   }
   .modal > :first-child,
