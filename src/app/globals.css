@@ -875,6 +875,10 @@ input, select, textarea { font-family: inherit; }
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    /* Alt kenar: home indicator / güvenli alan kadar boşluk bırak ki
+       toolbar gizlendiğinde footer (Kaydet) çentiğin/indicator'ın altında kalmasın.
+       box-sizing: border-box olduğu için 100dvh yüksekliği aşmaz. */
+    padding-bottom: env(safe-area-inset-bottom);
   }
   .modal > :first-child,
   .modal > :last-child { flex: 0 0 auto; }
