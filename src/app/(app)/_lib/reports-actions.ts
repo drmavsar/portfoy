@@ -32,16 +32,33 @@ export async function listTransactionsForReports(sinceMonths: number = 24): Prom
 
   const pageSize = 1000;
   const out: RawTxn[] = [];
+  // Soft-delete edilen (deleted_at set) kayıtlar rapor/özet toplamlarına
+  // dahil edilmemeli — silme işlemi status'ü 'committed' bıraktığından
+  // yalnızca status filtresi yetmez. 0018 migration'ı çalışmamış ortamda
+  // deleted_at kolonu olmayabilir; o durumda filtre düşürülür (cashflow-actions
+  // ile aynı davranış).
+  let filterDeleted = true;
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await supabase
+    let q = supabase
       .from("transactions")
       .select("occurred_on, direction, amount, currency, category_id, beneficiary_id, description, merchant_raw")
       .eq("status", "committed")
       .eq("is_transfer", false)
-      .gte("occurred_on", sinceIso)
+      .gte("occurred_on", sinceIso);
+    if (filterDeleted) q = q.is("deleted_at", null);
+    const { data, error } = await q
       .order("occurred_on", { ascending: true })
       .range(from, from + pageSize - 1);
     if (error) {
+      const msg = error.message?.toLowerCase() ?? "";
+      if (filterDeleted && (msg.includes("deleted_at") || error.code === "42703")) {
+        console.warn(
+          "listTransactionsForReports: deleted_at kolonu yok — 0018 migration çalıştırılmamış. Filter düşürüldü.",
+        );
+        filterDeleted = false;
+        from -= pageSize; // aynı sayfayı filtresiz tekrar dene
+        continue;
+      }
       console.error("listTransactionsForReports error", error);
       return [];
     }
