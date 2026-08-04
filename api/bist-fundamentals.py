@@ -228,6 +228,48 @@ def build_financials(ticker, warnings):
     return fin
 
 
+def build_holders(ticker, warnings):
+    """Ortaklık yapısı (major holders) → [{name, pct}]. borsapy'nin döndürdüğü
+    DataFrame şekli belirsiz olduğundan esnek kolon/indeks erişimi."""
+    out = []
+    try:
+        mh = ticker.major_holders
+    except Exception as e:
+        warnings.append(f"ortaklık yapısı çekilemedi: {e}")
+        return out
+    if mh is None or getattr(mh, "empty", True):
+        return out
+    try:
+        cols = [str(c) for c in getattr(mh, "columns", [])]
+
+        def pick(keys):
+            for c in cols:
+                cl = c.lower()
+                if any(k in cl for k in keys):
+                    return c
+            return None
+
+        name_col = pick(("holder", "name", "ortak", "shareholder", "ünvan", "unvan", "isim"))
+        pct_col = pick(("pct", "percent", "ratio", "share", "weight", "pay", "yüzde", "yuzde", "oran"))
+        for idx, row in list(mh.iterrows())[:12]:
+            name = row[name_col] if name_col is not None else idx
+            pct = None
+            if pct_col is not None:
+                pct = num(row[pct_col])
+            else:
+                for c in cols:
+                    v = num(row[c])
+                    if v is not None:
+                        pct = v
+                        break
+            sname = str(name).strip() if name is not None else ""
+            if sname and sname.lower() != "nan":
+                out.append({"name": sname, "pct": pct})
+    except Exception as e:
+        warnings.append(f"ortaklık yapısı ayrıştırılamadı: {e}")
+    return out
+
+
 def build_payload(symbol):
     """Tek hisse için tüm temel analiz verisini topla."""
     import borsapy as bp
@@ -334,6 +376,9 @@ def build_payload(symbol):
     except Exception as e:
         warnings.append(f"tavsiye dağılımı çekilemedi: {e}")
     out["analyst"] = analyst
+
+    # --- ortaklık yapısı (major holders) ---
+    out["holders"] = build_holders(ticker, warnings)
 
     # --- mali tablolar ---
     try:

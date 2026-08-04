@@ -74,6 +74,7 @@ export interface FundamentalsRaw {
       strongSell: number | null;
     };
   };
+  holders?: { name: string; pct: number | null }[];
   financials: {
     derived: {
       revenue_ttm?: number | null;

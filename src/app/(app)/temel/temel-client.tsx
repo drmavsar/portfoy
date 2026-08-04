@@ -902,6 +902,27 @@ function HakkindaTab({ data, indices }: { data: Fundamentals; indices: IndexBadg
           ))}
         </div>
       )}
+      {raw.holders && raw.holders.length > 0 && (
+        <div className="card" style={{ padding: 14, marginTop: 14 }}>
+          <div className="hint" style={{ fontSize: 11, marginBottom: 8 }}>
+            Ortaklık Yapısı
+            {isNum(raw.valuation.foreign_ratio) ? ` · yabancı oranı %${dec(raw.valuation.foreign_ratio, 1)}` : ""}
+          </div>
+          <div style={{ display: "grid", gap: 6 }}>
+            {raw.holders.map((h, i) => (
+              <div
+                key={i}
+                style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12 }}
+              >
+                <span style={{ color: "var(--fg-soft)" }}>{h.name}</span>
+                <span className="tabular" style={{ fontWeight: 600 }}>
+                  {isNum(h.pct) ? `%${dec(h.pct, 2)}` : "—"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {raw.profile.summary && (
         <div className="card" style={{ padding: 14, marginTop: 14 }}>
           <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>Faaliyet Özeti</div>
