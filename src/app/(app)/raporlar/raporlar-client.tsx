@@ -1086,7 +1086,7 @@ function BenchmarkTab({ data }: { data: BenchmarkCompareResult }) {
         geçmiş demektir.
         <br />
         <br />
-        Güncel hisse fiyatı Yahoo Finance, fon NAV&apos;ı TEFAS. Benchmark fiyatları {asOf} tarihine kadar günlük.
+        Güncel hisse fiyatı TradingView, fon NAV&apos;ı TEFAS. Benchmark fiyatları {asOf} tarihine kadar günlük.
         Fiyatı çekilemeyen sembollerde (⚠) maliyet bazı kullanılır.
       </div>
     </div>

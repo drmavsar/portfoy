@@ -3,10 +3,10 @@
 import { revalidateTag, revalidatePath } from "next/cache";
 
 /**
- * Piyasa verisi cache'ini manuel temizle — Yahoo (stock-prices) + Truncgil
- * (asset-rates) tag'leri stale işaretlenir, sonraki render'da taze çekilir.
+ * Piyasa verisi cache'ini manuel temizle — hisse fiyatı (stock-prices) +
+ * döviz/altın (asset-rates) tag'leri stale işaretlenir, sonraki render'da taze çekilir.
  *
- * NOT: Yahoo'nun kendi feed gecikmesini (15-20 dk) aşamaz; sadece bizim
+ * NOT: Sağlayıcının kendi feed gecikmesini (15-20 dk) aşamaz; sadece bizim
  * Next.js fetch cache katmanını (5-15 dk) atlar.
  */
 export async function refreshMarketData(): Promise<{ ok: boolean }> {

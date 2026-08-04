@@ -40,24 +40,57 @@ interface IntegrationItem {
 function IntegrationsTab() {
   const items: IntegrationItem[] = [
     {
-      name: "Truncgil v4",
-      sub: "Döviz + Türk altın türleri + gümüş",
+      name: "TradingView",
+      sub: "BIST hisse fiyatları (birincil)",
       status: "ok",
       scope:
-        "USD, EUR, GBP, CHF, JPY, AUD, CAD, vs. (Selling) · Gram altın (GRA) · Çeyrek/Yarım/Tam/Cumhuriyet/Ata/Reşat · 14/18/22 ayar bilezik · Ons · Gümüş",
+        "BIST tüm hisseler (BIST: prefix) · günlük % + haftalık/aylık performans · XU100 endeksi",
+      cache: "5 dk",
+      endpoint: "https://scanner.tradingview.com/turkey/scan",
+      notes: "~15 dk gecikmeli. Tek istekte tüm semboller. previous_close = close − change_abs.",
+    },
+    {
+      name: "canlidoviz",
+      sub: "Döviz + Türk altın türleri + gümüş (birincil)",
+      status: "ok",
+      scope:
+        "USD, EUR, GBP, CHF · Gram altın · Çeyrek/Yarım/Tam/Cumhuriyet/Ata · Ons altın · Gümüş",
+      cache: "30 dk",
+      endpoint: "https://a.canlidoviz.com/items/history?period=DAILY",
+      notes:
+        "Güvenilir günlük kapanış serisi. Son kapanış = kur, son 2 kapanışın farkı = günlük %. Altın/döviz taban kaynağı.",
+    },
+    {
+      name: "borsapy (Python)",
+      sub: "Sektör endeksi + temel analiz + ekonomik takvim",
+      status: "ok",
+      scope:
+        "Sektör endeksleri (XBANK, XGIDA, …) · bilanço/rasyo temel veriler · doviz.com ekonomik takvim",
+      cache: "10-30 dk",
+      endpoint: "Vercel Python serverless (/api/bist-sectors, /api/bist-fundamentals, /api/economic-calendar)",
+      notes: "TradingView arkalı borsapy kütüphanesi (requirements.txt bağımlılığı).",
+    },
+    {
+      name: "Truncgil v4",
+      sub: "Döviz/altın intraday override + yedek",
+      status: "ok",
+      scope:
+        "USD, EUR, GBP, CHF (Selling) · Gram altın (GRA) · Çeyrek/Yarım/Tam/Cumhuriyet/Ata · Ons · Gümüş",
       cache: "10 dk",
       endpoint: "https://finans.truncgil.com/v4/today.json",
-      notes: "Günlük % değişim (Change) de yakalanır — Bugünkü Servet Değişimi hesabında kullanılır.",
+      notes:
+        "canlidoviz tabanı üzerine çalışırsa taze intraday değişim yazar; kararsız olduğunda canlidoviz kalır.",
     },
     {
       name: "Yahoo Finance",
-      sub: "BIST hisseleri + endeksler",
+      sub: "BIST hisse yedeği + tarama motoru",
       status: "ok",
       scope:
-        "BIST tüm hisseler (.IS suffix) · XU100, XU030, XBANK, XGIDA, XUSIN, XHOLD, XKMYA, XULAS, XMANA, XELKT, XILTM, XTEKS",
-      cache: "5 dk (anlık), 10 dk (haftalık/aylık)",
+        "TradingView'in döndürmediği semboller için yedek · /tarama ve /komite tarama motoru (1 yıllık OHLC)",
+      cache: "5-30 dk",
       endpoint: "https://query1.finance.yahoo.com/v8/finance/chart/",
-      notes: "15 dk gecikmeli. previousClose = T-1 kapanış (günlük baz). 3 ay close array'inden 5/22 trading day back-look ile haftalık/aylık % hesabı.",
+      notes:
+        "Tarama/komite hâlâ Yahoo OHLC kullanıyor; ileride borsapy geçmiş-veri endpoint'ine taşınacak.",
     },
     {
       name: "CoinGecko",
@@ -70,21 +103,12 @@ function IntegrationsTab() {
     },
     {
       name: "TCMB",
-      sub: "Döviz kurları (fallback)",
+      sub: "Döviz kurları (son çare)",
       status: "ok",
       scope: "USD, EUR, GBP, CHF, JPY, AUD, CAD (ForexSelling)",
       cache: "1 saat",
       endpoint: "https://www.tcmb.gov.tr/kurlar/today.xml",
-      notes: "Truncgil çökerse FX için son çare. XML regex parse + son başarılı veri memory fallback.",
-    },
-    {
-      name: "borsa-api",
-      sub: "BIST hisse + endeks (Node.js)",
-      status: "dev",
-      scope: "Yahoo Finance wrapper · Node.js paket",
-      cache: "—",
-      endpoint: "github.com/ibidi/borsa-api",
-      notes: "Şu an doğrudan Yahoo çağırıyoruz; bu paket alternatif/yedek olarak rafta.",
+      notes: "canlidoviz + Truncgil çökerse FX için son çare. XML regex parse + memory fallback.",
     },
     {
       name: "KAP API",
@@ -113,8 +137,8 @@ function IntegrationsTab() {
         }}
       >
         Canlı veri kaynakları. Sayfa yüklenirken bu servislerden anlık fiyat/kur çekilir, Next.js
-        fetch cache ile dakikalık önbelleğe alınır. Bir kaynak çökerse zincirdeki fallback devreye
-        girer (Truncgil → TCMB FX için, Yahoo → BIST için).
+        fetch cache ile dakikalık önbelleğe alınır. Bir kaynak çökerse zincirdeki yedek devreye
+        girer (BIST hisse: TradingView → Yahoo · döviz/altın: canlidoviz → Truncgil → TCMB · sektör/temel: borsapy).
       </div>
       <div className="grid-base grid-2" style={{ gap: 16 }}>
         {items.map((it) => (

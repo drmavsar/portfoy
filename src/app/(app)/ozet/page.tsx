@@ -358,7 +358,7 @@ export default async function OzetPage() {
     dayChangeMap.set(key, cur);
   };
 
-  const truncgilSource = "Truncgil · Selling";
+  const fxSource = "canlidoviz · Selling";
 
   for (const a of accounts) {
     if (a.currency === "TRY") {
@@ -375,21 +375,21 @@ export default async function OzetPage() {
     const valueTry = Number(native) * rate;
     const dayDelta = valueTry * (chgPct / 100);
     const cls = classifyAccountClass(a.currency);
-    bumpDay(cls.key, cls.label, cls.color, dayDelta, valueTry, truncgilSource, truncgilUpdate);
+    bumpDay(cls.key, cls.label, cls.color, dayDelta, valueTry, fxSource, truncgilUpdate);
   }
 
   // Hisse günlük değişimi TradingView'den (previous_close = close − change_abs).
   // Not: TradingView market_time vermediğinden "borsa kapalıysa 0" koşulu
   // uygulanmaz; Portföy sayfasıyla tutarlı biçimde son seans değişimi gösterilir.
-  let yahooLatestUnix: number | null = null;
+  let quoteLatestUnix: number | null = null;
   for (const h of enriched) {
     const asset = assetMap[h.asset_id];
     const quote = h.quote;
     if (!asset || !quote || !quote.previous_close) continue;
     const qty = Number(h.quantity);
     const dayDelta = qty * (quote.price - quote.previous_close);
-    if (quote.market_time && (!yahooLatestUnix || quote.market_time > yahooLatestUnix)) {
-      yahooLatestUnix = quote.market_time;
+    if (quote.market_time && (!quoteLatestUnix || quote.market_time > quoteLatestUnix)) {
+      quoteLatestUnix = quote.market_time;
     }
     if (asset.asset_class === "equity_tr" || asset.asset_class === "equity_us") {
       bumpDay("equity", "Hisse", "#e26a8f", dayDelta, h.mv, "TradingView · 15dk", null);
@@ -399,13 +399,13 @@ export default async function OzetPage() {
       bumpDay("metal", "Altın & Gümüş", "#d4a056", dayDelta, h.mv, "TradingView · 15dk", null);
     }
   }
-  const yahooLastUpdate = yahooLatestUnix
-    ? new Date(yahooLatestUnix * 1000).toLocaleString("tr-TR", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })
+  const quoteLastUpdate = quoteLatestUnix
+    ? new Date(quoteLatestUnix * 1000).toLocaleString("tr-TR", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })
     : null;
 
   // Hisse satırına yahoo zamanını yaz (yukarıda null geçtim; burada doldur)
   const hisseEntry = dayChangeMap.get("equity");
-  if (hisseEntry && yahooLastUpdate) hisseEntry.lastUpdate = yahooLastUpdate;
+  if (hisseEntry && quoteLastUpdate) hisseEntry.lastUpdate = quoteLastUpdate;
 
   // Nakit (TRY hesapları) günlük değişimini daily_snapshots'tan hesapla.
   // Kanonik snapshot her gece TR 23:00'ta cron tarafından yazılır; dolayısıyla
@@ -481,7 +481,7 @@ export default async function OzetPage() {
               <div className="card-title">Toplam Servet</div>
               <div className="card-sub" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                 <span>{accounts.length} hesap · {portfolioGroups.length} yatırım portföyü</span>
-                <DataFreshness yahooLastUnix={yahooLatestUnix} truncgilDate={truncgilUpdate} />
+                <DataFreshness quoteLastUnix={quoteLatestUnix} truncgilDate={truncgilUpdate} />
               </div>
             </div>
             <div style={{ padding: "20px 24px" }}>
@@ -1040,16 +1040,16 @@ export default async function OzetPage() {
 
 /** Veri kaynaklarının son güncelleme zamanlarını "X dk önce" şeklinde gösterir. */
 function DataFreshness({
-  yahooLastUnix,
+  quoteLastUnix,
   truncgilDate,
 }: {
-  yahooLastUnix: number | null;
+  quoteLastUnix: number | null;
   truncgilDate: string | null | undefined;
 }) {
   // Server component bir kez çalışır; Date.now() server-side deterministic
   // eslint-disable-next-line react-hooks/purity
   const now = Date.now();
-  const yahooDate = yahooLastUnix ? new Date(yahooLastUnix * 1000) : null;
+  const quoteDate = quoteLastUnix ? new Date(quoteLastUnix * 1000) : null;
   const truncDate = truncgilDate ? new Date(truncgilDate) : null;
   const fmtRel = (d: Date | null) => {
     if (!d) return null;
@@ -1073,12 +1073,12 @@ function DataFreshness({
         })
       : null;
   const items: Array<{ label: string; time: string; rel: string }> = [];
-  const yt = fmtTime(yahooDate);
-  const yr = fmtRel(yahooDate);
-  if (yt && yr) items.push({ label: "Yahoo", time: yt, rel: yr });
+  const yt = fmtTime(quoteDate);
+  const yr = fmtRel(quoteDate);
+  if (yt && yr) items.push({ label: "Hisse", time: yt, rel: yr });
   const tt = fmtTime(truncDate);
   const tr = fmtRel(truncDate);
-  if (tt && tr) items.push({ label: "Truncgil", time: tt, rel: tr });
+  if (tt && tr) items.push({ label: "Döviz/Altın", time: tt, rel: tr });
   if (items.length === 0) return null;
   return (
     <span style={{ display: "inline-flex", gap: 10, fontSize: 11, color: "var(--muted)" }}>

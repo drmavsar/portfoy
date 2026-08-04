@@ -12,7 +12,7 @@ Son geliştirme moladan önce belirlenen eksiklerin sprint planı. Her sprint
 **Sorun**:
 - ATR/RS/pattern/trade plan/sektör momentum hesabı için **hiç test yok**.
   Bir yanlış edit tüm Tarama/Portföy sayısallarını sessizce bozar.
-- `/api/debug-rates` public — Truncgil ham response'unu sızdırıyor.
+- ~~`/api/debug-rates` public — Truncgil ham response'unu sızdırıyor.~~ ✅ endpoint kaldırıldı.
 - `rate_snapshots` freshness kontrolü yok — bozuk veri (XAU=1.0 vb.)
   fallback olarak haftalarca kalır.
 
@@ -25,8 +25,7 @@ Son geliştirme moladan önce belirlenen eksiklerin sprint planı. Her sprint
   - [ ] `_lib/stock-screening.test.ts` — RS, computeSectorMomentum
   - [ ] `_lib/portfolio-risk.test.ts` — auditPortfolio uyarı tipleri
   - [ ] `ekstre/actions.test.ts` — parseTurkishDate/Amount, applyRule
-- [ ] `/api/debug-rates`: auth required + sadece dev'de açık (NEXT_PUBLIC_ENV
-  veya cookie kontrolü) VEYA tamamen sil
+- [x] `/api/debug-rates`: tamamen silindi (public Truncgil sızıntısı kapatıldı)
 - [ ] `rate_snapshots` sanity check: XAU > 1000, USD 10-200 arası,
   EUR > USD kuralı vs. dışındaysa persist yapma
 

@@ -31,7 +31,7 @@ export function RefreshButton() {
       className="btn btn-sm"
       onClick={onClick}
       disabled={busy}
-      title="Piyasa verisini yeniden çek (Yahoo + Truncgil cache temizlenir, portföydeki fonların TEFAS NAV'ı güncellenir)"
+      title="Piyasa verisini yeniden çek (hisse fiyatı + döviz/altın cache temizlenir, portföydeki fonların TEFAS NAV'ı güncellenir)"
       style={{ whiteSpace: "nowrap" }}
     >
       <Icon name="refresh" size={12} />
