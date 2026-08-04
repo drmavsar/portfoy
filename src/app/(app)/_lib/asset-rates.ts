@@ -15,6 +15,7 @@
 //   CoinGecko simple/price?vs_currencies=try (BTC/ETH/SOL/USDT/BNB), 5 dk cache
 
 import { getTcmbRates } from "./fx-rates";
+import { fetchCanlidovizRates } from "./canlidoviz-rates";
 
 const TRUNCGIL_URL = "https://finans.truncgil.com/v4/today.json";
 
@@ -262,8 +263,25 @@ export async function getTruncgilUpdateDate(): Promise<string | null> {
   }
 }
 
-/** Currency → günlük % değişim (sadece Truncgil + CoinGecko 24h). */
+/**
+ * Currency → günlük % değişim.
+ *
+ * Taban: canlidoviz (FX + altın; güvenilir, son iki günlük kapanıştan hesaplanır).
+ * Truncgil canlı (intraday) değişimi döndürdüğünde onun üzerine yazılır — böylece
+ * Truncgil çalışırken taze intraday değişim, düştüğünde canlidoviz'in güvenilir
+ * günlük değişimi gösterilir (eskiden Truncgil boşsa altın/döviz "+0" kalıyordu).
+ */
 export async function getAssetChanges(): Promise<Record<string, number>> {
+  // 1) Güvenilir taban — canlidoviz
+  let out: Record<string, number> = {};
+  try {
+    const { changes } = await fetchCanlidovizRates();
+    out = { ...changes };
+  } catch {
+    /* canlidoviz başarısızsa Truncgil'e düş */
+  }
+
+  // 2) Truncgil intraday değişimi — varsa taban üzerine yazar
   try {
     const res = await fetch(TRUNCGIL_URL, {
       next: { revalidate: 300, tags: ["asset-rates"] },
@@ -272,32 +290,31 @@ export async function getAssetChanges(): Promise<Record<string, number>> {
         Accept: "application/json",
       },
     });
-    if (!res.ok) return {};
-    const json = (await res.json()) as Record<string, unknown>;
-
-    const lookup = new Map<string, string>();
-    for (const [code, aliases] of Object.entries(TRUNCGIL_ALIASES)) {
-      for (const a of aliases) lookup.set(a, code);
-    }
-
-    const out: Record<string, number> = {};
-    for (const [key, val] of Object.entries(json)) {
-      if (typeof val !== "object" || val === null) continue;
-      const e = val as TruncgilEntry & { Change?: number | string };
-      let chg: number | null = null;
-      if (typeof e.Change === "number" && Number.isFinite(e.Change)) chg = e.Change;
-      else if (typeof e.Change === "string") {
-        const n = parseFloat(e.Change.replace("%", "").replace(",", "."));
-        if (Number.isFinite(n)) chg = n;
+    if (res.ok) {
+      const json = (await res.json()) as Record<string, unknown>;
+      const lookup = new Map<string, string>();
+      for (const [code, aliases] of Object.entries(TRUNCGIL_ALIASES)) {
+        for (const a of aliases) lookup.set(a, code);
       }
-      if (chg == null) continue;
-      const code = lookup.get(normalizeKey(key));
-      if (code) out[code] = chg;
+      for (const [key, val] of Object.entries(json)) {
+        if (typeof val !== "object" || val === null) continue;
+        const e = val as TruncgilEntry & { Change?: number | string };
+        let chg: number | null = null;
+        if (typeof e.Change === "number" && Number.isFinite(e.Change)) chg = e.Change;
+        else if (typeof e.Change === "string") {
+          const n = parseFloat(e.Change.replace("%", "").replace(",", "."));
+          if (Number.isFinite(n)) chg = n;
+        }
+        if (chg == null) continue;
+        const code = lookup.get(normalizeKey(key));
+        if (code) out[code] = chg;
+      }
     }
-    return out;
   } catch {
-    return {};
+    /* Truncgil başarısızsa canlidoviz tabanı kalır */
   }
+
+  return out;
 }
 
 /** Persist edilen kur/altın snapshot'u DB'den oku — kaynaklar fail ederse fallback. */
@@ -376,16 +393,23 @@ const EXPECTED_KEYS = [
 
 /** Tüm desteklenen para birimi → TRY birim fiyat map'i. */
 export async function getAssetRates(): Promise<Record<string, number>> {
-  const [truncgil, fxFallback, crypto] = await Promise.all([
+  const [truncgil, fxFallback, crypto, canli] = await Promise.all([
     fetchTruncgil(),
     getTcmbRates(),
     fetchCoingeckoPrices(),
+    fetchCanlidovizRates().catch(() => ({ rates: {}, changes: {} })),
   ]);
 
   const out: Record<string, number> = {};
 
   // 1) TCMB FX fallback
   for (const [k, v] of Object.entries(fxFallback)) {
+    if (typeof v === "number" && v > 0) out[k] = v;
+  }
+
+  // 1.5) canlidoviz — FX + altın (güvenilir günlük kapanış). Truncgil canlıysa
+  //      bir sonraki adımda bunun üzerine yazar; Truncgil düştüğünde bu kalır.
+  for (const [k, v] of Object.entries(canli.rates)) {
     if (typeof v === "number" && v > 0) out[k] = v;
   }
 
