@@ -1,7 +1,8 @@
 "use server";
 
-// BIST endeksleri — Yahoo Finance public endpoint
-// XU100.IS, XU030.IS, XBANK.IS, XGIDA.IS, XUSIN.IS, XHOLD.IS, XKMYA.IS, XULAS.IS, XMANA.IS
+// BIST endeksleri — ana endeksler borsapy /api/bist-history (birincil),
+// Yahoo Finance yedek; sektör endeksleri /api/bist-sectors (borsapy).
+// XU100, XU030, XBANK, XGIDA, XUSIN, XHOLD, XKMYA, XULAS, XMANA, ...
 
 export interface IndexQuote {
   symbol: string;
@@ -137,14 +138,61 @@ async function fetchBistSectorsFromPython(baseUrl?: string): Promise<IndexQuote[
   }
 }
 
+/**
+ * Ana endeksleri (XU100, XU030) borsapy /api/bist-history'den al — son 1 ay
+ * close serisi (sparkline + günlük %). price = son close, prev = seri T-1.
+ */
+async function fetchMainIndicesFromBistHistory(symbols: string[]): Promise<IndexQuote[] | null> {
+  if (symbols.length === 0) return [];
+  try {
+    const prodHost = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+    const host = prodHost ? `https://${prodHost}` : "http://localhost:3000";
+    const res = await fetch(
+      `${host}/api/bist-history?index=${encodeURIComponent(symbols.join(","))}&period=1mo`,
+      { next: { revalidate: 600, tags: ["stock-prices"] } },
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      status: string;
+      series?: Record<string, { close?: Array<number | null> }>;
+    };
+    if (json.status !== "ok" || !json.series) return null;
+    const out: IndexQuote[] = [];
+    for (const symbol of symbols) {
+      const closesRaw = json.series[symbol]?.close ?? [];
+      const closes = closesRaw.filter((x): x is number => typeof x === "number" && Number.isFinite(x));
+      if (closes.length === 0) continue;
+      const price = closes[closes.length - 1];
+      const prev = priorCloseFromSeries(price, closes);
+      const chg = prev ? ((price - prev) / prev) * 100 : null;
+      const item = BIST_INDICES.find((x) => x.symbol === symbol);
+      out.push({
+        symbol,
+        label: item?.label ?? symbol,
+        price,
+        previous_close: prev,
+        change_pct: chg,
+        closes_1mo: closes,
+      });
+    }
+    return out;
+  } catch (err) {
+    console.error("[bist-history] main indices error", err);
+    return null;
+  }
+}
+
 export async function getBistIndices(): Promise<{
   main: IndexQuote[];
   sectors: IndexQuote[];
 }> {
-  // Ana endeksleri Yahoo'dan al
-  const mainSymbols = BIST_INDICES.filter((x) => x.group === "main");
-  const yahooMain = await Promise.all(mainSymbols.map((x) => fetchYahoo(x.symbol)));
-  const main = yahooMain.filter((q): q is IndexQuote => !!q);
+  // Ana endeksler: borsapy /api/bist-history (birincil), Yahoo (yedek)
+  const mainSymbols = BIST_INDICES.filter((x) => x.group === "main").map((x) => x.symbol);
+  let main = await fetchMainIndicesFromBistHistory(mainSymbols);
+  if (!main || main.length === 0) {
+    const yahooMain = await Promise.all(mainSymbols.map((s) => fetchYahoo(s)));
+    main = yahooMain.filter((q): q is IndexQuote => !!q);
+  }
 
   // Sektör endekslerini Python (borsapy) endpoint'ten al
   const pythonSectors = await fetchBistSectorsFromPython();

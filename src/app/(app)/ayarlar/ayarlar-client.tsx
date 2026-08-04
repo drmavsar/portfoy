@@ -62,12 +62,12 @@ function IntegrationsTab() {
     },
     {
       name: "borsapy (Python)",
-      sub: "Sektör endeksi + temel analiz + ekonomik takvim",
+      sub: "Fiyat geçmişi + sektör endeksi + temel analiz + ekonomik takvim",
       status: "ok",
       scope:
-        "Sektör endeksleri (XBANK, XGIDA, …) · bilanço/rasyo temel veriler · doviz.com ekonomik takvim",
+        "Hisse/endeks 1y OHLC (tarama + ana endeksler) · sektör endeksleri · bilanço/rasyo temel veriler · doviz.com ekonomik takvim",
       cache: "10-30 dk",
-      endpoint: "Vercel Python serverless (/api/bist-sectors, /api/bist-fundamentals, /api/economic-calendar)",
+      endpoint: "Vercel Python serverless (/api/bist-history, /api/bist-sectors, /api/bist-fundamentals, /api/economic-calendar)",
       notes: "TradingView arkalı borsapy kütüphanesi (requirements.txt bağımlılığı).",
     },
     {
@@ -83,14 +83,14 @@ function IntegrationsTab() {
     },
     {
       name: "Yahoo Finance",
-      sub: "BIST hisse yedeği + tarama motoru",
+      sub: "BIST acil yedek (canlı fiyat + tarama geçmişi)",
       status: "ok",
       scope:
-        "TradingView'in döndürmediği semboller için yedek · /tarama ve /komite tarama motoru (1 yıllık OHLC)",
+        "Yalnızca yedek: TradingView bir hisseyi döndürmezse canlı fiyat · borsapy bir sembolün OHLC geçmişini döndürmezse tarama/komite/endeks",
       cache: "5-30 dk",
       endpoint: "https://query1.finance.yahoo.com/v8/finance/chart/",
       notes:
-        "Tarama/komite hâlâ Yahoo OHLC kullanıyor; ileride borsapy geçmiş-veri endpoint'ine taşınacak.",
+        "Birincil kaynaklar (TradingView + borsapy) sağlıklıyken çağrılmaz; 429/eksik veri durumunda devreye girer.",
     },
     {
       name: "CoinGecko",
@@ -138,7 +138,7 @@ function IntegrationsTab() {
       >
         Canlı veri kaynakları. Sayfa yüklenirken bu servislerden anlık fiyat/kur çekilir, Next.js
         fetch cache ile dakikalık önbelleğe alınır. Bir kaynak çökerse zincirdeki yedek devreye
-        girer (BIST hisse: TradingView → Yahoo · döviz/altın: canlidoviz → Truncgil → TCMB · sektör/temel: borsapy).
+        girer (BIST hisse canlı: TradingView → Yahoo · BIST geçmiş/tarama/endeks: borsapy → Yahoo · döviz/altın: canlidoviz → Truncgil → TCMB · sektör/temel: borsapy).
       </div>
       <div className="grid-base grid-2" style={{ gap: 16 }}>
         {items.map((it) => (
