@@ -423,11 +423,10 @@ def build_payload(symbol):
         warnings.append(f"tavsiye dağılımı çekilemedi: {e}")
     out["analyst"] = analyst
 
-    # --- ortaklık yapısı (major holders) ---
-    out["holders"] = build_holders(ticker, warnings)
-
-    # --- KAP açıklamaları / haber akışı ---
-    out["news"] = build_news(ticker, warnings)
+    # NOT: ortaklık yapısı (major_holders) + haberler (news) çağrıları YAVAŞ;
+    # core payload'u 60s sınırına (504) itiyordu. Artık ayrı hafif ?mode=extra
+    # isteğinde dönüyorlar (build_extra_payload) — /temel bunları yan sekmeler
+    # için ayrıca, non-blocking çeker.
 
     # --- mali tablolar ---
     try:
@@ -439,6 +438,23 @@ def build_payload(symbol):
     return out
 
 
+def build_extra_payload(symbol):
+    """/temel yan sekmeleri için hafif yük: ortaklık yapısı + haber akışı.
+    Ağır mali tablo çağrılarını İÇERMEZ — core bist-fundamentals'ı 504'e itmemek
+    için ayrı bir istek olarak (?mode=extra) döner."""
+    import borsapy as bp
+
+    warnings = []
+    ticker = bp.Ticker(symbol)
+    return {
+        "ok": True,
+        "symbol": symbol,
+        "warnings": warnings,
+        "holders": build_holders(ticker, warnings),
+        "news": build_news(ticker, warnings),
+    }
+
+
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         status_code = 200
@@ -446,9 +462,12 @@ class handler(BaseHTTPRequestHandler):
             qs = parse_qs(urlparse(self.path).query)
             raw_symbol = (qs.get("symbol", [""])[0] or "").strip().upper()
             symbol = re.sub(r"[^A-Z0-9]", "", raw_symbol)[:12]
+            mode = (qs.get("mode", [""])[0] or "").strip().lower()
             if not symbol:
                 out = {"ok": False, "error": "symbol parametresi gerekli"}
                 status_code = 400
+            elif mode == "extra":
+                out = build_extra_payload(symbol)
             else:
                 out = build_payload(symbol)
         except ImportError as e:
