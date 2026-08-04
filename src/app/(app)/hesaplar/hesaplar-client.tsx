@@ -132,7 +132,7 @@ export function HesaplarClient({
     return map;
   }, [trades]);
 
-  // Holding'lerin MV'si (Yahoo varsa anlık, yoksa cost)
+  // Holding'lerin MV'si (anlık fiyat varsa onunla, yoksa maliyet)
   const holdingsWithMv = useMemo(() => {
     return holdings.map((h) => {
       const asset = assetMap[h.asset_id];

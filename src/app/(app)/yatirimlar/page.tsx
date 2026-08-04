@@ -398,15 +398,16 @@ export default async function YatirimlarPage() {
   const totalDayChangePct = totalDayOpen > 0 ? (totalDayChange / totalDayOpen) * 100 : null;
   const quotedCount = enriched.filter((h) => h.quote).length;
 
-  // Yahoo'nun en son trade time'ı (data freshness için)
-  let yahooLatestUnix: number | null = null;
+  // Fiyat sağlayıcının en son işlem zamanı (yalnızca Yahoo yedeği market_time
+  // döndürür; TradingView vermez, o yüzden çoğunlukla boş kalır).
+  let quoteLatestUnix: number | null = null;
   for (const h of enriched) {
-    if (h.quote?.market_time && (!yahooLatestUnix || h.quote.market_time > yahooLatestUnix)) {
-      yahooLatestUnix = h.quote.market_time;
+    if (h.quote?.market_time && (!quoteLatestUnix || h.quote.market_time > quoteLatestUnix)) {
+      quoteLatestUnix = h.quote.market_time;
     }
   }
-  const yahooLastUpdate = yahooLatestUnix
-    ? new Date(yahooLatestUnix * 1000)
+  const quoteLastUpdate = quoteLatestUnix
+    ? new Date(quoteLatestUnix * 1000)
     : null;
   // Server component bir kez çalışır; Date.now() server-side deterministic
   // eslint-disable-next-line react-hooks/purity
@@ -437,8 +438,8 @@ export default async function YatirimlarPage() {
           <div className="page-title">Portföy</div>
           <div className="page-sub">
             Kişi bazlı pozisyon · WAC + anlık fiyat + K/Z · {quotedCount}/{enriched.length} sembol TradingView / TEFAS
-            {yahooLastUpdate && (
-              <YahooFreshness date={yahooLastUpdate} nowMs={renderNowMs} />
+            {quoteLastUpdate && (
+              <QuoteFreshness date={quoteLastUpdate} nowMs={renderNowMs} />
             )}
           </div>
         </div>
@@ -730,7 +731,7 @@ export default async function YatirimlarPage() {
   );
 }
 
-function YahooFreshness({ date, nowMs }: { date: Date; nowMs: number }) {
+function QuoteFreshness({ date, nowMs }: { date: Date; nowMs: number }) {
   const ms = nowMs - date.getTime();
   const min = Math.max(0, Math.floor(ms / 60000));
   const rel =
@@ -749,7 +750,7 @@ function YahooFreshness({ date, nowMs }: { date: Date; nowMs: number }) {
   });
   return (
     <span title={time} style={{ marginLeft: 8, fontSize: 11, color: "var(--muted)" }}>
-      · Yahoo {rel}
+      · fiyat {rel}
     </span>
   );
 }
