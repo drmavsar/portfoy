@@ -29,6 +29,7 @@ type TabKey =
   | "saglik"
   | "temettu"
   | "analist"
+  | "haberler"
   | "tablolar"
   | "hakkinda";
 
@@ -39,6 +40,7 @@ const TABS: Array<[TabKey, string]> = [
   ["saglik", "Bilanço Sağlığı"],
   ["temettu", "Temettü"],
   ["analist", "Analist"],
+  ["haberler", "Haberler / KAP"],
   ["tablolar", "Mali Tablolar"],
   ["hakkinda", "Hakkında"],
 ];
@@ -498,6 +500,7 @@ function ReportView({
       {tab === "saglik" && <SaglikTab data={data} />}
       {tab === "temettu" && <TemettuTab data={data} />}
       {tab === "analist" && <AnalistTab data={data} />}
+      {tab === "haberler" && <HaberlerTab data={data} />}
       {tab === "tablolar" && <TablolarTab data={data} />}
       {tab === "hakkinda" && <HakkindaTab data={data} indices={indices} />}
 
@@ -838,6 +841,53 @@ function AnalistTab({ data }: { data: Fundamentals }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function HaberlerTab({ data }: { data: Fundamentals }) {
+  const news = data.raw.news ?? [];
+  if (news.length === 0) {
+    return (
+      <div className="empty" style={{ padding: 24 }}>
+        <div>KAP açıklaması / haber bulunamadı</div>
+        <div className="hint" style={{ marginTop: 6 }}>
+          Bu sembol için borsapy haber döndürmedi ya da servis yanıt vermedi.
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      {news.map((n, i) => {
+        const inner = (
+          <div className="card" style={{ padding: "12px 14px" }}>
+            {n.date && (
+              <div className="hint" style={{ fontSize: 10, marginBottom: 4 }}>{n.date.slice(0, 16)}</div>
+            )}
+            <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+              {n.title}
+              {n.url && <Icon name="ext" size={10} />}
+            </div>
+          </div>
+        );
+        return n.url ? (
+          <a
+            key={i}
+            href={n.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ textDecoration: "none", color: "inherit" }}
+          >
+            {inner}
+          </a>
+        ) : (
+          <div key={i}>{inner}</div>
+        );
+      })}
+      <SectionNote>
+        Kaynak: borsapy (KAP açıklamaları / haber akışı). Bilgilendirme amaçlıdır, yatırım tavsiyesi değildir.
+      </SectionNote>
     </div>
   );
 }

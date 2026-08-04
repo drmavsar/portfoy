@@ -270,6 +270,52 @@ def build_holders(ticker, warnings):
     return out
 
 
+def build_news(ticker, warnings, limit=15):
+    """KAP açıklamaları / haber akışı → [{date, title, url}]. borsapy'nin
+    döndürdüğü şekil (DataFrame/list/dict) belirsiz — esnek erişim."""
+    out = []
+    try:
+        news = ticker.news
+    except Exception as e:
+        warnings.append(f"haberler çekilemedi: {e}")
+        return out
+    if news is None:
+        return out
+    try:
+        if hasattr(news, "to_dict") and hasattr(news, "empty"):
+            if news.empty:
+                return out
+            records = news.to_dict(orient="records")
+        elif isinstance(news, list):
+            records = news
+        else:
+            return out
+
+        def pick(rec, keys):
+            for k in keys:
+                if k in rec and rec[k] is not None and str(rec[k]).strip() and str(rec[k]).lower() != "nan":
+                    return str(rec[k])
+            return None
+
+        for rec in records[:limit]:
+            if not isinstance(rec, dict):
+                continue
+            title = pick(rec, (
+                "title", "Title", "headline", "Headline", "subject", "Subject",
+                "baslik", "Başlık", "konu", "Konu", "aciklama", "Açıklama",
+            ))
+            date = pick(rec, (
+                "date", "Date", "datetime", "publishTime", "published", "time",
+                "Time", "tarih", "Tarih", "pubDate", "publishedDate",
+            ))
+            url = pick(rec, ("link", "Link", "url", "URL", "href"))
+            if title:
+                out.append({"date": date, "title": title[:300], "url": url})
+    except Exception as e:
+        warnings.append(f"haberler ayrıştırılamadı: {e}")
+    return out
+
+
 def build_payload(symbol):
     """Tek hisse için tüm temel analiz verisini topla."""
     import borsapy as bp
@@ -379,6 +425,9 @@ def build_payload(symbol):
 
     # --- ortaklık yapısı (major holders) ---
     out["holders"] = build_holders(ticker, warnings)
+
+    # --- KAP açıklamaları / haber akışı ---
+    out["news"] = build_news(ticker, warnings)
 
     # --- mali tablolar ---
     try:
