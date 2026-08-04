@@ -18,6 +18,10 @@
       "memory": 1024,
       "maxDuration": 60
     },
+    "api/analyst-ratings.py": {
+      "memory": 1024,
+      "maxDuration": 60
+    },
     "api/economic-calendar.py": {
       "memory": 512,
       "maxDuration": 30
