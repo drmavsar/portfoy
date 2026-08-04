@@ -186,7 +186,7 @@ export default async function RadarPage() {
         <div>
           <div className="page-title">Piyasa Radarı</div>
           <div className="page-sub">
-            BIST 100 piyasa geneli · en çok hareket edenler · sektör rotasyonu · Yahoo Finance (15 dk gecikme)
+            BIST 100 piyasa geneli · en çok hareket edenler · sektör rotasyonu · TradingView (~15 dk gecikme)
           </div>
         </div>
         <div className="page-actions">
@@ -311,7 +311,7 @@ export default async function RadarPage() {
         {stockRows.length === 0 ? (
           <div className="empty">
             <div className="title">Hisse fiyatı çekilemedi</div>
-            <div>Yahoo Finance servisi yanıt vermiyor.</div>
+            <div>Fiyat servisi yanıt vermiyor.</div>
           </div>
         ) : (
           <table className="dg">
@@ -385,8 +385,8 @@ export default async function RadarPage() {
         style={{ marginTop: 18, padding: 12, background: "var(--surface-2)", borderRadius: 8 }}
       >
         <Icon name="screener" size={12} /> Liste BIST 100 piyasa geneli — <b>●</b> işareti
-        portföyündeki hisseleri gösterir. Fiyatlar Yahoo Finance (BIST · 15 dk gecikmeli, 10 dk
-        cache); endeks üyeliği Borsa İstanbul CSV. Endeks hücresine gelince tam liste görünür.
+        portföyündeki hisseleri gösterir. Fiyatlar TradingView (BIST · ~15 dk gecikmeli, 5 dk
+        cache; Yahoo yedek); endeks üyeliği Borsa İstanbul CSV. Endeks hücresine gelince tam liste görünür.
       </div>
     </div>
   );
