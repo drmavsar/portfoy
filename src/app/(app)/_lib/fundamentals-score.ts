@@ -74,8 +74,8 @@ export interface FundamentalsRaw {
       strongSell: number | null;
     };
   };
-  holders?: { name: string; pct: number | null }[];
-  news?: { date: string | null; title: string; url: string | null }[];
+  // NOT: holders + news artık core payload'da DEĞİL — ayrı ?mode=extra
+  // isteğinde döner (bkz. fundamentals-extra.ts). Core'u 504'e itmemek için.
   financials: {
     derived: {
       revenue_ttm?: number | null;

@@ -7,6 +7,12 @@ import { Icon } from "@/components/ui/icon";
 import type { IndexBadge } from "@/app/(app)/_lib/bist-index-members";
 import { fetchFundamentals, type FundamentalsResult } from "@/app/(app)/_lib/fundamentals";
 import {
+  fetchFundamentalsExtra,
+  type FundamentalsExtra,
+  type Holder,
+  type NewsItem,
+} from "@/app/(app)/_lib/fundamentals-extra";
+import {
   bandVerdict,
   FAIR_PE,
   type AltmanZone,
@@ -233,14 +239,20 @@ export function TemelClient({ symbols, selected, name, indices }: Props) {
     symbol: string;
     value: FundamentalsResult;
   } | null>(null);
+  const [extra, setExtra] = useState<{ symbol: string; data: FundamentalsExtra } | null>(null);
 
   // Temel veri tarayıcıdan çekilir (sunucu→sunucu fetch Vercel Deployment
   // Protection'a takılıp 401 dönüyordu). selected değişince yeniden çekilir.
+  // Ortaklık + haber verisi AYRI (?mode=extra) ve non-blocking çekilir; yavaş
+  // olan bu çağrılar core temel veriyi (504) bekletmesin.
   useEffect(() => {
     if (!selected) return;
     let cancelled = false;
     fetchFundamentals(selected).then((value) => {
       if (!cancelled) setFetched({ symbol: selected, value });
+    });
+    fetchFundamentalsExtra(selected).then((data) => {
+      if (!cancelled) setExtra({ symbol: selected, data });
     });
     return () => {
       cancelled = true;
@@ -251,6 +263,7 @@ export function TemelClient({ symbols, selected, name, indices }: Props) {
   // sırasında türetilerek anında sıfırlanır, yükleniyor durumuna geçilir.
   const result = fetched && fetched.symbol === selected ? fetched.value : null;
   const loading = Boolean(selected) && !result;
+  const extraData = extra && extra.symbol === selected ? extra.data : null;
 
   const options = useMemo(() => {
     const set = new Set(symbols);
@@ -352,6 +365,7 @@ export function TemelClient({ symbols, selected, name, indices }: Props) {
           data={result.data}
           name={name}
           indices={indices}
+          extra={extraData}
           tab={tab}
           setTab={setTab}
           dimmed={isPending}
@@ -365,6 +379,7 @@ function ReportView({
   data,
   name,
   indices,
+  extra,
   tab,
   setTab,
   dimmed,
@@ -372,6 +387,7 @@ function ReportView({
   data: Fundamentals;
   name: string;
   indices: IndexBadge[];
+  extra: FundamentalsExtra | null;
   tab: TabKey;
   setTab: (t: TabKey) => void;
   dimmed: boolean;
@@ -500,9 +516,11 @@ function ReportView({
       {tab === "saglik" && <SaglikTab data={data} />}
       {tab === "temettu" && <TemettuTab data={data} />}
       {tab === "analist" && <AnalistTab data={data} />}
-      {tab === "haberler" && <HaberlerTab data={data} />}
+      {tab === "haberler" && <HaberlerTab news={extra?.news ?? null} />}
       {tab === "tablolar" && <TablolarTab data={data} />}
-      {tab === "hakkinda" && <HakkindaTab data={data} indices={indices} />}
+      {tab === "hakkinda" && (
+        <HakkindaTab data={data} indices={indices} holders={extra?.holders ?? null} />
+      )}
 
       <div style={{ marginTop: 18, fontSize: 11, color: "var(--muted)" }}>
         Yatırım tavsiyesi değildir. Veri borsapy (TradingView · İş Yatırım · KAP · hedeffiyat)
@@ -845,8 +863,15 @@ function AnalistTab({ data }: { data: Fundamentals }) {
   );
 }
 
-function HaberlerTab({ data }: { data: Fundamentals }) {
-  const news = data.raw.news ?? [];
+function HaberlerTab({ news }: { news: NewsItem[] | null }) {
+  if (news === null) {
+    return (
+      <div className="empty" style={{ padding: 24 }}>
+        <div>Haberler yükleniyor…</div>
+        <div className="hint" style={{ marginTop: 6 }}>KAP açıklamaları ayrı olarak çekiliyor.</div>
+      </div>
+    );
+  }
   if (news.length === 0) {
     return (
       <div className="empty" style={{ padding: 24 }}>
@@ -924,7 +949,15 @@ function TablolarTab({ data }: { data: Fundamentals }) {
   );
 }
 
-function HakkindaTab({ data, indices }: { data: Fundamentals; indices: IndexBadge[] }) {
+function HakkindaTab({
+  data,
+  indices,
+  holders,
+}: {
+  data: Fundamentals;
+  indices: IndexBadge[];
+  holders: Holder[] | null;
+}) {
   const { raw } = data;
   return (
     <div>
@@ -952,14 +985,14 @@ function HakkindaTab({ data, indices }: { data: Fundamentals; indices: IndexBadg
           ))}
         </div>
       )}
-      {raw.holders && raw.holders.length > 0 && (
+      {holders && holders.length > 0 && (
         <div className="card" style={{ padding: 14, marginTop: 14 }}>
           <div className="hint" style={{ fontSize: 11, marginBottom: 8 }}>
             Ortaklık Yapısı
             {isNum(raw.valuation.foreign_ratio) ? ` · yabancı oranı %${dec(raw.valuation.foreign_ratio, 1)}` : ""}
           </div>
           <div style={{ display: "grid", gap: 6 }}>
-            {raw.holders.map((h, i) => (
+            {holders.map((h, i) => (
               <div
                 key={i}
                 style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12 }}
