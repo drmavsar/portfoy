@@ -4,6 +4,7 @@ import {
   getXK100Symbols,
   type IndexBadge,
 } from "@/app/(app)/_lib/bist-index-members";
+import { getAnalystRatings, type AnalystRating } from "@/app/(app)/_lib/analyst-ratings";
 import { getBistIndices } from "@/app/(app)/_lib/market-indices";
 import { getStockPricesExtended, type StockQuoteExt } from "@/app/(app)/_lib/stock-prices";
 import { listAssets, listHoldings } from "@/app/(app)/_lib/wealth-actions";
@@ -17,7 +18,33 @@ type Mover = {
   owned: boolean;
   indices: IndexBadge[];
   quote: StockQuoteExt;
+  analyst: AnalystRating | null;
 };
+
+/** Analist yükseliş potansiyeli %: endpoint upside'ı, yoksa hedef ort. vs fiyat. */
+function analystUpside(r: Mover): number | null {
+  const a = r.analyst;
+  if (!a) return null;
+  if (a.upside_pct != null) return a.upside_pct;
+  const price = r.quote.price;
+  if (a.target_mean != null && price != null && price > 0) {
+    return ((a.target_mean - price) / price) * 100;
+  }
+  return null;
+}
+
+/** AL/TUT/SAT dağılımını kısa metne çevirir (tooltip için). */
+function recBreakdown(a: AnalystRating | null): string {
+  if (!a) return "";
+  const parts: string[] = [];
+  const buy = (a.strong_buy ?? 0) + (a.buy ?? 0);
+  const hold = a.hold ?? 0;
+  const sell = (a.sell ?? 0) + (a.strong_sell ?? 0);
+  if (buy) parts.push(`AL ${buy}`);
+  if (hold) parts.push(`TUT ${hold}`);
+  if (sell) parts.push(`SAT ${sell}`);
+  return parts.join(" · ");
+}
 
 function Sparkline({
   values,
@@ -136,7 +163,11 @@ export default async function RadarPage() {
 
   // Hisse listesi piyasa geneli — BIST 100 üye listesi taranır (sadece
   // portföydeki hisseler değil). Böylece yeni yukarı-trend adayları yakalanır.
-  const quotes = await getStockPricesExtended(bistSymbols);
+  // Analist tavsiye/hedef fiyat paralelde çekilir (borsapy, 6 saat cache).
+  const [quotes, analystRatings] = await Promise.all([
+    getStockPricesExtended(bistSymbols),
+    getAnalystRatings(bistSymbols),
+  ]);
 
   const assetMap = new Map(
     assets.filter((a) => a.asset_class === "equity_tr").map((a) => [a.symbol, a]),
@@ -165,9 +196,17 @@ export default async function RadarPage() {
         owned: ownedSymbols.has(sym),
         indices: info?.indices ?? [],
         quote: quotes[sym],
+        analyst: analystRatings[sym] ?? null,
       };
     })
     .sort((a, b) => (b.quote.change_pct ?? 0) - (a.quote.change_pct ?? 0));
+
+  // Analist en yüksek yükseliş potansiyeli (ort. hedef fiyata göre) — top 12
+  const analystTop = stockRows
+    .map((r) => ({ r, upside: analystUpside(r) }))
+    .filter((x) => x.upside != null)
+    .sort((a, b) => (b.upside ?? 0) - (a.upside ?? 0))
+    .slice(0, 12);
 
   // Günlük / haftalık / aylık en çok artan/azalan (top 5)
   const dayGainers = [...stockRows].sort((a, b) => (b.quote.change_pct ?? 0) - (a.quote.change_pct ?? 0)).slice(0, 5);
@@ -300,6 +339,71 @@ export default async function RadarPage() {
         </div>
       )}
 
+      {/* Analist yükseliş potansiyeli — ort. hedef fiyata göre top 12 */}
+      {analystTop.length > 0 && (
+        <div className="card" style={{ marginBottom: 18 }}>
+          <div className="card-head">
+            <div className="card-title">Analist Yükseliş Potansiyeli</div>
+            <div className="card-sub">ortalama hedef fiyata göre en yüksek potansiyel · borsapy</div>
+          </div>
+          <table className="dg">
+            <thead>
+              <tr>
+                <th>Sembol</th>
+                <th>Ad</th>
+                <th className="num">Fiyat</th>
+                <th className="num">Ort. Hedef</th>
+                <th className="num">Potansiyel</th>
+                <th className="num">Analist</th>
+                <th>Tavsiye</th>
+              </tr>
+            </thead>
+            <tbody>
+              {analystTop.map(({ r, upside }) => {
+                const up = upside ?? 0;
+                const color = up >= 0 ? "var(--positive)" : "var(--negative)";
+                return (
+                  <tr key={r.symbol}>
+                    <td>
+                      {r.external_url ? (
+                        <a
+                          href={r.external_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: "inherit", textDecoration: "none", fontWeight: 600, borderBottom: "1px dotted var(--muted)" }}
+                        >
+                          {r.symbol}
+                        </a>
+                      ) : (
+                        <span style={{ fontWeight: 600 }}>{r.symbol}</span>
+                      )}
+                      {r.owned && <OwnedDot />}
+                    </td>
+                    <td style={{ fontSize: 13 }}>{r.name}</td>
+                    <td className="num tabular">{fmt.tr(r.quote.price, 2)} ₺</td>
+                    <td className="num tabular">
+                      {r.analyst?.target_mean != null ? `${fmt.tr(r.analyst.target_mean, 2)} ₺` : "—"}
+                    </td>
+                    <td className="num tabular" style={{ color, fontWeight: 600 }}>
+                      {up >= 0 ? "+" : ""}{up.toFixed(1)}%
+                    </td>
+                    <td className="num tabular hint">
+                      {r.analyst?.num_analysts != null ? r.analyst.num_analysts : "—"}
+                    </td>
+                    <td style={{ fontSize: 11, color: "var(--muted)" }} title={recBreakdown(r.analyst)}>
+                      {r.analyst?.recommendation ?? (recBreakdown(r.analyst) || "—")}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div className="hint" style={{ padding: "8px 14px", fontSize: 11 }}>
+            Hedef fiyatlar analist konsensüsüdür, garanti değildir. Kapsanmayan sembollerde veri boş gelir.
+          </div>
+        </div>
+      )}
+
       {/* BIST 100 hisse listesi */}
       <div className="card">
         <div className="card-head">
@@ -323,6 +427,7 @@ export default async function RadarPage() {
                 <th className="num">Günlük</th>
                 <th className="num">Haftalık</th>
                 <th className="num">Aylık</th>
+                <th className="num">Hedef %</th>
                 <th>Endeksler</th>
               </tr>
             </thead>
@@ -331,6 +436,7 @@ export default async function RadarPage() {
                 const d = r.quote.change_pct ?? 0;
                 const w = r.quote.week_change_pct;
                 const m = r.quote.month_change_pct;
+                const up = analystUpside(r);
                 const pctColor = (v: number | null) =>
                   v == null ? "var(--muted)" : v >= 0 ? "var(--positive)" : "var(--negative)";
                 const pctText = (v: number | null) =>
@@ -359,6 +465,17 @@ export default async function RadarPage() {
                     <td className="num tabular" style={{ color: pctColor(d), fontWeight: 600 }}>{pctText(d)}</td>
                     <td className="num tabular" style={{ color: pctColor(w) }}>{pctText(w)}</td>
                     <td className="num tabular" style={{ color: pctColor(m) }}>{pctText(m)}</td>
+                    <td
+                      className="num tabular"
+                      style={{ color: pctColor(up), fontWeight: up != null ? 600 : 400 }}
+                      title={
+                        r.analyst
+                          ? `Ort. hedef ${r.analyst.target_mean != null ? `${fmt.tr(r.analyst.target_mean, 2)} ₺` : "—"}${recBreakdown(r.analyst) ? ` · ${recBreakdown(r.analyst)}` : ""}`
+                          : "Analist verisi yok"
+                      }
+                    >
+                      {pctText(up)}
+                    </td>
                     <td style={{ fontSize: 10 }}>
                       {r.indices.length > 0 ? (
                         <span
@@ -386,7 +503,7 @@ export default async function RadarPage() {
       >
         <Icon name="screener" size={12} /> Liste BIST 100 piyasa geneli — <b>●</b> işareti
         portföyündeki hisseleri gösterir. Fiyatlar TradingView (BIST · ~15 dk gecikmeli, 5 dk
-        cache; Yahoo yedek); endeks fiyatı borsapy; endeks üyeliği Borsa İstanbul CSV. Endeks hücresine gelince tam liste görünür.
+        cache; Yahoo yedek); endeks fiyatı borsapy; analist hedef/tavsiye borsapy (6 sa cache); endeks üyeliği Borsa İstanbul CSV. Endeks hücresine gelince tam liste görünür.
       </div>
     </div>
   );
