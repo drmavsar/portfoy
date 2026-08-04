@@ -386,7 +386,7 @@ export default async function RadarPage() {
       >
         <Icon name="screener" size={12} /> Liste BIST 100 piyasa geneli — <b>●</b> işareti
         portföyündeki hisseleri gösterir. Fiyatlar TradingView (BIST · ~15 dk gecikmeli, 5 dk
-        cache; Yahoo yedek); endeks üyeliği Borsa İstanbul CSV. Endeks hücresine gelince tam liste görünür.
+        cache; Yahoo yedek); endeks fiyatı borsapy; endeks üyeliği Borsa İstanbul CSV. Endeks hücresine gelince tam liste görünür.
       </div>
     </div>
   );

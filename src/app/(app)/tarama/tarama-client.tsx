@@ -144,8 +144,8 @@ export function TaramaClient({ rows, symbolCount }: Props) {
             fontSize: 12,
           }}
         >
-          {symbolCount} sembol taranmaya gönderildi, {rows.length} tanesi için Yahoo Finance
-          yanıt verdi. Eksik kalanlar için ya sembol Yahoo&apos;da yok ya da yeterli geçmiş veri
+          {symbolCount} sembol taranmaya gönderildi, {rows.length} tanesi için veri
+          alındı. Eksik kalanlar için ya sembol borsapy/Yahoo&apos;da yok ya da yeterli geçmiş veri
           yok (≥30 trading day).
         </div>
       )}
@@ -414,8 +414,8 @@ export function TaramaClient({ rows, symbolCount }: Props) {
         </div>
         <div>
           <b style={{ color: "var(--fg-soft)" }}>Kaynaklar:</b> BIST 100 üye listesi → Borsa İstanbul
-          CSV (1 saat cache) · OHLC + indikatörler → Yahoo Finance 1 yıllık günlük close (30 dk
-          cache).
+          CSV (1 saat cache) · OHLC + indikatörler → borsapy (/api/bist-history) 1 yıllık günlük
+          seri, Yahoo yedek (30 dk cache).
         </div>
         <div style={{ color: "var(--muted)" }}>
           Bu bir alım/satım tavsiyesi değildir. Karar destek skoru sadece teknik göstergelere dayanır;

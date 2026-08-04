@@ -1,7 +1,9 @@
 "use server";
 
-// BIST hisse taraması — Yahoo Finance 1 yıllık günlük close array'i üzerinden
-// teknik indikatörler hesaplar (SMA20/50/200, RSI14, momentum, 52h mesafe).
+// BIST hisse taraması — borsapy (/api/bist-history) 1 yıllık günlük OHLC
+// serisi üzerinden teknik indikatörler hesaplar (SMA20/50/200, RSI14,
+// momentum, 52h mesafe). Yahoo Finance yalnızca borsapy'de bulunmayan
+// semboller için yedek (429 kırılganlığından kurtulmak için birincil borsapy).
 // Tek bir Composite Score ile sıralanabilir hâle getirir.
 // Ayrıca her sembol için pattern detection çalışır (ATH/Cup/DoubleBottom).
 
@@ -154,7 +156,61 @@ function computeRS(
   return (ratioNow / ratioBack - 1) * 100;
 }
 
+// ── Veri kaynağı: borsapy (birincil, /api/bist-history) · Yahoo (yedek) ──
+
+interface HistorySeries {
+  ts: number[];
+  open: Array<number | null>;
+  high: Array<number | null>;
+  low: Array<number | null>;
+  close: Array<number | null>;
+  volume: number[];
+}
+
+function bistHistoryHost(): string {
+  // VERCEL_URL deployment'a özel korumalı olabilir; herkese açık production
+  // alias tercih edilir (market-indices.ts / economic-calendar.ts ile aynı desen).
+  const prodHost = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+  return prodHost ? `https://${prodHost}` : "http://localhost:3000";
+}
+
+/** borsapy /api/bist-history'den bir batch sembolün 1y OHLC serisini çeker. */
+async function fetchHistoryBatch(symbols: string[]): Promise<Record<string, HistorySeries>> {
+  if (symbols.length === 0) return {};
+  try {
+    const url = `${bistHistoryHost()}/api/bist-history?symbols=${encodeURIComponent(symbols.join(","))}&period=1y`;
+    const res = await fetch(url, { next: { revalidate: 1800, tags: ["stock-prices"] } });
+    if (!res.ok) return {};
+    const json = (await res.json()) as { status: string; series?: Record<string, HistorySeries> };
+    if (json.status !== "ok" || !json.series) return {};
+    return json.series;
+  } catch (err) {
+    console.error("[bist-history] batch error", err);
+    return {};
+  }
+}
+
+/** XU100 (veya başka endeks) 1y close serisi — RS için. borsapy birincil, Yahoo yedek. */
 async function fetchIndexCloses(symbol: string): Promise<number[]> {
+  try {
+    const url = `${bistHistoryHost()}/api/bist-history?index=${encodeURIComponent(symbol)}&period=1y`;
+    const res = await fetch(url, { next: { revalidate: 1800, tags: ["stock-prices"] } });
+    if (res.ok) {
+      const json = (await res.json()) as { status: string; series?: Record<string, HistorySeries> };
+      const closes = json.series?.[symbol]?.close;
+      if (closes && closes.length > 0) {
+        const arr = closes.filter((x): x is number => typeof x === "number" && Number.isFinite(x));
+        if (arr.length > 0) return arr;
+      }
+    }
+  } catch (err) {
+    console.error("[bist-history] index error", err);
+  }
+  return fetchIndexClosesYahoo(symbol);
+}
+
+/** Yedek: Yahoo endeks close serisi. */
+async function fetchIndexClosesYahoo(symbol: string): Promise<number[]> {
   try {
     const res = await fetch(
       `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.IS?interval=1d&range=1y`,
@@ -172,6 +228,134 @@ async function fetchIndexCloses(symbol: string): Promise<number[]> {
   }
 }
 
+/**
+ * OHLC dizilerinden ScreeningRow üretir — kaynaktan bağımsız SAF hesap
+ * (borsapy ve Yahoo yedeği aynı fonksiyonu kullanır). `price` son/canlı fiyat.
+ * Hizasız/eksik mumlar (c,h,l finite değilse) atılır; ts close ile birebir hizalı.
+ */
+function buildRow(
+  symbol: string,
+  closesRaw: Array<number | null>,
+  highsRaw: Array<number | null>,
+  lowsRaw: Array<number | null>,
+  volumesRaw: Array<number | null>,
+  timestamps: number[],
+  price: number,
+  indexCloses: number[],
+): ScreeningRow | null {
+  const closes: number[] = [];
+  const highs: number[] = [];
+  const lows: number[] = [];
+  const vols: number[] = [];
+  const ts: number[] = [];
+  for (let i = 0; i < closesRaw.length; i++) {
+    const c = closesRaw[i];
+    const h = highsRaw[i];
+    const l = lowsRaw[i];
+    if (
+      typeof c === "number" && Number.isFinite(c) &&
+      typeof h === "number" && Number.isFinite(h) &&
+      typeof l === "number" && Number.isFinite(l)
+    ) {
+      closes.push(c);
+      highs.push(h);
+      lows.push(l);
+      vols.push(typeof volumesRaw[i] === "number" ? (volumesRaw[i] as number) : 0);
+      // ts, closes ile birebir hizalı kalmalı — koşulsuz push
+      ts.push(timestamps[i] ?? 0);
+    }
+  }
+  if (closes.length < 30 || !Number.isFinite(price) || price <= 0) return null;
+
+  // Günlük getiri önceki kapanışı YALNIZ normalize close serisinden alır.
+  const prev = priorCloseFromSeries(price, closes);
+
+  // Dönemsel getiriler takvim bazlı: hedef tarihten önceki (≤) en yakın işlem
+  // gününün kapanışı referans alınır. Geçerli ts yoksa (kaynak DatetimeIndex
+  // vermediyse) dönemsel referanslar null kalır (SMA/RSI/pattern etkilenmez).
+  const hasRealTs = ts.length > 0 && ts[ts.length - 1] > 946684800; // > 2000-01-01
+  const lastSec = hasRealTs ? ts[ts.length - 1] : Math.floor(Date.now() / 1000);
+  const lastDate = new Date(lastSec * 1000);
+  const closeOnOrBefore = (targetSec: number): number | null => {
+    if (!hasRealTs) return null;
+    for (let i = ts.length - 1; i >= 0; i--) {
+      if (ts[i] > 0 && ts[i] <= targetSec) return closes[i];
+    }
+    return null;
+  };
+  const weekRef = closeOnOrBefore(lastSec - 7 * 86400);
+  const monthRef = closeOnOrBefore(epochMonthsBefore(lastDate, 1));
+  const quarterRef = closeOnOrBefore(epochMonthsBefore(lastDate, 3));
+  // YTD: önceki yılın son işlem günü (31 Aralık'tan önceki ≤ kapanış)
+  const ytdRef = closeOnOrBefore(
+    Math.floor(Date.UTC(lastDate.getUTCFullYear() - 1, 11, 31, 23, 59, 59) / 1000),
+  );
+
+  // 52 hafta yüksek/düşük (son ~252 trading day) — close değil gerçek high/low
+  const high52 = Math.max(...highs.slice(-252));
+  const low52 = Math.min(...lows.slice(-252));
+
+  const s20 = sma(closes, 20);
+  const s50 = sma(closes, 50);
+  const s200 = sma(closes, 200);
+  const r14 = rsi(closes, 14);
+  const vol20 = vols.length >= 20
+    ? vols.slice(-20).reduce((a, b) => a + b, 0) / 20
+    : null;
+
+  const atr14 = computeATR14(highs, lows, closes);
+  const patterns: PatternSignal[] =
+    atr14 != null
+      ? scanAllPatterns({ high: highs, low: lows, close: closes }, atr14, s20)
+      : [];
+
+  return {
+    symbol,
+    price,
+    prev_close: prev,
+    daily_pct: pctChange(price, prev),
+    week_pct: pctChange(price, weekRef),
+    month_pct: pctChange(price, monthRef),
+    quarter_pct: pctChange(price, quarterRef),
+    ytd_pct: pctChange(price, ytdRef),
+    high_52w: high52,
+    low_52w: low52,
+    high_distance_pct: pctChange(price, high52),
+    low_distance_pct: pctChange(price, low52),
+    sma20: s20,
+    sma50: s50,
+    sma200: s200,
+    sma20_dist: pctChange(price, s20),
+    sma50_dist: pctChange(price, s50),
+    sma200_dist: pctChange(price, s200),
+    rsi14: r14,
+    vol_20d: vol20,
+    rs_20: indexCloses.length > 0 ? computeRS(closes, indexCloses, 20) : null,
+    rs_60: indexCloses.length > 0 ? computeRS(closes, indexCloses, 60) : null,
+    atr14,
+    patterns,
+    score: null, // composite skor sonradan hesaplanır
+  };
+}
+
+/** ScreeningRow'u borsapy serisinden üretir. price = son geçerli close. */
+function rowFromSeries(
+  symbol: string,
+  s: HistorySeries,
+  indexCloses: number[],
+): ScreeningRow | null {
+  let price = NaN;
+  for (let i = s.close.length - 1; i >= 0; i--) {
+    const c = s.close[i];
+    if (typeof c === "number" && Number.isFinite(c) && c > 0) {
+      price = c;
+      break;
+    }
+  }
+  return buildRow(symbol, s.close, s.high, s.low, s.volume, s.ts, price, indexCloses);
+}
+
+/** Yedek: Yahoo 1y OHLC'den ScreeningRow (borsapy sembolü döndürmezse). */
 async function fetchOne(
   symbol: string,
   indexCloses: number[] = [],
@@ -186,106 +370,19 @@ async function fetchOne(
     const json = (await res.json()) as YahooResponse;
     const r = json.chart?.result?.[0];
     const meta = r?.meta;
-    const closesRaw = r?.indicators?.quote?.[0]?.close ?? [];
-    const highsRaw = r?.indicators?.quote?.[0]?.high ?? [];
-    const lowsRaw = r?.indicators?.quote?.[0]?.low ?? [];
-    const volumesRaw = r?.indicators?.quote?.[0]?.volume ?? [];
-    const timestamps = r?.timestamp ?? [];
-    const closes: number[] = [];
-    const highs: number[] = [];
-    const lows: number[] = [];
-    const vols: number[] = [];
-    const ts: number[] = [];
-    for (let i = 0; i < closesRaw.length; i++) {
-      const c = closesRaw[i];
-      const h = highsRaw[i];
-      const l = lowsRaw[i];
-      if (
-        typeof c === "number" && Number.isFinite(c) &&
-        typeof h === "number" && Number.isFinite(h) &&
-        typeof l === "number" && Number.isFinite(l)
-      ) {
-        closes.push(c);
-        highs.push(h);
-        lows.push(l);
-        vols.push(typeof volumesRaw[i] === "number" ? (volumesRaw[i] as number) : 0);
-        // ts, closes ile birebir hizalı kalmalı — koşulsuz push
-        ts.push(timestamps[i] ?? 0);
-      }
-    }
-    if (closes.length < 30 || !meta?.regularMarketPrice) return null;
-
-    const price = meta.regularMarketPrice;
-    // Günlük getiri önceki kapanışı YALNIZ normalize close serisinden alır;
-    // meta.chartPreviousClose range=1y'de ~1 yıl önceki fiyattır (günlük ≠ yıllık).
-    const prev = priorCloseFromSeries(price, closes);
-
-    // Dönemsel getiriler takvim bazlı: hedef tarihten önceki (≤) en yakın
-    // işlem gününün kapanışı referans alınır. Sabit "N işlem günü" yöntemi
-    // tatil yoğun dönemlerde kayıyor ve Yahoo'nun dönem rozetleriyle tutmuyordu.
-    const lastSec = ts[ts.length - 1] || Math.floor(Date.now() / 1000);
-    const lastDate = new Date(lastSec * 1000);
-    const closeOnOrBefore = (targetSec: number): number | null => {
-      for (let i = ts.length - 1; i >= 0; i--) {
-        if (ts[i] > 0 && ts[i] <= targetSec) return closes[i];
-      }
-      return null;
-    };
-    const weekRef = closeOnOrBefore(lastSec - 7 * 86400);
-    const monthRef = closeOnOrBefore(epochMonthsBefore(lastDate, 1));
-    const quarterRef = closeOnOrBefore(epochMonthsBefore(lastDate, 3));
-    // YTD: önceki yılın son işlem günü (31 Aralık'tan önceki ≤ kapanış)
-    const ytdRef = closeOnOrBefore(
-      Math.floor(Date.UTC(lastDate.getUTCFullYear() - 1, 11, 31, 23, 59, 59) / 1000),
-    );
-
-    // 52 hafta yüksek/düşük (son ~252 trading day) — close değil gerçek high/low
-    const high52 = Math.max(...highs.slice(-252));
-    const low52 = Math.min(...lows.slice(-252));
-
-    const s20 = sma(closes, 20);
-    const s50 = sma(closes, 50);
-    const s200 = sma(closes, 200);
-    const r14 = rsi(closes, 14);
-    const vol20 = vols.length >= 20
-      ? vols.slice(-20).reduce((a, b) => a + b, 0) / 20
-      : null;
-
-    const atr14 = computeATR14(highs, lows, closes);
-    const patterns: PatternSignal[] =
-      atr14 != null
-        ? scanAllPatterns({ high: highs, low: lows, close: closes }, atr14, s20)
-        : [];
-
-    return {
+    if (!meta?.regularMarketPrice) return null;
+    return buildRow(
       symbol,
-      price,
-      prev_close: prev,
-      daily_pct: pctChange(price, prev),
-      week_pct: pctChange(price, weekRef),
-      month_pct: pctChange(price, monthRef),
-      quarter_pct: pctChange(price, quarterRef),
-      ytd_pct: pctChange(price, ytdRef),
-      high_52w: high52,
-      low_52w: low52,
-      high_distance_pct: pctChange(price, high52),
-      low_distance_pct: pctChange(price, low52),
-      sma20: s20,
-      sma50: s50,
-      sma200: s200,
-      sma20_dist: pctChange(price, s20),
-      sma50_dist: pctChange(price, s50),
-      sma200_dist: pctChange(price, s200),
-      rsi14: r14,
-      vol_20d: vol20,
-      rs_20: indexCloses.length > 0 ? computeRS(closes, indexCloses, 20) : null,
-      rs_60: indexCloses.length > 0 ? computeRS(closes, indexCloses, 60) : null,
-      atr14,
-      patterns,
-      score: null, // composite skor sonradan hesaplanır
-    };
+      r?.indicators?.quote?.[0]?.close ?? [],
+      r?.indicators?.quote?.[0]?.high ?? [],
+      r?.indicators?.quote?.[0]?.low ?? [],
+      r?.indicators?.quote?.[0]?.volume ?? [],
+      r?.timestamp ?? [],
+      meta.regularMarketPrice,
+      indexCloses,
+    );
   } catch (err) {
-    console.error("screening fetchOne", symbol, err);
+    console.error("screening fetchOne (yahoo fallback)", symbol, err);
     return null;
   }
 }
@@ -332,13 +429,31 @@ export async function getScreeningData(symbols: string[]): Promise<ScreeningRow[
   const uniq = Array.from(new Set(symbols));
   // XU100 endeks closes'unu bir kez çek → her sembol için RS hesabında kullan
   const indexCloses = await fetchIndexCloses("XU100");
-  // 10'arlı batch'lerle paralel (Yahoo rate limit)
-  const out: ScreeningRow[] = [];
-  for (let i = 0; i < uniq.length; i += 10) {
-    const batch = uniq.slice(i, i + 10);
-    const results = await Promise.all(batch.map((s) => fetchOne(s, indexCloses)));
-    for (const r of results) if (r) out.push(r);
+
+  const rowMap = new Map<string, ScreeningRow>();
+
+  // Birincil: borsapy /api/bist-history — 20'lik batch'ler paralel (serverless
+  // süre sınırı için evren chunk'lanır; her chunk ayrı invocation'da koşar).
+  const BATCH = 20;
+  const batches: string[][] = [];
+  for (let i = 0; i < uniq.length; i += BATCH) batches.push(uniq.slice(i, i + BATCH));
+  const seriesResults = await Promise.all(batches.map((b) => fetchHistoryBatch(b)));
+  for (const series of seriesResults) {
+    for (const [sym, s] of Object.entries(series)) {
+      const row = rowFromSeries(sym, s, indexCloses);
+      if (row) rowMap.set(sym, row);
+    }
   }
+
+  // Yedek: borsapy'de bulunamayan semboller için Yahoo (10'arlı batch, rate limit).
+  const missing = uniq.filter((s) => !rowMap.has(s));
+  for (let i = 0; i < missing.length; i += 10) {
+    const batch = missing.slice(i, i + 10);
+    const results = await Promise.all(batch.map((s) => fetchOne(s, indexCloses)));
+    for (const r of results) if (r) rowMap.set(r.symbol, r);
+  }
+
+  const out = Array.from(rowMap.values());
   for (const r of out) r.score = computeScore(r);
   return out;
 }

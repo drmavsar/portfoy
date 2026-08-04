@@ -51,7 +51,7 @@ export default async function KomitePage() {
             fontSize: 12,
           }}
         >
-          Canlı fiyat verisi alınamadı (Yahoo Finance yanıt vermedi). Pozisyonlar
+          Canlı fiyat verisi alınamadı (borsapy/Yahoo yanıt vermedi). Pozisyonlar
           defter değeriyle gösteriliyor; teknik kalite ve gate kısmen eksik
           olabilir.
         </div>
