@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   bandVerdict,
+  computeAltmanZ,
+  computePiotroskiF,
   deriveMetrics,
   enrichFundamentals,
   FAIR_PE,
@@ -211,11 +213,116 @@ describe("scoreFundamentals", () => {
   });
 });
 
+describe("computeAltmanZ", () => {
+  it("sağlıklı imalatçı → Z hesaplanır, 'safe' bölgesi", () => {
+    const raw = base();
+    raw.quote.market_cap = 800; // TL = 1000 − 600 = 400 → X4 = 2.0
+    raw.financials.derived = {
+      total_assets: 1000,
+      current_assets: 500,
+      current_liabilities: 200, // WC = 300 → X1 = 0.3
+      equity: 600,
+      retained_earnings: 400, // X2 = 0.4
+      ebit: 200, // X3 = 0.2
+      revenue_ttm: 900, // X5 = 0.9
+    };
+    const z = computeAltmanZ(raw);
+    // 1.2·0.3 + 1.4·0.4 + 3.3·0.2 + 0.6·2.0 + 1.0·0.9 = 3.68
+    expect(z.z).toBeCloseTo(3.68, 2);
+    expect(z.zone).toBe("safe");
+    expect(z.components.working_capital_ta).toBeCloseTo(0.3, 5);
+  });
+
+  it("zayıf bilanço → distress bölgesi", () => {
+    const raw = base();
+    raw.quote.market_cap = 90;
+    raw.financials.derived = {
+      total_assets: 1000,
+      current_assets: 100,
+      current_liabilities: 400,
+      equity: 100,
+      retained_earnings: -200,
+      ebit: 10,
+      revenue_ttm: 200,
+    };
+    const z = computeAltmanZ(raw);
+    expect(z.z).not.toBeNull();
+    expect(z.zone).toBe("distress");
+  });
+
+  it("bir bileşen eksikse Z null, zone 'na'", () => {
+    const raw = base();
+    raw.financials.derived = {
+      total_assets: 1000,
+      current_assets: 500,
+      current_liabilities: 200,
+      equity: 600,
+      retained_earnings: 400,
+      // ebit yok
+      revenue_ttm: 900,
+    };
+    const z = computeAltmanZ(raw);
+    expect(z.z).toBeNull();
+    expect(z.zone).toBe("na");
+  });
+});
+
+describe("computePiotroskiF", () => {
+  it("tüm YoY kriterleri iyileşiyor → 8/8 (pay ihracı hariç)", () => {
+    const raw = base();
+    raw.financials.derived = {
+      piotroski: {
+        total_assets: [1000, 900],
+        net_income: [120, 80],
+        operating_cf: [150, 100],
+        current_assets: [500, 400],
+        current_liabilities: [200, 200],
+        long_term_liabilities: [100, 200],
+        gross_profit: [300, 250],
+        revenue: [900, 800],
+      },
+    };
+    const f = computePiotroskiF(raw);
+    expect(f.computable).toBe(8); // "shares" kriteri hesaplanamaz
+    expect(f.score).toBe(8);
+    expect(f.criteria.find((c) => c.key === "shares")?.pass).toBeNull();
+    expect(f.criteria.find((c) => c.key === "roa_up")?.pass).toBe(true);
+  });
+
+  it("önceki yıl verisi yoksa YoY kriterleri null → yalnız mevcut-dönem kriterleri", () => {
+    const raw = base();
+    raw.financials.derived = {
+      piotroski: {
+        total_assets: [1000, null],
+        net_income: [120, null],
+        operating_cf: [150, null],
+        current_assets: [500, null],
+        current_liabilities: [200, null],
+        long_term_liabilities: [100, null],
+        gross_profit: [300, null],
+        revenue: [900, null],
+      },
+    };
+    const f = computePiotroskiF(raw);
+    // roa_pos, cfo_pos, accrual hesaplanır; YoY'lar + shares null
+    expect(f.computable).toBe(3);
+    expect(f.score).toBe(3);
+  });
+
+  it("piotroski verisi yoksa skor null, computable 0", () => {
+    const f = computePiotroskiF(base());
+    expect(f.computable).toBe(0);
+    expect(f.score).toBeNull();
+  });
+});
+
 describe("enrichFundamentals", () => {
-  it("raw + derived + score üçlüsünü döndürür", () => {
+  it("raw + derived + score + health döndürür", () => {
     const result = enrichFundamentals(base());
     expect(result.raw.symbol).toBe("TEST");
     expect(result.derived.eps_ttm).toBe(10);
     expect(result.score.score).not.toBeNull();
+    expect(result.health.altman.zone).toBe("na"); // base()'de mali tablo yok
+    expect(result.health.piotroski.computable).toBe(0);
   });
 });

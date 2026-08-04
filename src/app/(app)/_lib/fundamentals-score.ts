@@ -87,6 +87,19 @@ export interface FundamentalsRaw {
       current_liabilities?: number | null;
       revenue_annual?: AnnualPoint[];
       net_income_annual?: AnnualPoint[];
+      // Altman Z + Piotroski F ek kalemleri (bist-fundamentals.py)
+      retained_earnings?: number | null;
+      ebit?: number | null;
+      piotroski?: {
+        total_assets?: [number | null, number | null];
+        current_assets?: [number | null, number | null];
+        current_liabilities?: [number | null, number | null];
+        long_term_liabilities?: [number | null, number | null];
+        gross_profit?: [number | null, number | null];
+        revenue?: [number | null, number | null];
+        net_income?: [number | null, number | null];
+        operating_cf?: [number | null, number | null];
+      };
     };
     income_annual?: StatementTable | null;
     balance_annual?: StatementTable | null;
@@ -122,10 +135,42 @@ export interface FundamentalScore {
   pillars: ScorePillar[];
 }
 
+export type AltmanZone = "safe" | "grey" | "distress" | "na";
+
+export interface AltmanZ {
+  z: number | null;
+  zone: AltmanZone;
+  components: {
+    working_capital_ta: number | null; // X1
+    retained_earnings_ta: number | null; // X2
+    ebit_ta: number | null; // X3
+    equity_mv_tl: number | null; // X4
+    sales_ta: number | null; // X5
+  };
+}
+
+export interface PiotroskiCriterion {
+  key: string;
+  label: string;
+  pass: boolean | null; // null = veri yok
+}
+
+export interface PiotroskiF {
+  score: number | null; // geçilen kriter sayısı (hesaplanabilenler arasından)
+  computable: number; // hesaplanabilen kriter sayısı (payda; tam skor 9)
+  criteria: PiotroskiCriterion[];
+}
+
+export interface HealthScores {
+  altman: AltmanZ;
+  piotroski: PiotroskiF;
+}
+
 export interface Fundamentals {
   raw: FundamentalsRaw;
   derived: DerivedMetrics;
   score: FundamentalScore;
+  health: HealthScores;
 }
 
 function isNum(v: unknown): v is number {
@@ -399,11 +444,126 @@ export function scoreFundamentals(
   };
 }
 
-/** Ham endpoint verisini türetilmiş metrik + skor ile zenginleştir. */
+// ============================================================
+// Bilanço sağlığı — Altman Z-Score + Piotroski F-Score
+// ============================================================
+
+type Pair = [number | null, number | null] | undefined;
+
+const pairCur = (p: Pair): number | null => (p && isNum(p[0]) ? p[0] : null);
+const pairPrev = (p: Pair): number | null => (p && isNum(p[1]) ? p[1] : null);
+
+/**
+ * Altman Z-Score (klasik 5-faktör imalat modeli). Finansal (banka/sigorta)
+ * şirketler için anlamlı değildir. Tüm bileşenler gerekli; biri eksikse "na".
+ */
+export function computeAltmanZ(raw: FundamentalsRaw): AltmanZ {
+  const d = raw.financials?.derived ?? {};
+  const ta = d.total_assets ?? null;
+  const ca = d.current_assets ?? null;
+  const cl = d.current_liabilities ?? null;
+  const equity = d.equity ?? null;
+  const re = d.retained_earnings ?? null;
+  const ebit = d.ebit ?? null;
+  const sales = d.revenue_ttm ?? null;
+  const mve = raw.quote?.market_cap ?? null;
+
+  const taOk = isNum(ta) && ta > 0;
+  const components = {
+    working_capital_ta: taOk && isNum(ca) && isNum(cl) ? (ca - cl) / ta : null,
+    retained_earnings_ta: taOk && isNum(re) ? re / ta : null,
+    ebit_ta: taOk && isNum(ebit) ? ebit / ta : null,
+    equity_mv_tl:
+      isNum(mve) && isNum(ta) && isNum(equity) && ta - equity > 0 ? mve / (ta - equity) : null,
+    sales_ta: taOk && isNum(sales) ? sales / ta : null,
+  };
+
+  const c = components;
+  if (
+    !isNum(c.working_capital_ta) ||
+    !isNum(c.retained_earnings_ta) ||
+    !isNum(c.ebit_ta) ||
+    !isNum(c.equity_mv_tl) ||
+    !isNum(c.sales_ta)
+  ) {
+    return { z: null, zone: "na", components };
+  }
+  const z =
+    1.2 * c.working_capital_ta +
+    1.4 * c.retained_earnings_ta +
+    3.3 * c.ebit_ta +
+    0.6 * c.equity_mv_tl +
+    1.0 * c.sales_ta;
+  const zone: AltmanZone = z >= 2.99 ? "safe" : z >= 1.81 ? "grey" : "distress";
+  return { z, zone, components };
+}
+
+/**
+ * Piotroski F-Score (9 kriter). Pay adedi geçmişi elimizde olmadığından
+ * "yeni pay ihracı yok" kriteri (7) hesaplanamaz → veri olan kriterler üzerinden
+ * skorlanır (computable = payda). YoY kriterleri önceki yıl verisi yoksa null.
+ */
+export function computePiotroskiF(raw: FundamentalsRaw): PiotroskiF {
+  const p = raw.financials?.derived?.piotroski ?? {};
+  const ratio = (a: number | null, b: number | null): number | null =>
+    isNum(a) && isNum(b) && b !== 0 ? a / b : null;
+  const gt = (a: number | null, b: number | null): boolean | null =>
+    isNum(a) && isNum(b) ? a > b : null;
+  const pos = (a: number | null): boolean | null => (isNum(a) ? a > 0 : null);
+
+  const ta = pairCur(p.total_assets);
+  const taP = pairPrev(p.total_assets);
+  const ni = pairCur(p.net_income);
+  const niP = pairPrev(p.net_income);
+  const cfo = pairCur(p.operating_cf);
+
+  const roa = ratio(ni, ta);
+  const roaP = ratio(niP, taP);
+  const cr = ratio(pairCur(p.current_assets), pairCur(p.current_liabilities));
+  const crP = ratio(pairPrev(p.current_assets), pairPrev(p.current_liabilities));
+  const lev = ratio(pairCur(p.long_term_liabilities), ta);
+  const levP = ratio(pairPrev(p.long_term_liabilities), taP);
+  const gm = ratio(pairCur(p.gross_profit), pairCur(p.revenue));
+  const gmP = ratio(pairPrev(p.gross_profit), pairPrev(p.revenue));
+  const turn = ratio(pairCur(p.revenue), ta);
+  const turnP = ratio(pairPrev(p.revenue), taP);
+
+  const criteria: PiotroskiCriterion[] = [
+    { key: "roa_pos", label: "ROA pozitif (net kâr > 0)", pass: pos(ni) },
+    { key: "cfo_pos", label: "İşletme nakit akışı pozitif", pass: pos(cfo) },
+    { key: "roa_up", label: "ROA artıyor (YoY)", pass: gt(roa, roaP) },
+    {
+      key: "accrual",
+      label: "Nakit akışı > net kâr (kazanç kalitesi)",
+      pass: isNum(cfo) && isNum(ni) ? cfo > ni : null,
+    },
+    {
+      key: "lev_down",
+      label: "Kaldıraç azalıyor (UV yük./varlık)",
+      pass: isNum(lev) && isNum(levP) ? lev < levP : null,
+    },
+    { key: "cr_up", label: "Cari oran artıyor (YoY)", pass: gt(cr, crP) },
+    { key: "shares", label: "Yeni pay ihracı yok", pass: null }, // pay adedi geçmişi yok
+    { key: "margin_up", label: "Brüt marj artıyor (YoY)", pass: gt(gm, gmP) },
+    { key: "turnover_up", label: "Aktif devir hızı artıyor (YoY)", pass: gt(turn, turnP) },
+  ];
+
+  const computableList = criteria.filter((x) => x.pass !== null);
+  const computable = computableList.length;
+  const score = computable > 0 ? computableList.filter((x) => x.pass === true).length : null;
+  return { score, computable, criteria };
+}
+
+export function computeHealth(raw: FundamentalsRaw): HealthScores {
+  return { altman: computeAltmanZ(raw), piotroski: computePiotroskiF(raw) };
+}
+
+/** Ham endpoint verisini türetilmiş metrik + skor + sağlık ile zenginleştir. */
 export function enrichFundamentals(raw: FundamentalsRaw): Fundamentals {
   const derived = deriveMetrics(raw);
   const score = scoreFundamentals(raw, derived);
-  return { raw, derived, score };
+  const health = computeHealth(raw);
+  return { raw, derived, score, health };
 }
 
 /** firstNum'u dışarıya da aç — UI bazı yedek alanlar için kullanır. */

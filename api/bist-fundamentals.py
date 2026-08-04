@@ -102,6 +102,16 @@ CAPEX_PATTERNS = [
     "maddi duran varlık alım",
     "duran varlıkların alım",
 ]
+# Altman Z + Piotroski F için ek kalem kalıpları
+RETAINED_PATTERNS = [
+    "geçmiş yıllar kar", "geçmiş yıllar kâr", "geçmiş yıl kar", "geçmiş yıl kâr",
+    "birikmiş kar", "birikmiş kâr", "dağıtılmamış kar", "dağıtılmamış kâr",
+]
+EBIT_PATTERNS = [
+    "esas faaliyet kar", "esas faaliyet kâr",
+    "faaliyet kar", "faaliyet kâr",
+]
+LONG_TERM_LIAB_PATTERNS = ["uzun vadeli yükümlülükler", "uzun vadeli yükümlülük"]
 
 
 def annual_series(df, patterns, max_periods=5):
@@ -115,6 +125,18 @@ def annual_series(df, patterns, max_periods=5):
         if v is not None:
             out.append({"period": str(col), "value": v})
     return out
+
+
+def two_period(df, patterns):
+    """[en güncel dönem, bir önceki dönem] değerlerini döndür (Piotroski YoY için).
+    İlk kolon en güncel dönemdir; yoksa None."""
+    row = find_row(df, patterns)
+    if row is None:
+        return [None, None]
+    cols = list(row.index)
+    cur = num(row[cols[0]]) if len(cols) >= 1 else None
+    prev = num(row[cols[1]]) if len(cols) >= 2 else None
+    return [cur, prev]
 
 
 def build_financials(ticker, warnings):
@@ -185,6 +207,23 @@ def build_financials(ticker, warnings):
     # Yıllık büyüme için seri
     derived["revenue_annual"] = annual_series(inc, REVENUE_PATTERNS)
     derived["net_income_annual"] = annual_series(inc, NET_INCOME_PATTERNS)
+
+    # Altman Z (mevcut dönem): birikmiş kâr + EBIT (faaliyet kârı)
+    if bal is not None and not bal.empty:
+        derived["retained_earnings"] = series_val(find_row(bal, RETAINED_PATTERNS))
+    derived["ebit"] = series_val(find_row(inc, EBIT_PATTERNS))
+
+    # Piotroski F — kalemlerin [güncel, önceki] yıl değerleri (YoY karşılaştırma)
+    derived["piotroski"] = {
+        "total_assets": two_period(bal, TOTAL_ASSETS_PATTERNS),
+        "current_assets": two_period(bal, CURRENT_ASSETS_PATTERNS),
+        "current_liabilities": two_period(bal, CURRENT_LIAB_PATTERNS),
+        "long_term_liabilities": two_period(bal, LONG_TERM_LIAB_PATTERNS),
+        "gross_profit": two_period(inc, GROSS_PROFIT_PATTERNS),
+        "revenue": two_period(inc, REVENUE_PATTERNS),
+        "net_income": two_period(inc, NET_INCOME_PATTERNS),
+        "operating_cf": two_period(cf, OCF_PATTERNS),
+    }
 
     return fin
 
