@@ -67,7 +67,9 @@ export async function GET(req: NextRequest) {
 
   const sp = req.nextUrl.searchParams;
   const dry = sp.get("dry") === "1";
-  const days = Math.min(90, Math.max(1, Number(sp.get("days") ?? "10")));
+  // Varsayılan 35 gün: kaçırılan çalışmalar veya CSV↔cron ek yerindeki boşluklar
+  // (ör. 2026-07-18…07-24 gram altın) her çalışmada kendiliğinden iyileşsin.
+  const days = Math.min(120, Math.max(1, Number(sp.get("days") ?? "35")));
   const triggeredBy = req.headers.get("x-triggered-by") ?? "cron";
 
   const today = new Date();

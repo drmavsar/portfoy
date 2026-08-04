@@ -23,7 +23,7 @@ import { CashflowCard } from "@/app/(app)/_components/cashflow-card";
 import { PersonEquityChart } from "@/app/(app)/_components/person-equity-chart";
 import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
-import { istanbulDateFromUnix, istanbulToday, istanbulYesterday } from "@/lib/finance/istanbul-date";
+import { istanbulYesterday } from "@/lib/finance/istanbul-date";
 
 interface AssetClassSlice {
   label: string;
@@ -229,10 +229,6 @@ export default async function OzetPage() {
     inner.set(id, cur);
     classBreakdown.set(classKey, inner);
   };
-  // Bugün TR günü mü kontrolü (üst tarafta hesapladık, tekrar)
-  const todayIso2 = istanbulToday();
-  const isTodayUnix = (s: number | null | undefined) =>
-    s ? istanbulDateFromUnix(s) === todayIso2 : false;
   // Hesaplar
   for (const a of accounts) {
     const c = classifyAccountClass(a.currency);
@@ -255,10 +251,10 @@ export default async function OzetPage() {
     const benId = portfolioBeneficiary.get(h.portfolio_id) ?? null;
     const quote = h.quote;
     const qty = Number(h.quantity);
+    // TradingView market_time vermez; günlük değişimi Portföy sayfasıyla tutarlı
+    // biçimde koşulsuz hesapla (previous_close = close − change_abs zaten doğru).
     const dayDelta =
-      quote && quote.previous_close && isTodayUnix(quote.market_time)
-        ? qty * (quote.price - quote.previous_close)
-        : 0;
+      quote && quote.previous_close ? qty * (quote.price - quote.previous_close) : 0;
     let classKey = "equity";
     if (asset.asset_class === "metal") classKey = "metal";
     else if (asset.asset_class === "fx") classKey = "fx";
@@ -382,35 +378,25 @@ export default async function OzetPage() {
     bumpDay(cls.key, cls.label, cls.color, dayDelta, valueTry, truncgilSource, truncgilUpdate);
   }
 
-  // Yahoo'nun "regularMarketTime"ı bugün değilse borsa kapalı sayılır
-  // (resmi tatil / hafta sonu) — günlük değişim 0 gösterilir, yoksa
-  // dünkü kapanış vs. dün-evvelki kapanış farkı (Yahoo'nun verdiği son
-  // değişim) yanlışlıkla "bugün" gibi görünür.
-  const todayIso = istanbulToday();
-  const isToday = (unixSec: number | null | undefined): boolean => {
-    if (!unixSec) return false;
-    return istanbulDateFromUnix(unixSec) === todayIso;
-  };
-
-  // Hisse meta için Yahoo'nun en geç regularMarketTime'ını al
+  // Hisse günlük değişimi TradingView'den (previous_close = close − change_abs).
+  // Not: TradingView market_time vermediğinden "borsa kapalıysa 0" koşulu
+  // uygulanmaz; Portföy sayfasıyla tutarlı biçimde son seans değişimi gösterilir.
   let yahooLatestUnix: number | null = null;
   for (const h of enriched) {
     const asset = assetMap[h.asset_id];
     const quote = h.quote;
     if (!asset || !quote || !quote.previous_close) continue;
     const qty = Number(h.quantity);
-    // Borsa bugün açık değilse günlük katkı 0
-    const marketOpen = isToday(quote.market_time);
-    const dayDelta = marketOpen ? qty * (quote.price - quote.previous_close) : 0;
+    const dayDelta = qty * (quote.price - quote.previous_close);
     if (quote.market_time && (!yahooLatestUnix || quote.market_time > yahooLatestUnix)) {
       yahooLatestUnix = quote.market_time;
     }
     if (asset.asset_class === "equity_tr" || asset.asset_class === "equity_us") {
-      bumpDay("equity", "Hisse", "#e26a8f", dayDelta, h.mv, "Yahoo Finance · 15dk", null);
+      bumpDay("equity", "Hisse", "#e26a8f", dayDelta, h.mv, "TradingView · 15dk", null);
     } else if (asset.asset_class === "crypto") {
-      bumpDay("crypto", "Kripto", "#b388f2", dayDelta, h.mv, "Yahoo Finance · 15dk", null);
+      bumpDay("crypto", "Kripto", "#b388f2", dayDelta, h.mv, "TradingView · 15dk", null);
     } else if (asset.asset_class === "metal") {
-      bumpDay("metal", "Altın & Gümüş", "#d4a056", dayDelta, h.mv, "Yahoo Finance · 15dk", null);
+      bumpDay("metal", "Altın & Gümüş", "#d4a056", dayDelta, h.mv, "TradingView · 15dk", null);
     }
   }
   const yahooLastUpdate = yahooLatestUnix
