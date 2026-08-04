@@ -9,6 +9,7 @@ import { fetchFundamentals, type FundamentalsResult } from "@/app/(app)/_lib/fun
 import {
   bandVerdict,
   FAIR_PE,
+  type AltmanZone,
   type Fundamentals,
   type StatementTable,
   type Verdict,
@@ -25,6 +26,7 @@ type TabKey =
   | "degerleme"
   | "buyume"
   | "borc"
+  | "saglik"
   | "temettu"
   | "analist"
   | "tablolar"
@@ -34,6 +36,7 @@ const TABS: Array<[TabKey, string]> = [
   ["degerleme", "Değerleme"],
   ["buyume", "Büyüme & Karlılık"],
   ["borc", "Borç & Nakit"],
+  ["saglik", "Bilanço Sağlığı"],
   ["temettu", "Temettü"],
   ["analist", "Analist"],
   ["tablolar", "Mali Tablolar"],
@@ -492,6 +495,7 @@ function ReportView({
       {tab === "degerleme" && <DegerlemeTab data={data} />}
       {tab === "buyume" && <BuyumeTab data={data} />}
       {tab === "borc" && <BorcTab data={data} />}
+      {tab === "saglik" && <SaglikTab data={data} />}
       {tab === "temettu" && <TemettuTab data={data} />}
       {tab === "analist" && <AnalistTab data={data} />}
       {tab === "tablolar" && <TablolarTab data={data} />}
@@ -661,6 +665,91 @@ function BorcTab({ data }: { data: Fundamentals }) {
         son 4 çeyrek (TTM) mali tablo toplamından hesaplanır. Banka/finans hisselerinde bazı
         kalemler farklı tablo yapısı nedeniyle boş gelebilir.
       </SectionNote>
+    </div>
+  );
+}
+
+function SaglikTab({ data }: { data: Fundamentals }) {
+  const { altman, piotroski } = data.health;
+
+  const zoneMeta: Record<AltmanZone, { label: string; verdict: Verdict }> = {
+    safe: { label: "Güvenli bölge", verdict: "good" },
+    grey: { label: "Gri bölge", verdict: "warn" },
+    distress: { label: "Sıkıntı bölgesi", verdict: "bad" },
+    na: { label: "Hesaplanamadı", verdict: "na" },
+  };
+  const zm = zoneMeta[altman.zone];
+
+  const pScore = piotroski.score;
+  const pVerdict: Verdict =
+    pScore == null ? "na" : pScore >= 7 ? "good" : pScore >= 4 ? "warn" : "bad";
+
+  return (
+    <div>
+      {/* Altman Z-Score */}
+      <div className="card" style={{ padding: 16, borderLeft: `3px solid ${verdictColor(zm.verdict)}` }}>
+        <div style={{ fontSize: 14, fontWeight: 650 }}>
+          Altman Z-Score <span className="hint">· iflas riski göstergesi</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginTop: 8, marginBottom: 4 }}>
+          <span
+            className="tabular"
+            style={{ fontSize: 30, fontWeight: 700, color: verdictColor(zm.verdict) }}
+          >
+            {altman.z != null ? altman.z.toFixed(2) : "—"}
+          </span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: verdictColor(zm.verdict) }}>
+            {zm.label}
+          </span>
+        </div>
+        <MetricGrid>
+          <Metric label="İşletme Serm./Varlık (X1)" value={dec(altman.components.working_capital_ta, 2)} />
+          <Metric label="Birikmiş Kâr/Varlık (X2)" value={dec(altman.components.retained_earnings_ta, 2)} />
+          <Metric label="FVÖK/Varlık (X3)" value={dec(altman.components.ebit_ta, 2)} />
+          <Metric label="PD/Yabancı Kaynak (X4)" value={dec(altman.components.equity_mv_tl, 2)} />
+          <Metric label="Satışlar/Varlık (X5)" value={dec(altman.components.sales_ta, 2)} />
+        </MetricGrid>
+        <SectionNote>
+          Z &gt; 2.99 güvenli · 1.81–2.99 gri · &lt; 1.81 sıkıntı. Klasik imalat modeli; banka/sigorta gibi
+          finansal şirketler için anlamlı değildir. Bir bileşen eksikse skor hesaplanamaz.
+        </SectionNote>
+      </div>
+
+      {/* Piotroski F-Score */}
+      <div className="card" style={{ padding: 16, marginTop: 16, borderLeft: `3px solid ${verdictColor(pVerdict)}` }}>
+        <div style={{ fontSize: 14, fontWeight: 650 }}>
+          Piotroski F-Score <span className="hint">· mali güç kalitesi</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 8 }}>
+          <span
+            className="tabular"
+            style={{ fontSize: 30, fontWeight: 700, color: verdictColor(pVerdict) }}
+          >
+            {pScore ?? "—"}
+          </span>
+          <span style={{ fontSize: 14, color: "var(--muted)" }}>/ {piotroski.computable} kriter</span>
+        </div>
+        <div style={{ marginTop: 12, display: "grid", gap: 6 }}>
+          {piotroski.criteria.map((c) => {
+            const color =
+              c.pass == null ? "var(--muted)" : c.pass ? "var(--positive)" : "var(--negative)";
+            const mark = c.pass == null ? "—" : c.pass ? "✓" : "✕";
+            return (
+              <div
+                key={c.key}
+                style={{ display: "flex", justifyContent: "space-between", fontSize: 12, gap: 10 }}
+              >
+                <span style={{ color: c.pass == null ? "var(--muted)" : "inherit" }}>{c.label}</span>
+                <span style={{ color, fontWeight: 700 }}>{mark}</span>
+              </div>
+            );
+          })}
+        </div>
+        <SectionNote>
+          9 kriterden geçilen sayısı; yüksek = daha güçlü mali profil. &quot;Yeni pay ihracı yok&quot;
+          kriteri pay adedi geçmişi olmadığından hesaplanamaz (bu yüzden payda {piotroski.computable}).
+        </SectionNote>
+      </div>
     </div>
   );
 }
