@@ -16,6 +16,7 @@
 
 import { getTcmbRates } from "./fx-rates";
 import { fetchCanlidovizRates } from "./canlidoviz-rates";
+import { fetchTradingViewQuotes } from "./tradingview-quotes";
 
 const TRUNCGIL_URL = "https://finans.truncgil.com/v4/today.json";
 
@@ -165,82 +166,40 @@ export interface FxTicker {
   chgPct: number | null;
 }
 
-/** Topbar canlı şerit için: USD/EUR/GBP + gram altın. Truncgil'den günlük değişim de gelir. */
+/**
+ * Topbar canlı şerit: USD/EUR + gram altın + BIST 100.
+ *
+ * Kur/değişim kanonik hibrit kaynaklardan gelir (getAssetRates + getAssetChanges
+ * = Truncgil canlı + canlidoviz güvenilir fallback), böylece şerit uygulamanın
+ * geri kalanıyla tutarlı ve Truncgil düşse de dolu kalır. BIST 100 TradingView'den
+ * (Yahoo'nun BIST'te eksik-mum/429 sorunu vardı).
+ */
 export async function getFxTickers(): Promise<FxTicker[]> {
   try {
-    const res = await fetch(TRUNCGIL_URL, {
-      next: { revalidate: 300, tags: ["asset-rates"] },
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)",
-        Accept: "application/json",
-      },
-    });
-    if (!res.ok) throw new Error(`Truncgil HTTP ${res.status}`);
-    const json = (await res.json()) as Record<string, unknown>;
-
-    const pickPct = (raw: unknown): number | null => {
-      if (typeof raw !== "string") return null;
-      const m = raw.replace("%", "").replace(",", ".").trim();
-      const n = parseFloat(m);
-      return Number.isFinite(n) ? n : null;
-    };
-
-    const extract = (key: string, label: string): FxTicker | null => {
-      const entry = json[key];
-      if (typeof entry !== "object" || entry === null) return null;
-      const e = entry as TruncgilEntry & { Change?: string };
-      const price = parseNum(e.Selling) ?? parseNum(e.Buying);
-      if (price == null) return null;
-      return { symbol: label, label, price, chgPct: pickPct(e.Change) };
-    };
+    const [rates, changes, tv] = await Promise.all([
+      getAssetRates(),
+      getAssetChanges(),
+      fetchTradingViewQuotes(["XU100"]),
+    ]);
 
     const out: FxTicker[] = [];
-    const usd = extract("USD", "USD/TRY"); if (usd) out.push(usd);
-    const eur = extract("EUR", "EUR/TRY"); if (eur) out.push(eur);
-    // Truncgil v4 gram altın key'i: önce GRA, sonra HAS, sonra eski gram-altin
-    const xau =
-      extract("GRA", "GRAM ALTIN") ||
-      extract("HAS", "GRAM ALTIN") ||
-      extract("gram-altin", "GRAM ALTIN") ||
-      extract("gramaltin", "GRAM ALTIN");
-    if (xau) out.push(xau);
+    const push = (code: string, label: string) => {
+      const price = rates[code];
+      if (typeof price === "number" && price > 0) {
+        out.push({ symbol: label, label, price, chgPct: changes[code] ?? null });
+      }
+    };
+    push("USD", "USD/TRY");
+    push("EUR", "EUR/TRY");
+    push("XAU", "GRAM ALTIN");
 
-    // BIST100 — Yahoo Finance XU100.IS
-    const bist = await fetchBist100();
-    if (bist) out.push(bist);
+    const xu = tv["XU100"];
+    if (xu) out.push({ symbol: "BIST100", label: "BIST 100", price: xu.close, chgPct: xu.changePct });
 
     return out;
   } catch (err) {
     console.error("getFxTickers error", err);
     return [];
-  }
-}
-
-async function fetchBist100(): Promise<FxTicker | null> {
-  try {
-    const res = await fetch(
-      "https://query1.finance.yahoo.com/v8/finance/chart/XU100.IS?interval=1d&range=2d",
-      {
-        next: { revalidate: 300 },
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; MehmetsAssets/1.0)" },
-      },
-    );
-    if (!res.ok) return null;
-    const json = (await res.json()) as {
-      chart?: {
-        result?: Array<{
-          meta?: { regularMarketPrice?: number; chartPreviousClose?: number; previousClose?: number };
-        }>;
-      };
-    };
-    const meta = json.chart?.result?.[0]?.meta;
-    if (!meta?.regularMarketPrice) return null;
-    const price = meta.regularMarketPrice;
-    const prev = meta.chartPreviousClose ?? meta.previousClose ?? null;
-    const chg = prev ? ((price - prev) / prev) * 100 : null;
-    return { symbol: "BIST100", label: "BIST 100", price, chgPct: chg };
-  } catch {
-    return null;
   }
 }
 
