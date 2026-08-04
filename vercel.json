@@ -35,6 +35,10 @@
     {
       "path": "/api/cron/fund-scores-refresh",
       "schedule": "0 18 * * *"
+    },
+    {
+      "path": "/api/cron/benchmark-daily",
+      "schedule": "30 15 * * *"
     }
   ]
 }
