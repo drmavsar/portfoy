@@ -436,7 +436,7 @@ export default async function YatirimlarPage() {
         <div>
           <div className="page-title">Portföy</div>
           <div className="page-sub">
-            Kişi bazlı pozisyon · WAC + anlık fiyat + K/Z · {quotedCount}/{enriched.length} sembol Yahoo Finance&apos;tan
+            Kişi bazlı pozisyon · WAC + anlık fiyat + K/Z · {quotedCount}/{enriched.length} sembol TradingView / TEFAS
             {yahooLastUpdate && (
               <YahooFreshness date={yahooLastUpdate} nowMs={renderNowMs} />
             )}
@@ -719,7 +719,7 @@ export default async function YatirimlarPage() {
             className="hint"
             style={{ marginTop: 18, padding: 12, background: "var(--surface-2)", borderRadius: 8, lineHeight: 1.6 }}
           >
-            Fiyat kaynağı: Yahoo Finance (BIST · 15 dk gecikmeli) · 5 dk cache.<br />
+            Fiyat kaynağı: TradingView (BIST · ~15 dk gecikmeli) · TEFAS (fon) · Yahoo yedek · 5 dk cache.<br />
             <b>Plan kolonu</b>: T1 = current + 2 × ATR14, T2 = current + 4 × ATR14, S1 = current − 1.5 × ATR14,
             S2 = max(WAC × 0.95, current − 2.5 × ATR14). Sağlık rozeti: Stop Altı / Maliyet Altı / Stop Yakın
             / Hedef Yakın / Extended (MA20 +%10 üstü) / Sağlıklı. Tooltip için kolon üstüne hover.

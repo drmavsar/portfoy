@@ -5,6 +5,7 @@
 // Cache 5 dk (revalidate). Yahoo halka açık ama nazikçe kullanılmalı.
 
 import { buildBars, priorCloseFromBars, utcDate } from "./stock-prices-util";
+import { fetchTradingViewQuotes, fetchTradingViewQuotesExtended } from "./tradingview-quotes";
 
 export interface StockQuote {
   symbol: string;
@@ -12,7 +13,7 @@ export interface StockQuote {
   previous_close: number | null;
   change_pct: number | null;
   currency: string;
-  source: "yahoo" | "fallback" | "tefas";
+  source: "yahoo" | "fallback" | "tefas" | "tradingview";
   market_time: number | null; // unix epoch (saniye)
 }
 
@@ -76,15 +77,47 @@ async function fetchOne(symbol: string): Promise<StockQuote | null> {
   }
 }
 
-/** Birden çok BIST sembolü için anlık fiyatları paralel çek. */
+/**
+ * Birden çok BIST sembolü için anlık fiyat.
+ *
+ * Birincil kaynak TradingView scanner (tek toplu istek, günlük değişimi doğru
+ * hesaplar). Yahoo yalnızca TradingView'in döndürmediği semboller için yedek —
+ * Yahoo'nun BIST serisi seans içinde eksik mum + HTTP 429 sorunları yüzünden
+ * günlük %'yi bozuyordu.
+ */
 export async function getStockPrices(symbols: string[]): Promise<Record<string, StockQuote>> {
   if (symbols.length === 0) return {};
   const unique = Array.from(new Set(symbols));
-  const results = await Promise.all(unique.map(fetchOne));
   const out: Record<string, StockQuote> = {};
-  for (const r of results) {
-    if (r) out[r.symbol] = r;
+
+  const tv = await fetchTradingViewQuotes(unique);
+  const missing: string[] = [];
+  for (const sym of unique) {
+    const q = tv[sym.toUpperCase()];
+    if (q) {
+      const prev = q.changeAbs != null ? q.close - q.changeAbs : null;
+      out[sym] = {
+        symbol: sym,
+        price: q.close,
+        previous_close: prev != null && prev > 0 ? prev : null,
+        change_pct: q.changePct,
+        currency: "TRY",
+        source: "tradingview",
+        market_time: null,
+      };
+    } else {
+      missing.push(sym);
+    }
   }
+
+  // Yedek: TradingView'de bulunmayan semboller için Yahoo.
+  if (missing.length > 0) {
+    const results = await Promise.all(missing.map(fetchOne));
+    for (const r of results) {
+      if (r) out[r.symbol] = r;
+    }
+  }
+
   return out;
 }
 
@@ -165,9 +198,35 @@ export async function getStockPricesExtended(
   if (symbols.length === 0) return {};
   const unique = Array.from(new Set(symbols));
   const out: Record<string, StockQuoteExt> = {};
-  // 10'arlı batch — Radar piyasa geneli ~100 sembol çekebiliyor (Yahoo rate limit)
-  for (let i = 0; i < unique.length; i += 10) {
-    const batch = unique.slice(i, i + 10);
+
+  // Birincil: TradingView scanner — tüm semboller tek istekte (Radar ~100 sembol
+  // çekebiliyor; Yahoo'da bu 10'arlı batch + rate limit demekti). Günlük değişim
+  // ve haftalık/aylık performans doğrudan gelir.
+  const tv = await fetchTradingViewQuotesExtended(unique);
+  const missing: string[] = [];
+  for (const sym of unique) {
+    const q = tv[sym.toUpperCase()];
+    if (q) {
+      const prev = q.changeAbs != null ? q.close - q.changeAbs : null;
+      out[sym] = {
+        symbol: sym,
+        price: q.close,
+        previous_close: prev != null && prev > 0 ? prev : null,
+        change_pct: q.changePct,
+        currency: "TRY",
+        source: "tradingview",
+        market_time: null,
+        week_change_pct: q.weekPct,
+        month_change_pct: q.monthPct,
+      };
+    } else {
+      missing.push(sym);
+    }
+  }
+
+  // Yedek: TradingView'de bulunmayan semboller için Yahoo (10'arlı batch).
+  for (let i = 0; i < missing.length; i += 10) {
+    const batch = missing.slice(i, i + 10);
     const results = await Promise.all(batch.map(fetchOneExt));
     for (const r of results) if (r) out[r.symbol] = r;
   }
