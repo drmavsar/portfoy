@@ -1,1 +1,2 @@
 borsapy
+beautifulsoup4
