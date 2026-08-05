@@ -21,6 +21,7 @@ export interface EconomicCalendarResult {
   range: { start: string; end: string } | null;
   countries: string[];
   ok: boolean;
+  diag?: string; // hata/teşhis (doviz http durumu, parse sayısı) — UI'da gösterilir
 }
 
 const EMPTY: EconomicCalendarResult = { events: [], range: null, countries: [], ok: false };
@@ -42,29 +43,37 @@ export async function getEconomicCalendar(opts?: {
       `${host}/api/economic-calendar?days=${days}&countries=${encodeURIComponent(countries)}`,
       { next: { revalidate: 1800, tags: ["economic-calendar"] } },
     );
-    if (!res.ok) {
-      console.error(`[economic-calendar] HTTP ${res.status}`);
-      return EMPTY;
-    }
-    const json = (await res.json()) as {
-      status: string;
+    const json = (await res.json().catch(() => null)) as {
+      status?: string;
       events?: EconomicEvent[];
       range?: { start: string; end: string };
       countries?: string[];
       message?: string;
-    };
-    if (json.status !== "ok" || !json.events) {
-      console.error("[economic-calendar] error:", json.message);
-      return EMPTY;
+      _diag?: { doviz_status?: number; containers_found?: number; parsed?: number };
+    } | null;
+
+    if (!res.ok || !json || json.status !== "ok" || !json.events) {
+      const d = json?._diag;
+      const diag = json?.message
+        ? `hata: ${json.message.slice(0, 200)}`
+        : d
+          ? `doviz http ${d.doviz_status}, container ${d.containers_found}, parse ${d.parsed}`
+          : `HTTP ${res.status}`;
+      console.error("[economic-calendar]", diag);
+      return { ...EMPTY, diag };
     }
     return {
       events: json.events,
       range: json.range ?? null,
       countries: json.countries ?? [],
       ok: true,
+      diag: json._diag
+        ? `doviz http ${json._diag.doviz_status} · parse ${json._diag.parsed}`
+        : undefined,
     };
   } catch (err) {
-    console.error("getEconomicCalendar error", err);
-    return EMPTY;
+    const diag = `fetch error: ${err instanceof Error ? err.message : String(err)}`;
+    console.error("getEconomicCalendar", diag);
+    return { ...EMPTY, diag };
   }
 }

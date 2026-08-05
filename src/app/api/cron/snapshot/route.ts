@@ -232,8 +232,17 @@ export async function GET(req: NextRequest) {
     new Set(((accountUsers ?? []) as { user_id: string }[]).map((a) => a.user_id)),
   );
 
-  // FX rates bir kez çekilir, tüm user'lar için kullanılır
-  const fxRates = await getAssetRates();
+  // FX rates bir kez çekilir, tüm user'lar için kullanılır. getAssetRates dış
+  // kaynaklara (canlidoviz/Truncgil/TCMB) bağlı; throw ederse TÜM snapshot koşusu
+  // düşerdi (o gün hiç satır yazılmaz → nakit "değişim" boşluğu). Sarmalayıp boş
+  // rate ile devam et: TRY hesapları (nakit) rate'e ihtiyaç duymaz, FX/metal
+  // hesapları balance_try'a düşer — snapshot yine yazılır, geçmiş korunur.
+  let fxRates: Record<string, number> = {};
+  try {
+    fxRates = await getAssetRates();
+  } catch (err) {
+    console.error("[cron/snapshot] getAssetRates failed, boş rate ile devam", err);
+  }
 
   const today = istanbulToday();
   const results: Array<{ user_id: string; ok: boolean; total?: number; error?: string }> = [];
