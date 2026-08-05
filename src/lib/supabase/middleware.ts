@@ -8,7 +8,25 @@ import type { Database } from "@/lib/types/database";
 // Supabase user kontrolüyle /login'e redirect etmemesi gerekir, aksi halde
 // route'a hiç ulaşamaz. Service-role client RLS bypass etse de auth gate
 // onlardan önce çalışır.
-const PUBLIC_PATHS = ["/login", "/auth", "/api/health", "/api/cron", "/api/admin"];
+//
+// Piyasa verisi Python endpoint'leri (borsapy / doviz.com) da PUBLIC olmalı:
+// kullanıcıya özel veri İÇERMEZ (BIST fiyat/temel/analist + ekonomik takvim).
+// Bunlar server action'lardan SUNUCU TARAFI fetch ile çağrılır ve o istekler
+// oturum cookie'si taşımaz → gate'liyken /login'e (200 HTML) redirect ediliyor,
+// Python fonksiyonu hiç çalışmıyordu (ekonomik takvim boş; tarama/endeks
+// sessizce Yahoo yedeğine düşüyordu). Public market-data → auth'tan muaf.
+const PUBLIC_PATHS = [
+  "/login",
+  "/auth",
+  "/api/health",
+  "/api/cron",
+  "/api/admin",
+  "/api/bist-sectors",
+  "/api/bist-history",
+  "/api/bist-fundamentals",
+  "/api/analyst-ratings",
+  "/api/economic-calendar",
+];
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
