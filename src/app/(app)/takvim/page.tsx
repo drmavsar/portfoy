@@ -23,7 +23,7 @@ function isTodayIso(iso: string): boolean {
 }
 
 export default async function TakvimPage() {
-  const { events, range, ok } = await getEconomicCalendar({ days: 14 });
+  const { events, range, ok, diag } = await getEconomicCalendar({ days: 14 });
 
   // Tarihe göre grupla (girişler zaten tarih+saat sıralı gelir)
   const byDate = new Map<string, EconomicEvent[]>();
@@ -62,6 +62,14 @@ export default async function TakvimPage() {
               ? "Seçili aralıkta ekonomik olay bulunamadı."
               : "doviz.com ekonomik takvim servisi şu an yanıt vermiyor. Biraz sonra tekrar dene."}
           </div>
+          {diag && (
+            <div
+              className="hint"
+              style={{ marginTop: 8, fontSize: 11, fontFamily: "var(--font-mono, monospace)", opacity: 0.8 }}
+            >
+              teşhis: {diag}
+            </div>
+          )}
         </div>
       ) : (
         <div style={{ display: "grid", gap: 18 }}>

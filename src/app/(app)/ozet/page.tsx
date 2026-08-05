@@ -23,7 +23,7 @@ import { CashflowCard } from "@/app/(app)/_components/cashflow-card";
 import { PersonEquityChart } from "@/app/(app)/_components/person-equity-chart";
 import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
-import { istanbulYesterday } from "@/lib/finance/istanbul-date";
+import { istanbulToday, istanbulYesterday } from "@/lib/finance/istanbul-date";
 
 interface AssetClassSlice {
   label: string;
@@ -408,22 +408,29 @@ export default async function OzetPage() {
   if (hisseEntry && quoteLastUpdate) hisseEntry.lastUpdate = quoteLastUpdate;
 
   // Nakit (TRY hesapları) günlük değişimini daily_snapshots'tan hesapla.
-  // Kanonik snapshot her gece TR 23:00'ta cron tarafından yazılır; dolayısıyla
-  // "dünden beri değişim" = canlı cashTotal − dünkü 23:00 snapshot. `length-2`
-  // indeksi gün atlamalarında yanıltır, o yüzden açıkça İstanbul takvim dünü
-  // aranır; o güne ait satır yoksa değişim 0 gösterilir.
+  // Kanonik snapshot her gece TR 23:00'ta cron tarafından yazılır; "değişim" =
+  // canlı cashTotal − en son (bugünden ÖNCEKİ) snapshot. İdeal olan dünkü
+  // snapshot; ama cron bir gün atlarsa (ör. dünkü satır yoksa) sıfır göstermek
+  // yerine mevcut EN GÜNCEL önceki snapshot'a göre kıyaslarız — böylece boşluk
+  // durumunda da gerçek nakit hareketi görünür.
   const cashEntry = dayChangeMap.get("cash_try");
   if (cashEntry) {
+    const todayIso = istanbulToday();
     const yesterdayIso = istanbulYesterday();
-    const prev = dailySnapshots.find((s) => s.snapshot_date === yesterdayIso);
+    const prev = dailySnapshots
+      .filter((s) => s.snapshot_date < todayIso)
+      .sort((a, b) => (a.snapshot_date < b.snapshot_date ? 1 : -1))[0];
     if (prev) {
       const prevCash = Number(prev.cash_try ?? 0);
       cashEntry.change = cashTotal - prevCash;
-      cashEntry.source = `daily_snapshots · dün 23:00'tan beri`;
+      cashEntry.source =
+        prev.snapshot_date === yesterdayIso
+          ? "daily_snapshots · dün 23:00'tan beri"
+          : `daily_snapshots · ${prev.snapshot_date} 23:00'tan beri`;
       cashEntry.lastUpdate = prev.snapshot_date;
     } else {
       cashEntry.change = 0;
-      cashEntry.source = "daily_snapshots · dünkü snapshot yok";
+      cashEntry.source = "daily_snapshots · snapshot yok";
       cashEntry.lastUpdate = null;
     }
   }
