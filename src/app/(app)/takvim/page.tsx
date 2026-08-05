@@ -155,7 +155,7 @@ export default async function TakvimPage() {
         className="hint"
         style={{ marginTop: 18, padding: 12, background: "var(--surface-2)", borderRadius: 8, lineHeight: 1.6 }}
       >
-        Kaynak: doviz.com ekonomik takvim (borsapy). Önem: <b style={{ color: "var(--negative)" }}>Yüksek</b> ·{" "}
+        Kaynak: doviz.com ekonomik takvim. Önem: <b style={{ color: "var(--negative)" }}>Yüksek</b> ·{" "}
         <b style={{ color: "var(--warning)" }}>Orta</b> · <b style={{ color: "var(--muted)" }}>Düşük</b>. Saatler
         Türkiye saatiyle. 30 dk cache.
       </div>
