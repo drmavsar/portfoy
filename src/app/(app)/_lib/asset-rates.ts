@@ -5,11 +5,14 @@
 // Altın türlerinde (gram/çeyrek/yarım/tam/cumhuriyet/ata/gümüş/ons) BİRİNCİL
 // kaynak canlidoviz'dir; Truncgil bu türleri ezmez (Truncgil coin primleri
 // canlidoviz'den ~%1,5-2,5 yüksekti ve kullanıcı canlidoviz'i referans alıyor).
-// Truncgil yalnızca canlidoviz'in vermediği altınları doldurur (bilezik 14/18/22,
-// reşat) ve FX'i override eder.
+// Bilezik (22/18/14 ayar) canlidoviz gram altınından türetilir (canlidoviz'de
+// ayrı kalem yok; Truncgil bilezik primi canlidoviz gram referansıyla ~%0,8
+// sapıyordu). Truncgil yalnızca reşat + canlidoviz'in düştüğü boşlukları doldurur
+// ve FX'i override eder.
 //   FX  → Truncgil Selling (override) · taban canlidoviz · son çare TCMB
 //   Altın → canlidoviz (satış) · boşluk için Truncgil · gram yoksa Yahoo XAUUSD
 //   Ons (XAU_OZ) → gram × 31.1035 (türetilir; ham ons değerleri tutarsızdı)
+//   Bilezik → canlidoviz gram × (ayar/24) × işçilik primi (canlidoviz kalibreli)
 //   Cache: 10 dakika
 //
 // Kripto:
@@ -378,8 +381,9 @@ export async function getAssetRates(): Promise<Record<string, number>> {
   // 2) Truncgil — FX'i override eder; ancak ALTIN türlerinde canlidoviz değeri
   //    varsa onu EZMEZ. (Truncgil coin primleri canlidoviz serbest piyasadan
   //    ~%1,5-2,5 yüksek geliyordu; kullanıcı canlidoviz'i referans alıyor.)
-  //    Truncgil yalnızca canlidoviz'in vermediği altınları doldurur — bilezik
-  //    14/18/22 ve reşat — artı FX override.
+  //    Truncgil yalnızca canlidoviz'in vermediği altınları doldurur — reşat ve
+  //    (canlidoviz gram düşerse) bilezik — artı FX override. Bilezik canlidoviz
+  //    gram varken 2.6'da türetilir (Truncgil bilezik değeri ezilir).
   const CANLI_GOLD = new Set([
     "XAU", "XAG", "XAU_OZ", "CEYREK", "YARIM", "TAM", "CUMHURIYET", "ATA",
   ]);
@@ -395,6 +399,24 @@ export async function getAssetRates(): Promise<Record<string, number>> {
   //      1 troy ons = 31.1035 gram olduğundan gramdan türetmek en sağlamı.
   if (typeof out.XAU === "number" && out.XAU > 0) {
     out.XAU_OZ = out.XAU * 31.1035;
+  }
+
+  // 2.6) Bilezik (22/18/14 ayar) — canlidoviz'de ayrı kalem YOK. Truncgil bilezik
+  //      kotasyonu canlidoviz gram referansıyla ~%0,8 sapıyordu (kullanıcı
+  //      canlidoviz'i baz alıyor). canlidoviz gram altın satışından türet:
+  //        bilezik = gram × (ayar/24) × işçilik primi
+  //      (ayar/24 = has altın içeriği; işçilik primi işleme/etiket farkı).
+  //      İşçilik primi canlidoviz "22 ayar bilezik / gram altın" oranından
+  //      kalibre edildi (≈0,9403 / (22/24) ≈ 1,0258); 18/14 ayar aynı primi
+  //      kullanır. Böylece bilezik gram ile birlikte hareket eder ve tek
+  //      kaynaktan (canlidoviz) türer. canlidoviz gram yoksa yukarıdaki Truncgil
+  //      bilezik değeri korunur.
+  const canliGram = canli.rates.XAU;
+  if (typeof canliGram === "number" && canliGram > 0) {
+    const ISCILIK = 1.0258; // canlidoviz bilezik primi (22 ayar kalibrasyonu)
+    out.BILEZIK22 = canliGram * (22 / 24) * ISCILIK;
+    out.BILEZIK18 = canliGram * (18 / 24) * ISCILIK;
+    out.BILEZIK14 = canliGram * (14 / 24) * ISCILIK;
   }
 
   // 3) XAU yoksa Yahoo fallback (ons × USD/TRY / 31.1035)
