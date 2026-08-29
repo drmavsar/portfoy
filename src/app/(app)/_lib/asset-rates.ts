@@ -2,14 +2,15 @@
 
 // Birim fiyat çözücü — TRY cinsinden, hesap currency koduna karşı.
 //
-// Primer kaynak: Truncgil v4 today.json
-//   FX (USD/EUR/GBP/CHF/...)        → Selling
-//   Türk altın türleri (gram/çeyrek/yarım/tam/cumhuriyet/ata/ons/gümüş) → Selling
+// Altın türlerinde (gram/çeyrek/yarım/tam/cumhuriyet/ata/gümüş/ons) BİRİNCİL
+// kaynak canlidoviz'dir; Truncgil bu türleri ezmez (Truncgil coin primleri
+// canlidoviz'den ~%1,5-2,5 yüksekti ve kullanıcı canlidoviz'i referans alıyor).
+// Truncgil yalnızca canlidoviz'in vermediği altınları doldurur (bilezik 14/18/22,
+// reşat) ve FX'i override eder.
+//   FX  → Truncgil Selling (override) · taban canlidoviz · son çare TCMB
+//   Altın → canlidoviz (satış) · boşluk için Truncgil · gram yoksa Yahoo XAUUSD
+//   Ons (XAU_OZ) → gram × 31.1035 (türetilir; ham ons değerleri tutarsızdı)
 //   Cache: 10 dakika
-//
-// Fallback'ler (Truncgil bir nedenle dönmezse):
-//   FX  → TCMB today.xml
-//   XAU → Yahoo XAUUSD=X × USD/TRY / 31.1035
 //
 // Kripto:
 //   CoinGecko simple/price?vs_currencies=try (BTC/ETH/SOL/USDT/BNB), 5 dk cache
@@ -356,7 +357,9 @@ export async function getAssetRates(): Promise<Record<string, number>> {
     fetchTruncgil(),
     getTcmbRates(),
     fetchCoingeckoPrices(),
-    fetchCanlidovizRates().catch(() => ({ rates: {}, changes: {} })),
+    fetchCanlidovizRates().catch(
+      () => ({ rates: {} as Record<string, number>, changes: {} as Record<string, number> }),
+    ),
   ]);
 
   const out: Record<string, number> = {};
@@ -372,13 +375,35 @@ export async function getAssetRates(): Promise<Record<string, number>> {
     if (typeof v === "number" && v > 0) out[k] = v;
   }
 
-  // 2) Truncgil — FX'i override eder, altın türlerini ekler
-  for (const [k, v] of Object.entries(truncgil)) out[k] = v;
+  // 2) Truncgil — FX'i override eder; ancak ALTIN türlerinde canlidoviz değeri
+  //    varsa onu EZMEZ. (Truncgil coin primleri canlidoviz serbest piyasadan
+  //    ~%1,5-2,5 yüksek geliyordu; kullanıcı canlidoviz'i referans alıyor.)
+  //    Truncgil yalnızca canlidoviz'in vermediği altınları doldurur — bilezik
+  //    14/18/22 ve reşat — artı FX override.
+  const CANLI_GOLD = new Set([
+    "XAU", "XAG", "XAU_OZ", "CEYREK", "YARIM", "TAM", "CUMHURIYET", "ATA",
+  ]);
+  for (const [k, v] of Object.entries(truncgil)) {
+    if (CANLI_GOLD.has(k) && typeof canli.rates[k] === "number" && canli.rates[k] > 0) {
+      continue; // canlidoviz altın değeri korunur (Truncgil ezmez)
+    }
+    out[k] = v;
+  }
+
+  // 2.5) Ons altın (XAU_OZ) = gram × 31.1035. canlidoviz item 81 ve Truncgil'in
+  //      ons değerleri tutarsız (gerçeğin ~yarısı) geliyordu; ons uluslararası
+  //      1 troy ons = 31.1035 gram olduğundan gramdan türetmek en sağlamı.
+  if (typeof out.XAU === "number" && out.XAU > 0) {
+    out.XAU_OZ = out.XAU * 31.1035;
+  }
 
   // 3) XAU yoksa Yahoo fallback (ons × USD/TRY / 31.1035)
   if (out.XAU == null) {
     const xauUsd = await fetchYahooXauUsd();
-    if (xauUsd && out.USD) out.XAU = (xauUsd * out.USD) / 31.1035;
+    if (xauUsd && out.USD) {
+      out.XAU = (xauUsd * out.USD) / 31.1035;
+      out.XAU_OZ = xauUsd * out.USD; // ons doğrudan
+    }
   }
 
   // 4) Kripto
