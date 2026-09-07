@@ -1,3 +1,4 @@
+import { PortfolioGrid } from "./portfolio-grid";
 import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
 import {
@@ -35,22 +36,6 @@ interface EnrichedHolding extends HoldingRow {
   pnl_pct: number | null;
   day_change_try: number;
   day_pnl_pct: number | null;
-}
-
-function qtyDecimals(assetClass: string | undefined, symbol: string | undefined): number {
-  if (assetClass === "crypto") {
-    if (symbol === "BTC") return 8;
-    return 4;
-  }
-  if (assetClass === "metal") return 2;
-  if (assetClass === "fund") return 2; // fon pay adedi — 2 hane yeterli
-  return 0;
-}
-
-// Fiyat/maliyet hassasiyeti: fon NAV ve WAC'ı 6 haneye kadar taşır
-// (TEFAS pay fiyatı bu hassasiyette); hisse/diğer için 2 hane.
-function priceDecimals(assetClass: string | undefined): number {
-  return assetClass === "fund" ? 6 : 2;
 }
 
 interface CustodySlice {
@@ -515,6 +500,15 @@ export default async function YatirimlarPage() {
             </div>
           )}
 
+          <PortfolioGrid rows={groups.flatMap(g => g.rows.map(h => ({
+            id: JSON.stringify([h.portfolio_id, h.asset_id]), assetId: h.asset_id,
+            portfolio: g.portfolio.name, person: g.beneficiary_id ? benMap[g.beneficiary_id]?.name ?? "Atanmamış" : "Atanmamış",
+            symbol: h.asset?.symbol ?? "?", name: h.asset?.name ?? "", assetClass: h.asset?.asset_class ?? "", url: h.asset?.external_url ?? null,
+            quantity: Number(h.quantity), wac: Number(h.wac_try), cost: Number(h.cost_basis_try),
+            price: h.quote?.price ?? null, priceCurrency: h.quote?.currency ?? h.asset?.currency ?? "TRY", changePct: h.quote?.change_pct ?? null,
+            value: h.market_value, pnl: h.pnl, pnlPct: h.pnl_pct, dayChange: h.day_change_try, plan: h.plan ?? null,
+          })))} />
+          <div className="hint" style={{ margin: "16px 0 8px" }}>Portföy kartları ve risk analizleri tüm pozisyonları kapsar; sütun filtreleri yalnızca yukarıdaki tabloya uygulanır.</div>
           <div style={{ display: "grid", gap: 18 }}>
             {groups.map((g) => {
               const share = totalMv > 0 ? (g.mv / totalMv) * 100 : 0;
@@ -564,119 +558,7 @@ export default async function YatirimlarPage() {
                       )}
                     </div>
                   </div>
-                  <table className="dg">
-                    <thead>
-                      <tr>
-                        <th>Sembol</th>
-                        <th className="num">Son</th>
-                        <th className="num">Günlük %</th>
-                        <th className="num">Günlük K/Z</th>
-                        <th className="num">Adet</th>
-                        <th className="num">WAC</th>
-                        <th className="num">Değer</th>
-                        <th className="num">Top. K/Z</th>
-                        <th className="num">Plan</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {g.rows.map((h) => {
-                        const sign = h.pnl >= 0 ? "+" : "";
-                        const color = h.pnl >= 0 ? "var(--positive)" : "var(--negative)";
-                        const dailyPctColor =
-                          h.quote?.change_pct == null
-                            ? "var(--muted)"
-                            : h.quote.change_pct >= 0
-                              ? "var(--positive)"
-                              : "var(--negative)";
-                        const dailyTryColor =
-                          h.day_change_try >= 0 ? "var(--positive)" : "var(--negative)";
-                        return (
-                          <tr key={`${h.portfolio_id}-${h.asset_id}`}>
-                            <td>
-                              <div style={{ fontSize: 13, fontWeight: 600 }}>
-                                {h.asset?.external_url ? (
-                                  <a
-                                    href={h.asset.external_url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    style={{ color: "inherit", textDecoration: "none", borderBottom: "1px dotted var(--muted)" }}
-                                  >
-                                    {h.asset.symbol}
-                                  </a>
-                                ) : (
-                                  h.asset?.symbol ?? "?"
-                                )}
-                              </div>
-                              {h.asset && <div className="hint">{h.asset.name}</div>}
-                            </td>
-                            <td className="num tabular">
-                              {h.quote ? fmt.tr(h.quote.price, priceDecimals(h.asset?.asset_class)) : "—"}
-                            </td>
-                            <td className="num tabular" style={{ color: dailyPctColor }}>
-                              {h.quote?.change_pct != null
-                                ? `${h.quote.change_pct >= 0 ? "+" : ""}${h.quote.change_pct.toFixed(2)}%`
-                                : "—"}
-                            </td>
-                            <td className="num tabular" style={{ color: dailyTryColor }}>
-                              {h.day_change_try !== 0
-                                ? `${h.day_change_try >= 0 ? "+" : ""}${fmt.tr(h.day_change_try, 0)}`
-                                : "—"}
-                              {h.day_pnl_pct != null && h.day_change_try !== 0 && (
-                                <div className="hint" style={{ fontSize: 10, color: dailyTryColor }}>
-                                  {h.day_pnl_pct >= 0 ? "+" : ""}{h.day_pnl_pct.toFixed(2)}%
-                                </div>
-                              )}
-                            </td>
-                            <td className="num tabular">
-                              {fmt.tr(Number(h.quantity), qtyDecimals(h.asset?.asset_class, h.asset?.symbol))}
-                            </td>
-                            <td className="num tabular">{fmt.tr(Number(h.wac_try), priceDecimals(h.asset?.asset_class))}</td>
-                            <td className="num tabular" style={{ fontWeight: 600 }}>
-                              {fmt.tr(h.market_value, 0)}
-                            </td>
-                            <td className="num tabular" style={{ color, fontWeight: 600 }}>
-                              {sign}
-                              {fmt.tr(h.pnl, 0)}
-                              {h.pnl_pct != null && (
-                                <div className="hint" style={{ fontSize: 10, color }}>
-                                  {sign}
-                                  {h.pnl_pct.toFixed(1)}%
-                                </div>
-                              )}
-                            </td>
-                            <td className="num">
-                              {h.plan ? (
-                                <PlanCell plan={h.plan} />
-                              ) : (
-                                <span className="hint" style={{ fontSize: 11 }}>—</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot>
-                      <tr style={{ borderTop: "2px solid var(--border)" }}>
-                        <td colSpan={6} className="hint" style={{ textAlign: "right", fontWeight: 600 }}>
-                          {g.portfolio.name} Toplam
-                        </td>
-                        <td className="num tabular" style={{ fontWeight: 700 }}>
-                          {fmt.tr(g.mv, 0)}
-                        </td>
-                        <td
-                          className="num tabular"
-                          style={{
-                            fontWeight: 700,
-                            color: g.pnl >= 0 ? "var(--positive)" : "var(--negative)",
-                          }}
-                        >
-                          {g.pnl >= 0 ? "+" : ""}
-                          {fmt.tr(g.pnl, 0)}
-                        </td>
-                        <td />
-                      </tr>
-                    </tfoot>
-                  </table>
+
 
                   {g.custody_slices.length > 0 && (
                     <div
@@ -948,46 +830,6 @@ function ConcentrationRow({
         }}
       >
         %{stat.pct.toFixed(1)}
-      </div>
-    </div>
-  );
-}
-
-function PlanCell({ plan }: { plan: TradePlan }) {
-  // Tooltip mesajı tüm detayı içerir; hücre kompakt rozet + T1/S1 mesafesi
-  const tooltip = [
-    `Sağlık: ${plan.health_label}`,
-    `T1: ${fmt.tr(plan.t1, 2)} (+${plan.delta_t1_pct.toFixed(1)}%) · RR ${plan.rr1.toFixed(2)}`,
-    `T2: ${fmt.tr(plan.t2, 2)} (+${plan.delta_t2_pct.toFixed(1)}%) · RR ${plan.rr2.toFixed(2)}`,
-    `S1: ${fmt.tr(plan.s1, 2)} (${plan.delta_s1_pct.toFixed(1)}%)`,
-    `S2: ${fmt.tr(plan.s2, 2)} (${plan.delta_s2_pct.toFixed(1)}%)`,
-    plan.high_52w_distance_pct != null
-      ? `52W high'a uzaklık: ${plan.high_52w_distance_pct.toFixed(1)}%`
-      : null,
-    plan.ma20_extension_pct != null
-      ? `MA20 extension: ${plan.ma20_extension_pct >= 0 ? "+" : ""}${plan.ma20_extension_pct.toFixed(1)}%`
-      : null,
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  return (
-    <div title={tooltip} style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-      <span
-        style={{
-          fontSize: 10,
-          fontWeight: 600,
-          color: plan.health_color,
-          background: `color-mix(in srgb, ${plan.health_color} 12%, transparent)`,
-          padding: "2px 7px",
-          borderRadius: 100,
-          whiteSpace: "nowrap",
-        }}
-      >
-        {plan.health_label}
-      </span>
-      <div className="tabular hint" style={{ fontSize: 10, lineHeight: 1.3 }}>
-        T1 +{plan.delta_t1_pct.toFixed(1)}% · S1 {plan.delta_s1_pct.toFixed(1)}%
       </div>
     </div>
   );

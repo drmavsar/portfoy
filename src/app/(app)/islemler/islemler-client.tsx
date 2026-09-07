@@ -2,6 +2,10 @@
 
 import { useMemo, useState, useTransition } from "react";
 
+import { DataGrid, type GridColumn } from "@/components/grid/data-grid";
+import { moneyTotals } from "@/components/grid/model";
+import { quantityTotals } from "@/components/grid/investment-summary";
+
 import { Icon } from "@/components/ui/icon";
 import { ModalPortal } from "@/components/ui/modal-portal";
 import { fmt } from "@/lib/finance/fmt";
@@ -60,8 +64,6 @@ function qtyDecimals(assetClass: string | undefined, symbol: string | undefined)
 }
 
 type RangeKey = "month" | "ytd" | "last30" | "last90" | "all" | "custom";
-type SortCol = "date" | "symbol" | "side" | "qty" | "price" | "amount" | "ben" | "cust";
-type SortDir = "asc" | "desc";
 
 function tradeAmount(t: TradeRow): number {
   const gross = Number(t.quantity) * Number(t.price);
@@ -122,14 +124,12 @@ export function IslemlerClient({
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
 
-  const [sortCol, setSortCol] = useState<SortCol>("date");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   const assetMap = useMemo(() => Object.fromEntries(assets.map((a) => [a.id, a])), [assets]);
   const custodyMap = useMemo(() => Object.fromEntries(custodies.map((c) => [c.id, c])), [custodies]);
   const benMap = useMemo(() => Object.fromEntries(beneficiaries.map((b) => [b.id, b])), [beneficiaries]);
 
-  const filtered = useMemo(() => {
+  const periodRows = useMemo(() => {
     const bounds = rangeBounds(range, customFrom, customTo);
     let out = trades;
     if (bounds) {
@@ -140,54 +140,35 @@ export function IslemlerClient({
     }
     if (sideFilter !== "all") out = out.filter((t) => t.side === sideFilter);
 
-    const cmpStr = (a: string, b: string) => a.localeCompare(b, "tr");
-    const sorted = [...out].sort((a, b) => {
-      let cmp = 0;
-      switch (sortCol) {
-        case "date":
-          cmp = cmpStr(a.executed_at, b.executed_at);
-          break;
-        case "symbol":
-          cmp = cmpStr(assetMap[a.asset_id]?.symbol ?? "", assetMap[b.asset_id]?.symbol ?? "");
-          break;
-        case "side":
-          cmp = cmpStr(a.side, b.side);
-          break;
-        case "qty":
-          cmp = Number(a.quantity) - Number(b.quantity);
-          break;
-        case "price":
-          cmp = Number(a.price) - Number(b.price);
-          break;
-        case "amount":
-          cmp = tradeAmount(a) - tradeAmount(b);
-          break;
-        case "ben": {
-          const an = a.beneficiary_id ? benMap[a.beneficiary_id]?.name ?? "" : "";
-          const bn = b.beneficiary_id ? benMap[b.beneficiary_id]?.name ?? "" : "";
-          cmp = cmpStr(an, bn);
-          break;
-        }
-        case "cust": {
-          const an = a.custody_id ? custodyMap[a.custody_id]?.name ?? "" : "";
-          const bn = b.custody_id ? custodyMap[b.custody_id]?.name ?? "" : "";
-          cmp = cmpStr(an, bn);
-          break;
-        }
-      }
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-    return sorted;
-  }, [trades, range, customFrom, customTo, sideFilter, sortCol, sortDir, assetMap, benMap, custodyMap]);
-
-  const totalGross = filtered.reduce(
-    (s, t) => s + Number(t.quantity) * Number(t.price) + Number(t.fees),
-    0,
-  );
+    return out;
+  }, [trades, range, customFrom, customTo, sideFilter]);
+  const [gridRows, setGridRows] = useState<TradeRow[] | null>(null);
+  const filtered = gridRows ?? periodRows;
+  const totalGross = moneyTotals(filtered, t => Number(t.quantity) * Number(t.price), t => t.currency);
+  const portfolioMap = Object.fromEntries(portfolios.map(p => [p.id, p.name]));
+  const columns: GridColumn<TradeRow>[] = [
+    { id: "date", title: "Tarih", value: t => t.executed_at, render: t => fmtDate(t.executed_at), width: 120 },
+    { id: "symbol", title: "Sembol", value: t => assetMap[t.asset_id]?.symbol ?? t.asset_id, groupable: true, render: t => <span title={assetMap[t.asset_id]?.name}>{assetMap[t.asset_id]?.symbol ?? "?"}</span> },
+    { id: "portfolio", title: "Portföy", value: t => portfolioMap[t.portfolio_id] ?? "Atanmamış", groupable: true },
+    { id: "side", title: "Yön", value: t => t.side === "buy" ? "Alış" : "Satış", groupable: true },
+    { id: "qty", title: "Adet", value: t => Number(t.quantity), numeric: true, render: t => fmt.tr(Number(t.quantity), qtyDecimals(assetMap[t.asset_id]?.asset_class, assetMap[t.asset_id]?.symbol)) },
+    { id: "price", title: "Fiyat", value: t => Number(t.price), numeric: true, render: t => fmt.tr(Number(t.price), assetMap[t.asset_id]?.asset_class === "fund" ? 6 : 2) },
+    { id: "fees", title: "Komisyon", value: t => Number(t.fees), numeric: true },
+    { id: "amount", title: "Tutar", value: tradeAmount, numeric: true, render: t => moneyTotals([t], tradeAmount, t => t.currency) },
+    { id: "currency", title: "Para Birimi", value: t => t.currency, groupable: true },
+    { id: "person", title: "Kişi", value: t => t.beneficiary_id ? benMap[t.beneficiary_id]?.name ?? "Atanmamış" : "Atanmamış", groupable: true },
+    { id: "custody", title: "Kurum", value: t => t.custody_id ? custodyMap[t.custody_id]?.name ?? "Atanmamış" : "Atanmamış", groupable: true },
+    { id: "notes", title: "Not", value: t => t.notes },
+  ];
+  const tradeSummary = (rows: TradeRow[]) => <span>
+    Alış: {moneyTotals(rows.filter(t => t.side === "buy"), tradeAmount, t => t.currency)} · Satış: {moneyTotals(rows.filter(t => t.side === "sell"), tradeAmount, t => t.currency)} · Komisyon: {moneyTotals(rows, t => Number(t.fees), t => t.currency)}
+    <br />Net adet (alış − satış): {quantityTotals(rows, t => t.asset_id, t => assetMap[t.asset_id]?.symbol ?? t.asset_id, t => Number(t.quantity) * (t.side === "buy" ? 1 : -1))}
+  </span>;
 
   const symbolSummary = useMemo(() => {
     interface Row {
       asset_id: string;
+      currency: string;
       symbol: string;
       name: string;
       asset_class: string;
@@ -200,10 +181,12 @@ export function IslemlerClient({
     for (const t of filtered) {
       const a = assetMap[t.asset_id];
       if (!a) continue;
-      let row = map.get(t.asset_id);
+      const key = JSON.stringify([t.asset_id, t.currency]);
+      let row = map.get(key);
       if (!row) {
         row = {
           asset_id: t.asset_id,
+          currency: t.currency,
           symbol: a.symbol,
           name: a.name,
           asset_class: a.asset_class,
@@ -212,7 +195,7 @@ export function IslemlerClient({
           sellQty: 0,
           sellGross: 0,
         };
-        map.set(t.asset_id, row);
+        map.set(key, row);
       }
       const qty = Number(t.quantity);
       const gross = qty * Number(t.price);
@@ -244,16 +227,8 @@ export function IslemlerClient({
         realizedBasis += r.sellQty * buyWac;
       }
     }
-    return { buyGross, sellGross, realized, realizedBasis };
+    return { buyGross, sellGross, realized, realizedBasis, singleCurrency: new Set(symbolSummary.map(r => r.currency)).size === 1 };
   }, [symbolSummary]);
-
-  const toggleSort = (col: SortCol) => {
-    if (sortCol === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else {
-      setSortCol(col);
-      setSortDir(col === "date" || col === "qty" || col === "price" ? "desc" : "asc");
-    }
-  };
 
   const remove = (id: string) => {
     setError(null);
@@ -333,7 +308,7 @@ export function IslemlerClient({
         </div>
         <div className="card" style={{ padding: 16 }}>
           <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>FİLTRELİ BRÜT HACİM</div>
-          <div className="tabular" style={{ fontSize: 24, fontWeight: 700 }}>{fmt.try(totalGross)}</div>
+          <div className="tabular" style={{ fontSize: 24, fontWeight: 700 }}>{totalGross}</div>
         </div>
         <div className="card" style={{ padding: 16 }}>
           <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>YÖN FİLTRESİ</div>
@@ -367,76 +342,11 @@ export function IslemlerClient({
           </div>
         </div>
 
-        {filtered.length === 0 ? (
-          <div className="empty">
-            <div className="title">Bu filtrede işlem yok</div>
-            <div>{trades.length === 0 ? "Sağ üstteki \"Yeni İşlem\" ile başla." : "Filtre aralığını genişlet veya \"Tümü\"yü dene."}</div>
-          </div>
-        ) : (
-          <table className="dg">
-            <thead>
-              <tr>
-                <SortHeader col="date"   label="Tarih"  sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} style={{ width: 100 }} />
-                <SortHeader col="symbol" label="Sembol" sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} />
-                <SortHeader col="side"   label="Yön"    sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} style={{ width: 70 }} />
-                <SortHeader col="qty"    label="Adet"   sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} num />
-                <SortHeader col="price"  label="Fiyat"  sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} num />
-                <th className="num">Komisyon</th>
-                <SortHeader col="amount" label="Tutar"  sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} num />
-                <SortHeader col="ben"    label="Kişi"   sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} />
-                <SortHeader col="cust"   label="Kurum"  sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} />
-                <th style={{ width: 76 }} />
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((t) => {
-                const a = assetMap[t.asset_id];
-                const c = t.custody_id ? custodyMap[t.custody_id] : null;
-                const b = t.beneficiary_id ? benMap[t.beneficiary_id] : null;
-                const isBuy = t.side === "buy";
-                return (
-                  <tr key={t.id}>
-                    <td className="mono" style={{ color: "var(--muted)", fontSize: 11 }}>{fmtDate(t.executed_at)}</td>
-                    <td>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{a?.symbol ?? "?"}</div>
-                      {a && <div className="hint">{a.name}</div>}
-                    </td>
-                    <td>
-                      <span className="chip chip-sm" style={{ background: isBuy ? "var(--positive-soft)" : "var(--negative-soft)", color: isBuy ? "var(--positive)" : "var(--negative)" }}>
-                        {isBuy ? "ALIŞ" : "SATIŞ"}
-                      </span>
-                    </td>
-                    <td className="num tabular">{fmt.tr(Number(t.quantity), qtyDecimals(a?.asset_class, a?.symbol))}</td>
-                    <td className="num tabular">{fmt.tr(Number(t.price), 2)} ₺</td>
-                    <td className="num tabular hint">{Number(t.fees) > 0 ? fmt.tr(Number(t.fees), 2) : "—"}</td>
-                    <td className="num tabular" style={{ fontWeight: 600 }} title={t.notes ?? undefined}>
-                      {fmt.try(tradeAmount(t), 2)}
-                    </td>
-                    <td style={{ fontSize: 12 }}>
-                      {b ? (
-                        <span>
-                          <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 50, background: b.color ?? "#7d8699", marginRight: 6, verticalAlign: "middle" }} />
-                          {b.name}
-                        </span>
-                      ) : <span className="hint">—</span>}
-                    </td>
-                    <td style={{ fontSize: 12, color: "var(--muted)" }}>{c?.name ?? "—"}</td>
-                    <td>
-                      <div style={{ display: "flex", gap: 4 }}>
-                        <button className="icon-btn" onClick={() => setEditing(t)} disabled={!configured || busy} title="Düzenle">
-                          <Icon name="edit" size={12} />
-                        </button>
-                        <button className="icon-btn" onClick={() => remove(t.id)} disabled={!configured || busy} title="Sil">
-                          <Icon name="trash" size={12} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
+        <DataGrid rows={periodRows} columns={columns} rowId={t => t.id} storageKey="portfolio-trades-grid-v1" summary={tradeSummary} onFilteredRows={setGridRows}
+          actions={t => <div style={{ display: "flex", gap: 4 }}>
+            <button className="icon-btn" onClick={() => setEditing(t)} disabled={!configured || busy} title="Düzenle"><Icon name="edit" size={12} /></button>
+            <button className="icon-btn" onClick={() => remove(t.id)} disabled={!configured || busy} title="Sil"><Icon name="trash" size={12} /></button>
+          </div>} />
       </div>
 
       {symbolSummary.length > 0 && (
@@ -470,31 +380,31 @@ export function IslemlerClient({
                 const qtyD = qtyDecimals(r.asset_class, r.symbol);
                 const pnlColor = pnl == null ? undefined : pnl >= 0 ? "var(--positive)" : "var(--negative)";
                 return (
-                  <tr key={r.asset_id}>
+                  <tr key={JSON.stringify([r.asset_id, r.currency])}>
                     <td>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{r.symbol}</div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{r.symbol} · {r.currency}</div>
                       <div className="hint">{r.name}</div>
                     </td>
                     <td className="num tabular">
                       {r.buyQty > 0 ? fmt.tr(r.buyQty, qtyD) : <span className="hint">—</span>}
                     </td>
                     <td className="num tabular hint">
-                      {buyWac != null ? `${fmt.tr(buyWac, 2)} ₺` : "—"}
+                      {buyWac != null ? `${fmt.tr(buyWac, 2)} ${r.currency}` : "—"}
                     </td>
                     <td className="num tabular">
-                      {r.buyQty > 0 ? fmt.try(r.buyGross, 2) : <span className="hint">—</span>}
+                      {r.buyQty > 0 ? moneyTotals([r], () => r.buyGross, r => r.currency) : <span className="hint">—</span>}
                     </td>
                     <td className="num tabular">
                       {r.sellQty > 0 ? fmt.tr(r.sellQty, qtyD) : <span className="hint">—</span>}
                     </td>
                     <td className="num tabular hint">
-                      {sellWac != null ? `${fmt.tr(sellWac, 2)} ₺` : "—"}
+                      {sellWac != null ? `${fmt.tr(sellWac, 2)} ${r.currency}` : "—"}
                     </td>
                     <td className="num tabular">
-                      {r.sellQty > 0 ? fmt.try(r.sellGross, 2) : <span className="hint">—</span>}
+                      {r.sellQty > 0 ? moneyTotals([r], () => r.sellGross, r => r.currency) : <span className="hint">—</span>}
                     </td>
                     <td className="num tabular" style={{ color: pnlColor, fontWeight: 600 }}>
-                      {pnl != null ? fmt.try(pnl, 2) : <span className="hint">—</span>}
+                      {pnl != null ? moneyTotals([r], () => pnl, r => r.currency) : <span className="hint">—</span>}
                     </td>
                     <td className="num tabular" style={{ color: pnlColor, fontWeight: 600 }}>
                       {pct != null ? fmt.pct(pct, 2) : <span className="hint">—</span>}
@@ -509,12 +419,12 @@ export function IslemlerClient({
                 <td />
                 <td />
                 <td className="num tabular" style={{ fontWeight: 700 }}>
-                  {fmt.try(summaryTotals.buyGross, 2)}
+                  {moneyTotals(symbolSummary, r => r.buyGross, r => r.currency)}
                 </td>
                 <td />
                 <td />
                 <td className="num tabular" style={{ fontWeight: 700 }}>
-                  {fmt.try(summaryTotals.sellGross, 2)}
+                  {moneyTotals(symbolSummary, r => r.sellGross, r => r.currency)}
                 </td>
                 <td
                   className="num tabular"
@@ -529,7 +439,7 @@ export function IslemlerClient({
                   }}
                 >
                   {summaryTotals.realizedBasis > 0
-                    ? fmt.try(summaryTotals.realized, 2)
+                    ? moneyTotals(symbolSummary.filter(r => r.buyQty > 0 && r.sellQty > 0), r => r.sellGross - r.sellQty * r.buyGross / r.buyQty, r => r.currency)
                     : "—"}
                 </td>
                 <td
@@ -545,6 +455,7 @@ export function IslemlerClient({
                   }}
                 >
                   {summaryTotals.realizedBasis > 0
+                    && summaryTotals.singleCurrency
                     ? fmt.pct((summaryTotals.realized / summaryTotals.realizedBasis) * 100, 2)
                     : "—"}
                 </td>
@@ -580,34 +491,6 @@ export function IslemlerClient({
         />
       )}
     </div>
-  );
-}
-
-function SortHeader({
-  col,
-  label,
-  sortCol,
-  sortDir,
-  onToggle,
-  num,
-  style,
-}: {
-  col: SortCol;
-  label: string;
-  sortCol: SortCol;
-  sortDir: SortDir;
-  onToggle: (c: SortCol) => void;
-  num?: boolean;
-  style?: React.CSSProperties;
-}) {
-  const active = sortCol === col;
-  return (
-    <th className={num ? "num" : ""} style={{ ...style, cursor: "pointer", userSelect: "none" }} onClick={() => onToggle(col)}>
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-        {label}
-        <span style={{ opacity: active ? 1 : 0.3, fontSize: 9 }}>{active ? (sortDir === "asc" ? "▲" : "▼") : "▲▼"}</span>
-      </span>
-    </th>
   );
 }
 

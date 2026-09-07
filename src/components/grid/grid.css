@@ -13,8 +13,8 @@
 .shared-grid td:first-child,.shared-grid th:first-child { width:44px; min-width:44px; }
 .shared-grid-sort { background:none; border:0; color:inherit; cursor:pointer; font:inherit; padding:0; }
 .shared-grid-group td { background:var(--surface-2); }
-.shared-grid-group-content { display:flex; align-items:center; gap:12px; }
-.shared-grid-group-content strong { margin-left:auto; white-space:nowrap; }
+.shared-grid-group-content { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.shared-grid-group-content strong { white-space:normal; }
 .shared-grid-footer { position:sticky; bottom:0; z-index:4; background:var(--surface); border-top:2px solid var(--border); display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px; padding:14px; font-size:13px; }
 .shared-grid tr[aria-selected=true] td { background:var(--surface-2); }
 .shared-grid.is-compact td { padding-top:5px; padding-bottom:5px; }
