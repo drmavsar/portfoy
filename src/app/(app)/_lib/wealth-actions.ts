@@ -1,5 +1,7 @@
 "use server";
 
+import { readAll } from "@/lib/supabase/read-all";
+
 import { revalidatePath } from "next/cache";
 
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
@@ -132,31 +134,17 @@ export async function listPortfolios(): Promise<PortfolioRow[]> {
 export async function listTrades(): Promise<TradeRow[]> {
   if (!(await isSupabaseConfigured())) return [];
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("trades")
-    .select(
-      "id, portfolio_id, custody_id, account_id, asset_id, beneficiary_id, side, executed_at, quantity, price, currency, fees, notes",
-    )
-    .order("executed_at", { ascending: false })
-    .limit(500);
-  if (error) {
-    console.error("listTrades error", error);
-    return [];
-  }
-  return (data ?? []) as unknown as TradeRow[];
+  return readAll<TradeRow>((from, to) => supabase.from("trades")
+    .select("id, portfolio_id, custody_id, account_id, asset_id, beneficiary_id, side, executed_at, quantity, price, currency, fees, notes", { count: "exact" })
+    .order("executed_at", { ascending: false }).order("id", { ascending: true }).range(from, to), r => r.id);
 }
 
 export async function listHoldings(): Promise<HoldingRow[]> {
   if (!(await isSupabaseConfigured())) return [];
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("v_holdings_wac")
-    .select("portfolio_id, asset_id, quantity, wac_try, cost_basis_try");
-  if (error) {
-    console.error("listHoldings error", error);
-    return [];
-  }
-  return (data ?? []) as unknown as HoldingRow[];
+  return readAll<HoldingRow>((from, to) => supabase.from("v_holdings_wac")
+    .select("portfolio_id, asset_id, quantity, wac_try, cost_basis_try", { count: "exact" })
+    .order("portfolio_id", { ascending: true }).order("asset_id", { ascending: true }).range(from, to), r => JSON.stringify([r.portfolio_id, r.asset_id]));
 }
 
 export interface HoldingCustodyRow {
@@ -170,34 +158,11 @@ export interface HoldingCustodyRow {
  * Trades'i (portfolio, asset, custody) bazında net'leyip pozitif kalanları
  * döner. v_holdings_wac custody-agnostik olduğu için (WAC portfolio+asset
  * seviyesinde tutuluyor) — kurum kırılımı burada trades'ten türetilir.
- * Tüm trade'ler taranır (listTrades'in 500 limiti burada uygulanmaz);
+ * Tüm trade'ler listTrades üzerinden sayfalı okunur;
  * postgrest default 1000 satır cap'ini aşmak için sayfalama yapılır.
  */
 export async function listHoldingsByCustody(): Promise<HoldingCustodyRow[]> {
-  if (!(await isSupabaseConfigured())) return [];
-  const supabase = await createClient();
-
-  const pageSize = 1000;
-  const rows: Array<{
-    portfolio_id: string;
-    asset_id: string;
-    custody_id: string | null;
-    side: "buy" | "sell";
-    quantity: number | string;
-  }> = [];
-  for (let from = 0; ; from += pageSize) {
-    const { data, error } = await supabase
-      .from("trades")
-      .select("portfolio_id, asset_id, custody_id, side, quantity")
-      .range(from, from + pageSize - 1);
-    if (error) {
-      console.error("listHoldingsByCustody error", error);
-      return [];
-    }
-    const batch = (data ?? []) as typeof rows;
-    rows.push(...batch);
-    if (batch.length < pageSize) break;
-  }
+  const rows = await listTrades();
 
   const acc = new Map<string, HoldingCustodyRow>();
   for (const r of rows) {
