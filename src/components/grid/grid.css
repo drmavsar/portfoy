@@ -1,0 +1,21 @@
+.shared-grid-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:10px 14px; font-size:12px; }
+.shared-grid input:not([type=checkbox]), .shared-grid select { background:var(--surface); color:var(--fg); border:1px solid var(--border); border-radius:5px; padding:6px; max-width:100%; }
+.shared-grid input[type=number] { width:74px; }
+.shared-grid label { display:inline-flex; gap:6px; align-items:center; }
+.shared-grid-options { padding:10px 14px; border-block:1px solid var(--border); font-size:12px; }
+.shared-grid-options summary { cursor:pointer; }
+.shared-grid-scroll { overflow:auto; max-height:65vh; }
+.shared-grid table { table-layout:fixed; width:max-content; min-width:100%; }
+.shared-grid thead { position:sticky; top:0; z-index:3; background:var(--surface); }
+.shared-grid th input:not([type=checkbox]) { display:block; width:100%; margin-top:6px; text-transform:none; }
+.shared-grid td { overflow-wrap:anywhere; }
+.shared-grid td.num { white-space:nowrap; }
+.shared-grid td:first-child,.shared-grid th:first-child { width:44px; min-width:44px; }
+.shared-grid-sort { background:none; border:0; color:inherit; cursor:pointer; font:inherit; padding:0; }
+.shared-grid-group td { background:var(--surface-2); }
+.shared-grid-group-content { display:flex; align-items:center; gap:12px; }
+.shared-grid-group-content strong { margin-left:auto; white-space:nowrap; }
+.shared-grid-footer { position:sticky; bottom:0; z-index:4; background:var(--surface); border-top:2px solid var(--border); display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px; padding:14px; font-size:13px; }
+.shared-grid tr[aria-selected=true] td { background:var(--surface-2); }
+.shared-grid.is-compact td { padding-top:5px; padding-bottom:5px; }
+.shared-grid :focus-visible { outline:2px solid var(--accent, #304ac5); outline-offset:2px; }

@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { DataGrid, type GridColumn } from "@/components/grid/data-grid";
+import { moneyTotals } from "@/components/grid/model";
 import { useEffect, useMemo, useState, useTransition } from "react";
 
 import type { AccountRow, BeneficiaryLite, CustodyRow } from "@/app/(app)/hesaplar/actions";
@@ -15,7 +17,6 @@ import {
 } from "@/app/(app)/_lib/cashflow-actions";
 import { Icon } from "@/components/ui/icon";
 import { ModalPortal } from "@/components/ui/modal-portal";
-import { fmt } from "@/lib/finance/fmt";
 
 const inp: React.CSSProperties = {
   background: "var(--surface)",
@@ -50,8 +51,6 @@ function fmtDate(iso: string): string {
 }
 
 type RangeKey = "month" | "ytd" | "last30" | "last90" | "all" | "custom";
-type SortCol = "date" | "desc" | "cat" | "ben" | "acc" | "amount";
-type SortDir = "asc" | "desc";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -116,12 +115,9 @@ export function CashflowClient({
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
 
-  // Sıralama
-  const [sortCol, setSortCol] = useState<SortCol>("date");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [gridRows, setGridRows] = useState<TransactionRow[] | null>(null);
 
   const isInflow = direction === "inflow";
-  const sign = isInflow ? "+" : "-";
   const color = isInflow ? "var(--positive)" : "var(--negative)";
 
   const catMap = useMemo(
@@ -142,81 +138,23 @@ export function CashflowClient({
     return custodies.find((c) => c.id === a.custody_id) ?? null;
   };
 
-  // KPI'lar — toplam veri seti üzerinden (filtreden bağımsız)
-  const monthSum = useMemo(() => {
-    const now = new Date();
-    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-    return rows
-      .filter((r) => r.occurred_on.startsWith(ym))
-      .reduce((s, r) => s + Number(r.amount), 0);
-  }, [rows]);
-
-  const ytdSum = useMemo(() => {
-    const y = new Date().getFullYear().toString();
-    return rows
-      .filter((r) => r.occurred_on.startsWith(y))
-      .reduce((s, r) => s + Number(r.amount), 0);
-  }, [rows]);
-
-  // Filtre + sıralama
+  const totalText = (items: TransactionRow[]) => moneyTotals(items, r => Number(r.amount) * (isInflow ? 1 : -1), r => r.currency);
+  const monthRows = rows.filter(r => r.occurred_on.startsWith(todayIso().slice(0, 7)));
+  const yearRows = rows.filter(r => r.occurred_on.startsWith(todayIso().slice(0, 4)));
   const filteredRows = useMemo(() => {
     const bounds = rangeBounds(range, customFrom, customTo);
-    let out = rows;
-    if (bounds) {
-      out = out.filter((r) => r.occurred_on >= bounds.from && r.occurred_on <= bounds.to);
-    }
-
-    const cmpString = (a: string, b: string) => a.localeCompare(b, "tr");
-
-    const sorted = [...out].sort((a, b) => {
-      let cmp = 0;
-      switch (sortCol) {
-        case "date":
-          cmp = cmpString(a.occurred_on, b.occurred_on);
-          break;
-        case "desc":
-          cmp = cmpString(a.description ?? "", b.description ?? "");
-          break;
-        case "cat": {
-          const an = a.category_id ? catMap[a.category_id]?.name ?? "" : "";
-          const bn = b.category_id ? catMap[b.category_id]?.name ?? "" : "";
-          cmp = cmpString(an, bn);
-          break;
-        }
-        case "ben": {
-          const an = a.beneficiary_id ? benMap[a.beneficiary_id]?.name ?? "" : "";
-          const bn = b.beneficiary_id ? benMap[b.beneficiary_id]?.name ?? "" : "";
-          cmp = cmpString(an, bn);
-          break;
-        }
-        case "acc": {
-          const aa = accMap[a.account_id]?.name ?? "";
-          const ba = accMap[b.account_id]?.name ?? "";
-          cmp = cmpString(aa, ba);
-          break;
-        }
-        case "amount":
-          cmp = Number(a.amount) - Number(b.amount);
-          break;
-      }
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-
-    return sorted;
-  }, [rows, range, customFrom, customTo, sortCol, sortDir, accMap, benMap, catMap]);
-
-  const filteredSum = useMemo(
-    () => filteredRows.reduce((s, r) => s + Number(r.amount), 0),
-    [filteredRows],
-  );
-
-  const toggleSort = (col: SortCol) => {
-    if (sortCol === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else {
-      setSortCol(col);
-      setSortDir(col === "date" || col === "amount" ? "desc" : "asc");
-    }
-  };
+    if (range === "custom" && (!customFrom || !customTo || customFrom > customTo)) return [];
+    return bounds ? rows.filter(r => r.occurred_on >= bounds.from && r.occurred_on <= bounds.to) : rows;
+  }, [rows, range, customFrom, customTo]);
+  const columns: GridColumn<TransactionRow>[] = [
+    { id: "date", title: "Tarih", value: r => r.occurred_on, render: r => fmtDate(r.occurred_on), width: 130 },
+    { id: "description", title: "Açıklama", value: r => r.description, width: 300, render: r => <div>{r.description ?? "—"}{r.notes && <div className="hint">{r.notes}</div>}</div> },
+    { id: "category", title: "Kategori", groupable: true, value: r => r.category_id ? catMap[r.category_id]?.name ?? "Atanmamış" : "Atanmamış" },
+    { id: "person", title: "Kişi / Hane", groupable: true, value: r => r.beneficiary_id ? benMap[r.beneficiary_id]?.name ?? "Atanmamış" : "Atanmamış" },
+    { id: "account", title: "Hesap", groupable: true, width: 220, value: r => { const c = custodyOf(r.account_id); return [c?.name, accMap[r.account_id]?.name ?? "Bilinmeyen hesap"].filter(Boolean).join(" / "); } },
+    { id: "currency", title: "Para birimi", groupable: true, value: r => r.currency, width: 110 },
+    { id: "amount", title: "Tutar", numeric: true, value: r => Number(r.amount), render: r => <span style={{ color, whiteSpace: "nowrap" }}>{totalText([r])}</span>, width: 180 },
+  ];
 
   const remove = (id: string) => {
     setError(null);
@@ -315,16 +253,16 @@ export function CashflowClient({
       <div className="grid-base grid-3" style={{ marginBottom: 18, gap: 16 }}>
         <div className="card" style={{ padding: 16 }}>
           <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>BU AY {isInflow ? "GELİR" : "GİDER"}</div>
-          <div className="tabular" style={{ fontSize: 24, fontWeight: 700, color }}>{sign}{fmt.try(monthSum)}</div>
+          <div className="tabular" style={{ fontSize: 24, fontWeight: 700, color }}>{totalText(monthRows)}</div>
         </div>
         <div className="card" style={{ padding: 16 }}>
           <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>BU YIL (YTD)</div>
-          <div className="tabular" style={{ fontSize: 24, fontWeight: 700, color }}>{sign}{fmt.try(ytdSum)}</div>
+          <div className="tabular" style={{ fontSize: 24, fontWeight: 700, color }}>{totalText(yearRows)}</div>
         </div>
         <div className="card" style={{ padding: 16 }}>
           <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>FİLTRELİ TOPLAM</div>
-          <div className="tabular" style={{ fontSize: 24, fontWeight: 700, color }}>{sign}{fmt.try(filteredSum)}</div>
-          <div className="hint" style={{ fontSize: 11 }}>{filteredRows.length} kayıt</div>
+          <div className="tabular" style={{ fontSize: 24, fontWeight: 700, color }}>{totalText(gridRows ?? filteredRows)}</div>
+          <div className="hint" style={{ fontSize: 11 }}>{(gridRows ?? filteredRows).length} kayıt</div>
         </div>
       </div>
 
@@ -332,15 +270,7 @@ export function CashflowClient({
         <div className="card-head" style={{ flexWrap: "wrap", gap: 10 }}>
           <div className="card-title">{isInflow ? "Gelir Kayıtları" : "Gider Kayıtları"}</div>
           <div className="card-sub">
-            {filteredRows.length} / {rows.length}
-            {rows.length >= 5000 && (
-              <span
-                title="Sunucu limiti dolu — eski kayıtlar gözükmüyor olabilir. Tarih filtresi kullan."
-                style={{ marginLeft: 6, color: "var(--warning)", fontWeight: 600 }}
-              >
-                · limit
-              </span>
-            )}
+            Seçili dönemde {filteredRows.length} kayıt
           </div>
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
             {rangePresets.map(([k, label]) => (
@@ -372,84 +302,19 @@ export function CashflowClient({
           </div>
         </div>
 
-        {filteredRows.length === 0 ? (
-          <div className="empty">
-            <div className="title">Bu filtrede kayıt yok</div>
-            <div>
-              {rows.length === 0
-                ? <>Sağ üstteki &quot;{isInflow ? "Yeni Gelir" : "Yeni Gider"}&quot; ile ilk kaydını ekle.</>
-                : <>Filtre aralığını genişlet veya &quot;Tümü&quot;yü dene.</>}
-            </div>
-          </div>
-        ) : (
-          <table className="dg">
-            <thead>
-              <tr>
-                <SortHeader col="date" label="Tarih" sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} style={{ width: 100 }} />
-                <SortHeader col="desc" label="Açıklama" sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} />
-                <SortHeader col="cat" label="Kategori" sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} />
-                <SortHeader col="ben" label="Kişi" sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} />
-                <SortHeader col="acc" label="Hesap" sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} />
-                <SortHeader col="amount" label="Tutar" sortCol={sortCol} sortDir={sortDir} onToggle={toggleSort} num />
-                <th style={{ width: 76 }} />
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRows.map((r) => {
-                const acc = accMap[r.account_id];
-                const cust = custodyOf(r.account_id);
-                const cat = r.category_id ? catMap[r.category_id] : null;
-                const ben = r.beneficiary_id ? benMap[r.beneficiary_id] : null;
-                return (
-                  <tr key={r.id}>
-                    <td className="mono" style={{ color: "var(--muted)", fontSize: 11 }}>{fmtDate(r.occurred_on)}</td>
-                    <td>
-                      <div style={{ fontSize: 13, fontWeight: 500 }}>{r.description ?? "—"}</div>
-                      {r.notes && <div className="hint" style={{ marginTop: 2 }}>{r.notes}</div>}
-                    </td>
-                    <td style={{ fontSize: 12 }}>
-                      {cat ? <span>{cat.icon ?? ""} {cat.name}</span> : <span className="hint">—</span>}
-                    </td>
-                    <td style={{ fontSize: 12 }}>
-                      {ben ? (
-                        <span>
-                          <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 50, background: ben.color ?? "#7d8699", marginRight: 6, verticalAlign: "middle" }} />
-                          {ben.name}
-                        </span>
-                      ) : <span className="hint">—</span>}
-                    </td>
-                    <td style={{ fontSize: 12, color: "var(--muted)" }}>
-                      {cust && acc ? `${cust.name} / ${acc.name}` : acc?.name ?? "—"}
-                    </td>
-                    <td className="num tabular" style={{ color, fontWeight: 600 }}>
-                      {sign}{fmt.tr(Number(r.amount), 2)} ₺
-                    </td>
-                    <td>
-                      <div style={{ display: "flex", gap: 4 }}>
-                        <button
-                          className="icon-btn"
-                          onClick={() => setEditing(r)}
-                          disabled={!configured || busy}
-                          title="Düzenle"
-                        >
-                          <Icon name="edit" size={12} />
-                        </button>
-                        <button
-                          className="icon-btn"
-                          onClick={() => remove(r.id)}
-                          disabled={!configured || busy}
-                          title="Sil"
-                        >
-                          <Icon name="trash" size={12} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
+        {range === "custom" && (!customFrom || !customTo || customFrom > customTo) && <p role="alert" style={{ padding: 14 }}>Geçerli bir başlangıç ve bitiş tarihi seçin.</p>}
+        <DataGrid
+          rows={filteredRows}
+          columns={columns}
+          rowId={r => r.id}
+          storageKey={`cashflow-grid-v1-${direction}`}
+          summary={totalText}
+          onFilteredRows={setGridRows}
+          actions={r => <div style={{ display: "flex", gap: 4 }}>
+            <button className="icon-btn" aria-label="Düzenle" title="Düzenle" disabled={!configured || busy} onClick={() => setEditing(r)}><Icon name="edit" size={12} /></button>
+            <button className="icon-btn" aria-label="Sil" title="Sil" disabled={!configured || busy} onClick={() => remove(r.id)}><Icon name="trash" size={12} /></button>
+          </div>}
+        />
       </div>
 
       {modalOpen && (
@@ -554,40 +419,6 @@ function UndoToast({
         <Icon name="x" size={12} />
       </button>
     </div>
-  );
-}
-
-function SortHeader({
-  col,
-  label,
-  sortCol,
-  sortDir,
-  onToggle,
-  num,
-  style,
-}: {
-  col: SortCol;
-  label: string;
-  sortCol: SortCol;
-  sortDir: SortDir;
-  onToggle: (c: SortCol) => void;
-  num?: boolean;
-  style?: React.CSSProperties;
-}) {
-  const active = sortCol === col;
-  return (
-    <th
-      className={num ? "num" : ""}
-      style={{ ...style, cursor: "pointer", userSelect: "none" }}
-      onClick={() => onToggle(col)}
-    >
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-        {label}
-        <span style={{ opacity: active ? 1 : 0.3, fontSize: 9 }}>
-          {active ? (sortDir === "asc" ? "▲" : "▼") : "▲▼"}
-        </span>
-      </span>
-    </th>
   );
 }
 
