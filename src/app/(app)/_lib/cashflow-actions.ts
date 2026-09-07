@@ -21,63 +21,28 @@ export interface TransactionRow {
   notes: string | null;
 }
 
-const TRANSACTIONS_QUERY_LIMIT = 5000;
-
-export async function listTransactions(
-  direction: TxnDirection,
-): Promise<TransactionRow[]> {
+/** Read every page: grid totals must never silently stop at the API row cap. */
+export async function listTransactions(direction: TxnDirection): Promise<TransactionRow[]> {
   if (!(await isSupabaseConfigured())) return [];
   const supabase = await createClient();
-  const SELECT_COLS =
-    "id, account_id, occurred_on, direction, amount, currency, description, category_id, beneficiary_id, is_transfer, notes";
-
-  // İdeal sorgu: soft-deleted'leri ele
-  const first = await supabase
-    .from("transactions")
-    .select(SELECT_COLS)
-    .eq("direction", direction)
-    .eq("status", "committed")
-    .is("deleted_at", null)
-    .order("occurred_on", { ascending: false })
-    .limit(TRANSACTIONS_QUERY_LIMIT);
-
-  // 0018 migration henüz çalışmadıysa "deleted_at" kolonu yok → filter
-  // hata verir. Bu durumda filter'sız bir kez daha dene (defensive fallback).
-  if (first.error) {
-    const msg = String(first.error.message ?? "").toLowerCase();
-    if (msg.includes("deleted_at") || first.error.code === "42703") {
-      console.warn(
-        "listTransactions: deleted_at kolonu yok — 0018 migration çalıştırılmamış. Filter düşürüldü.",
-      );
-      const fallback = await supabase
-        .from("transactions")
-        .select(SELECT_COLS)
-        .eq("direction", direction)
-        .eq("status", "committed")
-        .order("occurred_on", { ascending: false })
-        .limit(TRANSACTIONS_QUERY_LIMIT);
-      if (fallback.error) {
-        console.error("listTransactions fallback error", fallback.error);
-        return [];
-      }
-      const data = (fallback.data ?? []) as unknown as TransactionRow[];
-      if (data.length >= TRANSACTIONS_QUERY_LIMIT) {
-        console.warn(
-          `listTransactions: ${TRANSACTIONS_QUERY_LIMIT} satır limitine ulaşıldı, eski kayıtlar görünmüyor olabilir.`,
-        );
-      }
-      return data;
-    }
-    console.error("listTransactions error", first.error);
-    return [];
-  }
-  const data = (first.data ?? []) as unknown as TransactionRow[];
-  if (data.length >= TRANSACTIONS_QUERY_LIMIT) {
-    console.warn(
-      `listTransactions: ${TRANSACTIONS_QUERY_LIMIT} satır limitine ulaşıldı, eski kayıtlar görünmüyor olabilir.`,
-    );
-  }
-  return data;
+  const rows: TransactionRow[] = [];
+  // Smaller than the default PostgREST cap; exact count detects custom server caps.
+  const pageSize = 500;
+  let expected = 0;
+  do {
+    const { data, error, count } = await supabase.from("transactions")
+      .select("id, account_id, occurred_on, direction, amount, currency, description, category_id, beneficiary_id, is_transfer, notes", { count: "exact" })
+      .eq("direction", direction).eq("status", "committed").is("deleted_at", null)
+      .order("occurred_on", { ascending: false }).order("id", { ascending: true })
+      .range(rows.length, rows.length + pageSize - 1);
+    if (error || count == null) throw new Error("Kayıtların tamamı yüklenemedi. Lütfen tekrar deneyin.");
+    expected = count;
+    const batch = (data ?? []) as unknown as TransactionRow[];
+    if (!batch.length && rows.length < expected) throw new Error("Kayıtlar değişti; lütfen sayfayı yenileyin.");
+    rows.push(...batch);
+  } while (rows.length < expected);
+  if (new Set(rows.map(r => r.id)).size !== rows.length) throw new Error("Kayıtlar değişti; lütfen sayfayı yenileyin.");
+  return rows;
 }
 
 export async function createTransaction(input: {
