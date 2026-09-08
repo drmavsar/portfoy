@@ -1,0 +1,19 @@
+.overview-activity { margin:18px 0; }
+.overview-activity .card-head { flex-wrap:wrap; gap:12px; }
+.overview-controls { margin-left:auto; display:flex; gap:12px; flex-wrap:wrap; }
+.overview-controls label { display:flex; gap:6px; align-items:center; font-size:13px; }
+.overview-controls select { background:var(--surface); color:var(--fg); border:1px solid var(--border); padding:6px; border-radius:6px; }
+.overview-note { padding:8px 16px; font-size:12px; }
+.overview-kpis { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; padding:0 16px 16px; }
+.overview-kpis a { display:flex; flex-direction:column; gap:8px; padding:16px; border:1px solid var(--border); border-radius:8px; color:var(--fg); text-decoration:none; }
+.overview-kpis a:hover { background:var(--surface-2); }
+.overview-kpis strong { font-size:22px; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
+.overview-kpis small { color:var(--muted); }
+.overview-recent { overflow:auto; }
+.overview-recent table { width:100%; border-collapse:collapse; font-size:13px; }
+.overview-recent caption { padding:8px 16px; text-align:left; color:var(--muted); }
+.overview-recent th,.overview-recent td { padding:10px 16px; text-align:left; border-bottom:1px solid var(--border); }
+.overview-recent td:last-child { white-space:nowrap; text-align:right; font-variant-numeric:tabular-nums; }
+.overview-recent .positive { color:var(--positive); }
+.overview-recent .negative { color:var(--negative); }
+@media(max-width:650px) { .overview-kpis { grid-template-columns:1fr; } .overview-recent table { min-width:580px; } }
