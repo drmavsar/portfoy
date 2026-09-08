@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { OverviewActivity } from "./overview-activity";
 import {
   listAccounts,
   listBeneficiariesLite,
@@ -472,10 +474,23 @@ export default async function OzetPage() {
         </div>
       </div>
 
+      <nav aria-label="Hızlı erişim" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+        <Link className="btn btn-sm" href="/gelirler">Gelirler</Link>
+        <Link className="btn btn-sm" href="/giderler">Giderler</Link>
+        <Link className="btn btn-sm" href="/islemler">Yatırım işlemleri</Link>
+        <Link className="btn btn-sm" href="/hesaplar">Hesaplar</Link>
+        <Link className="btn btn-sm" href="/yatirimlar">Portföy</Link>
+        <Link className="btn btn-sm" href="/raporlar">Raporlar</Link>
+      </nav>
+      {enriched.some(h => Number(h.quantity) > 0 && !h.quote) && <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+        {enriched.filter(h => Number(h.quantity) > 0 && !h.quote).length} pozisyonda fiyat bulunmadığı için bu ekranda maliyet değeri kullanılıyor. <Link href="/yatirimlar">Portföyü incele →</Link>
+      </div>}
+      <OverviewActivity rows={txns} people={beneficiaries} today={istanbulToday()} />
+
       {accounts.length === 0 && enriched.length === 0 ? (
         <div className="empty">
           <div className="title">
-            <Icon name="dashboard" size={20} /> Henüz veri yok
+            <Icon name="dashboard" size={20} /> Henüz hesap veya yatırım pozisyonu yok
           </div>
           <div style={{ marginTop: 8, lineHeight: 1.6 }}>
             Önce <b>Hesaplar</b> ya da <b>İşlemler</b> sekmesinden veri ekle.
