@@ -1,0 +1,13 @@
+.comparison-controls { display:flex; gap:12px; flex-wrap:wrap; align-items:center; padding:12px 16px; border:0; }
+.comparison-controls label { display:inline-flex; gap:6px; align-items:center; font-size:13px; }
+.comparison-controls select { background:var(--surface); color:var(--fg); border:1px solid var(--border); border-radius:6px; padding:7px; max-width:100%; }
+.comparison-controls legend,.comparison-note { color:var(--muted); font-size:12px; padding:8px 16px; }
+.comparison-scroll { overflow:auto; max-height:65vh; }
+.comparison-scroll table { border-collapse:separate; border-spacing:0; min-width:100%; font-size:13px; }
+.comparison-scroll caption { text-align:left; padding:12px 16px; }
+.comparison-scroll th,.comparison-scroll td { padding:12px 16px; border-bottom:1px solid var(--border); white-space:nowrap; text-align:right; background:var(--surface); }
+.comparison-scroll th:first-child { text-align:left; position:sticky; left:0; z-index:1; }
+.comparison-scroll thead th { position:sticky; top:0; z-index:2; }
+.comparison-scroll thead th:first-child { z-index:3; }
+.comparison-scroll tfoot th,.comparison-scroll tfoot td { position:sticky; bottom:0; border-top:2px solid var(--border); background:var(--surface-2); }
+.comparison-scroll small { display:block; color:var(--muted); margin-top:4px; }

@@ -13,9 +13,9 @@ import { RaporlarClient } from "./raporlar-client";
 export const dynamic = "force-dynamic";
 
 export default async function RaporlarPage() {
-  // Son 24 ay veri çekiyoruz — client tarafı tarih aralığı filtresi uygular
+  // Nakit hareketleri tam geçmiş: önceki dönem karşılaştırmaları kesilmemeli.
   const [txns, realized, categories, beneficiaries, realValue, benchmark] = await Promise.all([
-    listTransactionsForReports(24),
+    listTransactionsForReports(null),
     listRealizedForReport(24),
     listCategories(),
     listBeneficiariesLite(),

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 
+import { ExpenseComparison } from "./expense-comparison";
 import { fmt } from "@/lib/finance/fmt";
 
 import type { RawRealizedLot, RawTxn } from "@/app/(app)/_lib/reports-actions";
@@ -81,7 +82,7 @@ interface Props {
   benchmark: BenchmarkCompareResult | null;
 }
 
-type TabKey = "cashflow" | "performance" | "realvalue" | "benchmark";
+type TabKey = "expenses" | "cashflow" | "performance" | "realvalue" | "benchmark";
 
 export function RaporlarClient({ txns, realized, categories, beneficiaries, realValue, benchmark }: Props) {
   const [tab, setTab] = useState<TabKey>("cashflow");
@@ -407,7 +408,7 @@ export function RaporlarClient({ txns, realized, categories, beneficiaries, real
           <div className="page-title">Raporlar</div>
           <div className="page-sub">
             {label} ·{" "}
-            {tab === "cashflow"
+            {(tab === "cashflow" || tab === "expenses")
               ? `${filtered.length} nakit işlem`
               : `${filteredRealized.length} kapanan lot`}
           </div>
@@ -437,6 +438,7 @@ export function RaporlarClient({ txns, realized, categories, beneficiaries, real
         <TabBtn active={tab === "cashflow"} onClick={() => setTab("cashflow")}>
           Nakit Akış
         </TabBtn>
+        <TabBtn active={tab === "expenses"} onClick={() => setTab("expenses")}>Gider Karşılaştırması</TabBtn>
         <TabBtn active={tab === "performance"} onClick={() => setTab("performance")}>
           Yatırım Performansı
         </TabBtn>
@@ -457,21 +459,25 @@ export function RaporlarClient({ txns, realized, categories, beneficiaries, real
           <span style={{ fontSize: 12, color: "var(--muted)" }}>Başlangıç</span>
           <input
             type="date"
+            aria-label="Başlangıç tarihi"
             value={customFrom}
-            onChange={(e) => setCustomFrom(e.target.value)}
+            onInput={(e) => setCustomFrom(e.currentTarget.value)}
             style={inp}
           />
           <span style={{ fontSize: 12, color: "var(--muted)" }}>Bitiş</span>
           <input
             type="date"
+            aria-label="Bitiş tarihi"
             value={customTo}
-            onChange={(e) => setCustomTo(e.target.value)}
+            onInput={(e) => setCustomTo(e.currentTarget.value)}
             style={inp}
           />
         </div>
       )}
 
-      {tab === "benchmark" ? (
+      {tab === "expenses" ? (
+        <ExpenseComparison txns={txns} categories={categories} beneficiaries={beneficiaries} from={from} to={to} />
+      ) : tab === "benchmark" ? (
         benchmark ? <BenchmarkTab data={benchmark} /> : null
       ) : tab === "realvalue" ? (
         <RealValueTab rows={realValue} />

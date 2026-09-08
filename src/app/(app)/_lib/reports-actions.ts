@@ -1,6 +1,7 @@
 "use server";
 
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
+import { readAll } from "@/lib/supabase/read-all";
 import { createClient } from "@/lib/supabase/server";
 import { processSellTrade } from "@/app/(app)/_lib/tefas/realized-lots-processor";
 
@@ -15,58 +16,20 @@ export interface RawTxn {
   merchant_raw: string | null;
 }
 
-/**
- * Raporlar için ham transactions (son N ay, committed, transfer hariç).
- *
- * PostgREST default 1000 satır cap'ini aşmak için range() ile sayfalama
- * yapılır — ASC + no-limit varyantı en yeni ayları sessizce düşürüyordu
- * (aktif kullanıcıda 24 ay > 1000 satır).
- */
-export async function listTransactionsForReports(sinceMonths: number = 24): Promise<RawTxn[]> {
+/** Committed, non-transfer cashflow. Null loads all history for comparisons. */
+export async function listTransactionsForReports(sinceMonths: number | null = 24): Promise<RawTxn[]> {
   if (!(await isSupabaseConfigured())) return [];
   const supabase = await createClient();
   const since = new Date();
-  since.setMonth(since.getMonth() - sinceMonths);
-  since.setDate(1);
-  const sinceIso = since.toISOString().slice(0, 10);
-
-  const pageSize = 1000;
-  const out: RawTxn[] = [];
-  // Soft-delete edilen (deleted_at set) kayıtlar rapor/özet toplamlarına
-  // dahil edilmemeli — silme işlemi status'ü 'committed' bıraktığından
-  // yalnızca status filtresi yetmez. 0018 migration'ı çalışmamış ortamda
-  // deleted_at kolonu olmayabilir; o durumda filtre düşürülür (cashflow-actions
-  // ile aynı davranış).
-  let filterDeleted = true;
-  for (let from = 0; ; from += pageSize) {
-    let q = supabase
-      .from("transactions")
-      .select("occurred_on, direction, amount, currency, category_id, beneficiary_id, description, merchant_raw")
-      .eq("status", "committed")
-      .eq("is_transfer", false)
-      .gte("occurred_on", sinceIso);
-    if (filterDeleted) q = q.is("deleted_at", null);
-    const { data, error } = await q
-      .order("occurred_on", { ascending: true })
-      .range(from, from + pageSize - 1);
-    if (error) {
-      const msg = error.message?.toLowerCase() ?? "";
-      if (filterDeleted && (msg.includes("deleted_at") || error.code === "42703")) {
-        console.warn(
-          "listTransactionsForReports: deleted_at kolonu yok — 0018 migration çalıştırılmamış. Filter düşürüldü.",
-        );
-        filterDeleted = false;
-        from -= pageSize; // aynı sayfayı filtresiz tekrar dene
-        continue;
-      }
-      console.error("listTransactionsForReports error", error);
-      return [];
-    }
-    const batch = (data ?? []) as unknown as RawTxn[];
-    out.push(...batch);
-    if (batch.length < pageSize) break;
-  }
-  return out;
+  since.setUTCDate(1);
+  if (sinceMonths != null) since.setUTCMonth(since.getUTCMonth() - sinceMonths);
+  return readAll<RawTxn & { id: string }>((from, to) => {
+    let query = supabase.from("transactions")
+      .select("id, occurred_on, direction, amount, currency, category_id, beneficiary_id, description, merchant_raw", { count: "exact" })
+      .eq("status", "committed").eq("is_transfer", false).is("deleted_at", null);
+    if (sinceMonths != null) query = query.gte("occurred_on", since.toISOString().slice(0, 10));
+    return query.order("occurred_on", { ascending: true }).order("id", { ascending: true }).range(from, to);
+  }, row => row.id);
 }
 
 export interface RawRealizedLot {
