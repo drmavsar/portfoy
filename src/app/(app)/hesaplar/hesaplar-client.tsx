@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 
-import { Icon, type IconName } from "@/components/ui/icon";
+import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
 
 import type {
@@ -16,63 +16,8 @@ import type { StockQuote } from "@/app/(app)/_lib/stock-prices";
 
 import type { AccountRow, BeneficiaryLite, CustodyRow } from "./actions";
 import { deleteAccount } from "./actions";
+import { AccountsGrid } from "./accounts-grid";
 import { NewAccountModal } from "./new-account-modal";
-
-const subIcon: Record<string, IconName> = {
-  checking: "wallet",
-  savings: "wallet",
-  brokerage: "wealth",
-  credit_card: "wallet",
-  loan: "wallet",
-  crypto: "coins",
-  safe: "diamond",
-  other: "wallet",
-};
-
-const ACCOUNT_TYPE_LABEL: Record<string, string> = {
-  checking: "VADESİZ",
-  savings: "VADELİ",
-  brokerage: "YATIRIM",
-  credit_card: "KREDİ KARTI",
-  loan: "KREDİ",
-  crypto: "KRİPTO",
-  safe: "FİZİKİ",
-  other: "DİĞER",
-};
-
-function maskIBAN(iban: string | null): string {
-  if (!iban || iban === "—") return "";
-  const clean = iban.replace(/\s/g, "");
-  if (clean.length < 12) return iban;
-  return clean.slice(0, 4) + " •••• •••• •••• " + clean.slice(-4);
-}
-
-function shortOf(custody: CustodyRow): string {
-  return custody.short ?? custody.name.slice(0, 3).toUpperCase();
-}
-
-function decimalsFor(currency: string): number {
-  if (currency === "BTC") return 8;
-  if (["ETH", "SOL", "BNB"].includes(currency)) return 6;
-  if (["XAU", "XAG", "BILEZIK22", "BILEZIK14", "BILEZIK18"].includes(currency)) return 2;
-  if (currency === "XAU_OZ") return 4;
-  return 0;
-}
-
-const CURRENCY_LABEL_SHORT: Record<string, string> = {
-  XAU: "gr Altın",
-  XAG: "gr Gümüş",
-  XAU_OZ: "ons",
-  CEYREK: "Çeyrek",
-  YARIM: "Yarım",
-  TAM: "Tam",
-  CUMHURIYET: "Cumhuriyet",
-  ATA: "Ata",
-  RESAT: "Reşat",
-  BILEZIK22: "gr 22ay",
-  BILEZIK14: "gr 14ay",
-  BILEZIK18: "gr 18ay",
-};
 
 function tryValueOf(a: AccountRow, fxRates: Record<string, number | undefined>): number {
   if (a.currency === "TRY") return a.balance_try ?? a.opening_balance ?? 0;
@@ -112,10 +57,6 @@ export function HesaplarClient({
   const [busy, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const custodyMap = useMemo(
-    () => Object.fromEntries(custodies.map((c) => [c.id, c])),
-    [custodies],
-  );
   const assetMap = useMemo(
     () => Object.fromEntries(assets.map((a) => [a.id, a])),
     [assets],
@@ -334,9 +275,10 @@ export function HesaplarClient({
             </div>
           </div>
 
+          <AccountsGrid accounts={accounts} custodies={custodies} beneficiaries={beneficiaries} fxRates={fxRates} busy={busy} onEdit={setEditing} onRemove={remove} />
           {/* Her kişi için ayrıntı */}
           <div style={{ display: "grid", gap: 18 }}>
-            {groups.map((g) => (
+            {groups.filter(g => g.portfolios.length > 0).map((g) => (
               <div key={g.id} className="card">
                 <div className="card-head">
                   <div
@@ -364,126 +306,6 @@ export function HesaplarClient({
                     {fmt.trydp(g.grandTotal)}
                   </div>
                 </div>
-
-                {/* Hesaplar — custody bazında gruplu */}
-                {g.accounts.length > 0 && (() => {
-                  const byCustody = new Map<string | null, AccountRow[]>();
-                  for (const a of g.accounts) {
-                    const k = a.custody_id;
-                    if (!byCustody.has(k)) byCustody.set(k, []);
-                    byCustody.get(k)!.push(a);
-                  }
-                  return (
-                    <div>
-                      <div
-                        style={{
-                          padding: "10px 18px 6px",
-                          fontSize: 11,
-                          color: "var(--muted)",
-                          textTransform: "uppercase",
-                          letterSpacing: "0.08em",
-                        }}
-                      >
-                        Hesaplar
-                      </div>
-                      {Array.from(byCustody.entries()).map(([custodyId, accs]) => {
-                        const custody = custodyId ? custodyMap[custodyId] : null;
-                        const custodyTotal = accs.reduce((s, a) => s + tryValueOf(a, fxRates), 0);
-                        return (
-                          <div key={custodyId ?? "no-custody"}>
-                            <div
-                              style={{
-                                display: "grid",
-                                gridTemplateColumns: "28px 1fr auto",
-                                gap: 10,
-                                alignItems: "center",
-                                padding: "6px 18px",
-                                background: "var(--surface-2)",
-                              }}
-                            >
-                              {custody ? (
-                                <div
-                                  className="bank-logo"
-                                  style={{ background: custody.color ?? "#6ea8fe", width: 22, height: 22, fontSize: 9 }}
-                                >
-                                  {shortOf(custody)}
-                                </div>
-                              ) : (
-                                <span />
-                              )}
-                              <div style={{ fontSize: 12, fontWeight: 600 }}>
-                                {custody?.name ?? "(Kurum atanmamış)"}
-                              </div>
-                              <div className="tabular" style={{ fontSize: 12, fontWeight: 600 }}>
-                                {fmt.trydp(custodyTotal)}
-                              </div>
-                            </div>
-                            <table className="dg">
-                              <tbody>
-                                {accs.map((a) => (
-                                  <tr key={a.id}>
-                                    <td style={{ width: 28, padding: "6px 6px 6px 18px" }}>
-                                      <Icon name={subIcon[a.account_type] ?? "wallet"} size={13} />
-                                    </td>
-                                    <td style={{ fontSize: 13, fontWeight: 500, padding: "6px 8px" }}>
-                                      {a.name}
-                                      <span
-                                        className="hint"
-                                        style={{ marginLeft: 8, fontSize: 10, letterSpacing: "0.06em" }}
-                                      >
-                                        {ACCOUNT_TYPE_LABEL[a.account_type] ?? a.account_type.toUpperCase()}
-                                      </span>
-                                    </td>
-                                    <td
-                                      className="mono"
-                                      style={{ fontSize: 11, color: "var(--muted)", padding: "6px 8px" }}
-                                    >
-                                      {maskIBAN(a.iban)}
-                                    </td>
-                                    <td className="num tabular" style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
-                                      {a.currency !== "TRY" && a.balance_native != null ? (
-                                        <span style={{ fontSize: 11, color: "var(--muted)" }}>
-                                          {fmt.tr(a.balance_native, decimalsFor(a.currency))}{" "}
-                                          {CURRENCY_LABEL_SHORT[a.currency] ?? a.currency}
-                                        </span>
-                                      ) : null}
-                                    </td>
-                                    <td
-                                      className="num tabular"
-                                      style={{ fontWeight: 600, padding: "6px 12px", whiteSpace: "nowrap" }}
-                                    >
-                                      {fmt.tr(tryValueOf(a, fxRates), 2)} ₺
-                                    </td>
-                                    <td style={{ width: 64, padding: "6px 12px 6px 6px" }}>
-                                      <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                                        <button
-                                          className="icon-btn"
-                                          onClick={() => setEditing(a)}
-                                          disabled={busy}
-                                          title="Düzenle"
-                                        >
-                                          <Icon name="edit" size={12} />
-                                        </button>
-                                        <button
-                                          className="icon-btn"
-                                          onClick={() => remove(a.id)}
-                                          disabled={busy}
-                                          title="Sil"
-                                        >
-                                          <Icon name="trash" size={12} />
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })()}
 
                 {/* Yatırım portföyleri */}
                 {g.portfolios.length > 0 && (
