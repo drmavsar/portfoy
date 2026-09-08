@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { OverviewActivity } from "./overview-activity";
 import {
   listAccounts,
   listBeneficiariesLite,
@@ -485,7 +484,6 @@ export default async function OzetPage() {
       {enriched.some(h => Number(h.quantity) > 0 && !h.quote) && <div className="card" style={{ padding: 14, marginBottom: 16 }}>
         {enriched.filter(h => Number(h.quantity) > 0 && !h.quote).length} pozisyonda fiyat bulunmadığı için bu ekranda maliyet değeri kullanılıyor. <Link href="/yatirimlar">Portföyü incele →</Link>
       </div>}
-      <OverviewActivity rows={txns} people={beneficiaries} today={istanbulToday()} />
 
       {accounts.length === 0 && enriched.length === 0 ? (
         <div className="empty">
