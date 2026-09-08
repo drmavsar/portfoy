@@ -1,6 +1,5 @@
 "use server";
 
-import { readAll } from "@/lib/supabase/read-all";
 import { revalidatePath } from "next/cache";
 
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
@@ -53,9 +52,18 @@ export async function listCustodyLocations(): Promise<CustodyRow[]> {
 export async function listAccounts(): Promise<AccountRow[]> {
   if (!(await isSupabaseConfigured())) return [];
   const supabase = await createClient();
-  return readAll<AccountRow>((from, to) => supabase.from("accounts")
-    .select("id, custody_id, beneficiary_id, name, account_type, currency, iban, balance_try, balance_native, opening_balance", { count: "exact" })
-    .is("archived_at", null).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to), a => a.id);
+  const { data, error } = await supabase
+    .from("accounts")
+    .select(
+      "id, custody_id, beneficiary_id, name, account_type, currency, iban, balance_try, balance_native, opening_balance",
+    )
+    .is("archived_at", null)
+    .order("created_at", { ascending: true });
+  if (error) {
+    console.error("listAccounts error", error);
+    return [];
+  }
+  return (data ?? []) as unknown as AccountRow[];
 }
 
 export async function listBeneficiariesLite(): Promise<BeneficiaryLite[]> {
