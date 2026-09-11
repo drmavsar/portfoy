@@ -35,11 +35,12 @@ interface Props<T> {
   rowId: (row: T) => string;
   storageKey: string;
   summary: (rows: T[]) => ReactNode;
+  groupingEnabled?: boolean;
   actions?: (row: T) => ReactNode;
   onFilteredRows?: (rows: T[]) => void;
 }
 
-export function DataGrid<T>({ rows, columns, rowId, storageKey, summary, actions, onFilteredRows }: Props<T>) {
+export function DataGrid<T>({ rows, columns, rowId, storageKey, summary, actions, onFilteredRows, groupingEnabled = true }: Props<T>) {
   const defaults: Settings = { groups: [], hidden: [], order: columns.map(c => c.id), pinned: [], widths: {}, compact: false, sort: [{ id: columns[0].id, desc: true }] };
   const [settings, setSettings] = useState(defaults);
   const [filters, setFilters] = useState<Record<string, string>>({});
@@ -72,7 +73,7 @@ export function DataGrid<T>({ rows, columns, rowId, storageKey, summary, actions
   // Notify parent only when the actual row membership/order changes.
   const filteredKey = filtered.map(rowId).join(",");
   useEffect(() => { onFilteredRows?.(filtered); }, [filteredKey, rows, onFilteredRows]); // eslint-disable-line react-hooks/exhaustive-deps
-  const groups = groupRows(filtered, columns, settings.groups);
+  const groups = groupRows(filtered, columns, groupingEnabled ? settings.groups : []);
   const ordered = [...settings.order, ...columns.map(c => c.id).filter(id => !settings.order.includes(id))]
     .map(id => columns.find(c => c.id === id)).filter((c): c is GridColumn<T> => !!c && !settings.hidden.includes(c.id));
   const visible = [...ordered.filter(c => settings.pinned.includes(c.id)), ...ordered.filter(c => !settings.pinned.includes(c.id))];
@@ -126,12 +127,12 @@ export function DataGrid<T>({ rows, columns, rowId, storageKey, summary, actions
 
   return <section className={`shared-grid ${settings.compact ? "is-compact" : ""}`} aria-label="Kayıt tablosu">
     <div className="shared-grid-toolbar">
-      <label>Grupla <select value="" onChange={e => { update({ groups: [...settings.groups, e.target.value] }); setClosed(new Set()); }}>
+      {groupingEnabled && <><label>Grupla <select value="" onChange={e => { update({ groups: [...settings.groups, e.target.value] }); setClosed(new Set()); }}>
         <option value="">Alan ekle…</option>{columns.filter(c => c.groupable && !settings.groups.includes(c.id)).map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
       </select></label>
       {settings.groups.map((id, i) => <button className="btn btn-sm" key={id} onClick={() => update({ groups: settings.groups.filter(x => x !== id) })}>{i + 1}. {columns.find(c => c.id === id)?.title} ×</button>)}
       <button className="btn btn-sm" onClick={() => setClosed(new Set())}>Grupları aç</button>
-      <button className="btn btn-sm" onClick={() => { const keys: string[] = []; const visit = (gs: Group<T>[]) => gs.forEach(g => { keys.push(g.key); visit(g.children); }); visit(groups); setClosed(new Set(keys)); }}>Grupları kapat</button>
+      <button className="btn btn-sm" onClick={() => { const keys: string[] = []; const visit = (gs: Group<T>[]) => gs.forEach(g => { keys.push(g.key); visit(g.children); }); visit(groups); setClosed(new Set(keys)); }}>Grupları kapat</button></>}
       <button className="btn btn-sm" onClick={exportCsv}>CSV indir</button>
       <button className="btn btn-sm" onClick={exportExcel}>Excel indir</button>
       <label><input type="checkbox" checked={settings.compact} onChange={e => update({ compact: e.target.checked })} /> Sıkışık</label>
@@ -139,7 +140,7 @@ export function DataGrid<T>({ rows, columns, rowId, storageKey, summary, actions
     <details className="shared-grid-options"><summary>Sütunlar ve kayıtlı görünümler</summary>
       <div className="shared-grid-toolbar">
         <input aria-label="Görünüm adı" placeholder="Görünüm adı" value={viewName} onChange={e => setViewName(e.target.value)} maxLength={60} />
-        <button className="btn btn-sm" disabled={!viewName.trim()} onClick={() => { setViews(v => ({ ...v, [viewName.trim()]: { settings, filters } })); setNotice("Sütunlar, gruplama ve sütun filtreleri bu tarayıcıda kaydedildi. Tarih aralığı ayrıca seçilir."); }}>Görünümü kaydet</button>
+        <button className="btn btn-sm" disabled={!viewName.trim()} onClick={() => { setViews(v => ({ ...v, [viewName.trim()]: { settings, filters } })); setNotice(groupingEnabled ? "Sütunlar, gruplama ve sütun filtreleri bu tarayıcıda kaydedildi. Tarih aralığı ayrıca seçilir." : "Sütunlar ve sütun filtreleri bu tarayıcıda kaydedildi. Tarih aralığı ayrıca seçilir."); }}>Görünümü kaydet</button>
         <select aria-label="Kayıtlı görünüm" value="" onChange={e => { const view = views[e.target.value]; if (!view) return; update(view.settings); setFilters(view.filters); setClosed(new Set()); setViewName(e.target.value); }}><option value="">Görünüm yükle…</option>{Object.keys(views).map(n => <option key={n}>{n}</option>)}</select>
         <button className="btn btn-sm" disabled={!views[viewName]} onClick={() => setViews(v => { const next = { ...v }; delete next[viewName]; return next; })}>Görünümü sil</button>
         <button className="btn btn-sm" onClick={() => { setSettings(defaults); setFilters({}); setClosed(new Set()); setPage(0); }}>Varsayılana dön</button>

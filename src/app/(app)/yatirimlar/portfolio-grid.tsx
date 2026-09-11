@@ -37,7 +37,7 @@ function summary(rows: PortfolioGridRow[]) {
   return <span>Değer: {money("value")} · Maliyet: {money("cost")} · K/Z: {money("pnl")} ({percent(cost > 0 ? pnl / cost * 100 : null)}) · Günlük: {money("dayChange")}<br />{quantityTotals(rows, r => r.assetId, r => r.symbol, r => r.quantity)}</span>;
 }
 export function PortfolioGrid({ rows }: { rows: PortfolioGridRow[] }) {
-  return <div className="card"><div className="card-head"><div className="card-title">Tüm Pozisyonlar</div><div className="card-sub">Güncel pozisyonlar · {rows.length} kayıt</div></div><DataGrid rows={rows} columns={columns} rowId={r => r.id} storageKey="portfolio-holdings-grid-v1" summary={summary} /></div>;
+  return <div className="card"><div className="card-head"><div className="card-title">Tüm Pozisyonlar</div><div className="card-sub">Güncel pozisyonlar · {rows.length} kayıt</div></div><DataGrid groupingEnabled={false} rows={rows} columns={columns} rowId={r => r.id} storageKey="portfolio-holdings-grid-v1" summary={summary} /></div>;
 }
 
 function qtyDecimals(assetClass: string | undefined, symbol: string | undefined): number {
