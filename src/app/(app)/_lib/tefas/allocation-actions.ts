@@ -297,6 +297,7 @@ function toScoreCandidate(s: FundScores): ScoreCandidate {
     fund_code: s.fund_code,
     mehmet_score: s.mehmet_score,
     components_used: s.components_used,
+    as_of: s.as_of,
   };
 }
 

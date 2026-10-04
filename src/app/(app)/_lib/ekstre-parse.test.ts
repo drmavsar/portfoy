@@ -7,6 +7,7 @@ import {
   parseAmountAuto,
   parseAmountUS,
   parseTurkishAmount,
+  occurrenceKey,
   parseTurkishDate,
   type ClassificationRule,
 } from "./ekstre-parse";
@@ -25,11 +26,38 @@ describe("parseTurkishDate", () => {
     expect(parseTurkishDate("  15/06/2026  ")).toBe("2026-06-15");
   });
 
+  it("noktalı ve tireli gün-ay-yıl da kabul edilir (eskiden atlanıyordu)", () => {
+    expect(parseTurkishDate("15.01.2026")).toBe("2026-01-15");
+    expect(parseTurkishDate("05-04-2026")).toBe("2026-04-05");
+  });
+
   it("geçersiz format → null", () => {
     expect(parseTurkishDate("2026-05-04")).toBeNull();
-    expect(parseTurkishDate("05-04-2026")).toBeNull();
     expect(parseTurkishDate("abc")).toBeNull();
     expect(parseTurkishDate("")).toBeNull();
+  });
+});
+
+describe("occurrenceKey (dosya içi tekrar)", () => {
+  it("ilk geçiş anahtarı değişmez, tekrarlar sıra eki alır", () => {
+    const counts = new Map<string, number>();
+    const k = "card|1234|2026-01-15|-45.00|KAFE";
+    expect(occurrenceKey(k, counts)).toBe(k); // eski içe aktarımlarla uyumlu
+    expect(occurrenceKey(k, counts)).toBe(`${k}|#1`); // ikinci gerçek harcama
+    expect(occurrenceKey(k, counts)).toBe(`${k}|#2`);
+    expect(occurrenceKey("başka", counts)).toBe("başka");
+  });
+});
+
+describe("parseAmountAuto — kart hücresi sayısal gelirse", () => {
+  it("'-626.5' (sheet_to_json sayısal biçim) −626,5 okunur, −6265 değil", () => {
+    expect(parseAmountAuto("-626.5")).toBe(-626.5);
+    expect(parseAmountAuto("45.00")).toBe(45);
+  });
+  it("TR biçimi bozulmaz", () => {
+    expect(parseAmountAuto("-1.234,56")).toBe(-1234.56);
+    expect(parseAmountAuto("626,50")).toBe(626.5);
+    expect(parseAmountAuto("1.250")).toBe(1250);
   });
 });
 

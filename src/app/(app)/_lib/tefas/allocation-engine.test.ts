@@ -30,6 +30,19 @@ const score = (overrides: Partial<ScoreCandidate>): ScoreCandidate => ({
 });
 
 describe("selectTopN", () => {
+  it("en güncel skordan 7+ gün eski (bayat) fon dışlanır", () => {
+    const r = selectTopN(
+      [
+        { fund_code: "A", mehmet_score: 90, components_used: 5, as_of: "2026-02-10" }, // bayat
+        { fund_code: "B", mehmet_score: 60, components_used: 5, as_of: "2026-10-02" },
+        { fund_code: "C", mehmet_score: 50, components_used: 5, as_of: "2026-09-28" }, // 4 gün — ok
+      ],
+      10,
+      3,
+    );
+    expect(r.map((x) => x.fund_code)).toEqual(["B", "C"]);
+  });
+
   it("Skor DESC, components >= 3, top N adet", () => {
     const r = selectTopN(
       [
@@ -143,6 +156,17 @@ describe("buildCurrentPositions", () => {
       holding({ fund_code: "A", quantity: 100, wac_try: 8, last_price_try: null }),
     ]);
     expect(positions[0].market_value_try).toBe(800);
+  });
+
+  it("Fon dışı varlıklar ağırlık paydasına girmez", () => {
+    const { positions, totalMarketValueTry } = buildCurrentPositions([
+      holding({ fund_code: "A", quantity: 100, last_price_try: 10 }), // 1000 fon
+      holding({ asset_id: "eq", asset_class: "equity_tr", symbol: "THYAO", fund_code: null, fund_name: null, quantity: 30, last_price_try: 300 }), // 9000 hisse
+    ]);
+    expect(totalMarketValueTry).toBe(1000);
+    expect(positions[0].weight_pct).toBe(1);
+    expect(positions[1].weight_pct).toBe(0);
+    expect(positions[1].market_value_try).toBe(9000);
   });
 
   it("Empty holdings → zero total, no positions", () => {

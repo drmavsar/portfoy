@@ -13,11 +13,26 @@ export interface ClassificationRule {
   set_is_transfer: boolean | null;
 }
 
+/** "15/01/2026", "15.01.2026" ve "15-01-2026" → "2026-01-15". Eskiden yalnız
+ * "/" kabul ediliyordu; noktalı standart biçimdeki satırlar sessizce atlanıyordu. */
 export function parseTurkishDate(s: string): string | null {
-  const m = s.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const m = s.trim().match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
   if (!m) return null;
   const [, d, mo, y] = m;
   return `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+}
+
+/**
+ * Aynı dosyada aynı (kaynak, kart, tarih, tutar, işyeri) birden fazla kez
+ * geçiyorsa her tekrar AYRI gerçek işlemdir (aynı kafede iki ayrı 45 TL).
+ * Eskiden ikincisi tekrar sanılıp atlanıyordu. İlk geçişin anahtarı eskisiyle
+ * aynı kalır (daha önce içe aktarılmış ekstreler yeniden aktarılınca yine
+ * tekrar sayılır); sonrakilere dosya içi sıra eki eklenir.
+ */
+export function occurrenceKey(baseKey: string, counts: Map<string, number>): string {
+  const n = counts.get(baseKey) ?? 0;
+  counts.set(baseKey, n + 1);
+  return n === 0 ? baseKey : `${baseKey}|#${n}`;
 }
 
 export function parseTurkishAmount(input: unknown): number | null {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { runBacktestPure, type BacktestEngineInput } from "./engine";
+import { __internals, runBacktestPure, type BacktestEngineInput } from "./engine";
 import type { BacktestParams } from "./types";
 
 /**
@@ -157,5 +157,37 @@ describe("runBacktestPure — strategy diff", () => {
     // En azından bazı rebalance'larda ağırlıklar farklı olmalı (top_n=3, cap doygun olabilir)
     // ama her ikisi de geçerli sonuç döner
     expect(ew.ok && sw.ok).toBe(true);
+  });
+});
+
+describe("TÜFE ve volatilite (denetim düzeltmeleri)", () => {
+  it("lookupCpiAt dönemi dönemle karşılaştırır ve bir ay gecikmeli değeri döner", () => {
+    const cpi = { "2023-01": 100, "2023-06": 120, "2024-11": 128, "2024-12": 130 };
+    // Mayıs 2024 NAV → Nisan 2024 TÜFE'si; Nisan yok → en yakın önceki (2023-06)
+    expect(__internals.lookupCpiAt(cpi, "2024-05-15")).toBe(120);
+    // Aralık 2024 NAV → Kasım 2024 TÜFE'si (yayın gecikmesi)
+    expect(__internals.lookupCpiAt(cpi, "2024-12-20")).toBe(128);
+    // Eski hata: hep ilk girişte (100) takılıyordu
+    expect(__internals.lookupCpiAt(cpi, "2024-12-20")).not.toBe(100);
+  });
+
+  it("enflasyon varken reel CAGR nominalden düşük (eskiden eşitti)", () => {
+    const r = runBacktestPure(buildFixture());
+    expect(r.ok).toBe(true);
+    expect(r.summary.cagr).not.toBeNull();
+    expect(r.summary.real_cagr).not.toBeNull();
+    expect(r.summary.real_cagr!).toBeLessThan(r.summary.cagr!);
+  });
+
+  it("navFill: karar gününden SONRAKİ ilk NAV (TEFAS ileri fiyatlama)", () => {
+    const prices = [
+      { as_of: "2024-01-02", nav: 1.0 },
+      { as_of: "2024-01-03", nav: 1.1 },
+      { as_of: "2024-01-05", nav: 1.2 },
+    ];
+    expect(__internals.navFill(prices, "2024-01-02")).toBe(1.1); // t+1
+    expect(__internals.navFill(prices, "2024-01-04")).toBe(1.2); // hafta sonu/tatil atlanır
+    expect(__internals.navFill(prices, "2024-01-09")).toBe(1.2); // veri bitti → son NAV
+    expect(__internals.navAt(prices, "2024-01-02")).toBe(1.0); // karar günü NAV'ı (değerleme)
   });
 });

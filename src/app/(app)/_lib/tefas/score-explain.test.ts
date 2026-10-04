@@ -121,6 +121,32 @@ describe("breakdown", () => {
     expect(infl.label_status).toBe("missing");
   });
 
+  it("DB'deki kesirli ağırlıklar (0.25) yüzdeye çevrilir — aynı katkı", () => {
+    const r = explainFundScore(
+      baseInput({
+        persona: {
+          inflation_weight: 0.25,
+          tax_weight: 0.2,
+          risk_weight: 0.2,
+          long_term_weight: 0.2,
+          diversification_weight: 0.15,
+        },
+      }),
+    );
+    const infl = r.breakdown.find((b) => b.key === "inflation_protection")!;
+    expect(infl.weight_pct).toBeCloseTo(25, 5); // eskiden 0.25 görünüyordu
+    expect(infl.contribution).toBeCloseTo(22.75, 2); // eskiden 0.2275
+  });
+
+  it("eksik bileşen varken katkılar mevcut ağırlığa göre normalize (toplam = skor)", () => {
+    const input = baseInput();
+    input.scores.inflation_protection_score = null; // 25 ağırlık düşer → payda 75
+    const r = explainFundScore(input);
+    const sum = r.breakdown.reduce((acc, b) => acc + (b.contribution ?? 0), 0);
+    // (30·20 + 80·20 + 73·20 + 60·15) / 75
+    expect(sum).toBeCloseTo((30 * 20 + 80 * 20 + 73 * 20 + 60 * 15) / 75, 5);
+  });
+
   it("Tüm component'lerin etiketi doğru status", () => {
     const r = explainFundScore(baseInput());
     const m = Object.fromEntries(r.breakdown.map((b) => [b.key, b.label_status]));
