@@ -13,7 +13,12 @@ import {
   listPortfolios,
   listTrades,
 } from "@/app/(app)/_lib/wealth-actions";
-import { getAssetChanges, getAssetRates, getTruncgilUpdateDate } from "@/app/(app)/_lib/asset-rates";
+import {
+  getAssetBidRatios,
+  getAssetChanges,
+  getAssetRates,
+  getTruncgilUpdateDate,
+} from "@/app/(app)/_lib/asset-rates";
 import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
 import { listTransactionsForReports } from "@/app/(app)/_lib/reports-actions";
 import { listBenchmarkPoints, listWealthSnapshots } from "@/app/(app)/_lib/wealth-snapshots-actions";
@@ -25,6 +30,8 @@ import {
 } from "@/app/(app)/_lib/daily-snapshots-actions";
 import { findStaleBalances } from "@/app/(app)/_lib/stale-balances";
 import { AssetCompositionChart } from "@/app/(app)/_components/asset-composition-chart";
+import { LiquidationCard } from "@/app/(app)/_components/liquidation-card";
+import { liquidationSummary } from "@/lib/finance/liquidation";
 import { RefreshButton } from "@/app/(app)/_components/refresh-button";
 import { TotalWealthDisplay } from "@/app/(app)/_components/total-wealth-display";
 import { CashflowCard } from "@/app/(app)/_components/cashflow-card";
@@ -77,7 +84,7 @@ function tryValueOf(a: AccountRow, fxRates: Record<string, number | undefined>):
 
 export default async function OzetPage() {
   const prevYearEnd = `${Number(istanbulToday().slice(0, 4)) - 1}-12-31`;
-  const [accounts, custodies, beneficiaries, fxRates, fxChanges, truncgilUpdate, holdings, assets, portfolios, trades, txns, wealthSnapshots, benchmarkPoints, accountActivity, prevYearEndSnapshot] = await Promise.all([
+  const [accounts, custodies, beneficiaries, fxRates, fxChanges, truncgilUpdate, holdings, assets, portfolios, trades, txns, wealthSnapshots, benchmarkPoints, accountActivity, prevYearEndSnapshot, bidRatios] = await Promise.all([
     listAccounts(),
     listCustodyLocations(),
     listBeneficiariesLite(),
@@ -93,6 +100,7 @@ export default async function OzetPage() {
     listBenchmarkPoints(),
     listAccountActivity(),
     getDailySnapshotOnOrBefore(prevYearEnd),
+    getAssetBidRatios().catch(() => ({}) as Record<string, number>),
   ]);
 
   const benMap: Record<string, BeneficiaryLite> = Object.fromEntries(beneficiaries.map((b) => [b.id, b]));
@@ -530,6 +538,18 @@ export default async function OzetPage() {
     todayTr,
   );
   const custodyName = new Map(custodies.map((c) => [c.id, c.name]));
+
+  // Bozdurma değeri: altın/döviz hesapları alış fiyatıyla
+  const liquidation = liquidationSummary(
+    accounts
+      .filter((a) => {
+        const k = classifyAccountClass(a.currency).key;
+        return k === "fx" || k === "metal";
+      })
+      .map((a) => ({ currency: a.currency, native: Number(a.balance_native ?? 0) })),
+    fxRates,
+    bidRatios,
+  );
   const accountCustody = new Map(accounts.map((a) => [a.id, a.custody_id]));
 
   return (
@@ -759,6 +779,8 @@ export default async function OzetPage() {
               })()}
             </div>
           </div>
+
+          <LiquidationCard data={liquidation} grandTotal={grandTotal} />
 
           <div>
             {groupedAccounts.length > 0 && (
