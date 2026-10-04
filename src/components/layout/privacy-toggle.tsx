@@ -35,19 +35,19 @@ export function PrivacyToggle() {
       type="button"
       className="icon-btn"
       onClick={() => setHidden((v) => !v)}
-      aria-label={hidden ? "Verileri göster" : "Verileri gizle"}
-      title={hidden ? "Verileri göster" : "Verileri gizle"}
-      style={{ width: 30, height: 30 }}
+      aria-label={hidden ? "Tutarları göster" : "Tutarları gizle"}
+      aria-pressed={hidden}
+      title={hidden ? "Tutarları göster" : "Tutarları gizle"}
     >
-      <Icon name={hidden ? "eye" : "eye"} size={14} />
+      <Icon name="eye" size={18} />
       {hidden && (
         <span
           aria-hidden
           style={{
             position: "absolute",
-            width: 16,
+            width: 20,
             height: 2,
-            background: "var(--muted)",
+            background: "currentColor",
             transform: "rotate(-25deg)",
             borderRadius: 2,
           }}

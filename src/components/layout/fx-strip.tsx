@@ -1,5 +1,6 @@
 "use client";
 
+import { ARROW, direction, pct } from "@/lib/design/format";
 import { fmt } from "@/lib/finance/fmt";
 import type { FxTicker } from "@/app/(app)/_lib/asset-rates";
 
@@ -22,15 +23,16 @@ export function FxStrip({ tickers }: { tickers: FxTicker[] }) {
       </span>
       {tickers.map((t) => {
         const chg = t.chgPct;
+        const dir = direction(chg);
         return (
           <div key={t.symbol} className="fx-tick">
             <span className="fx-pair">{t.label}</span>
-            <span className="mono fx-last">
+            <span className="fx-last">
               {fmt.tr(t.price, t.price > 1000 ? 0 : t.price > 10 ? 2 : 4)}
             </span>
             {chg != null && (
-              <span className={`mono fx-chg ${chg >= 0 ? "pos" : "neg"}`}>
-                {chg >= 0 ? "▲" : "▼"} {Math.abs(chg).toFixed(2)}%
+              <span className={`fx-chg ${dir === "up" ? "pos" : dir === "down" ? "neg" : "flat"}`}>
+                {ARROW[dir]} {pct(chg, { sign: true, decimals: 2 })}
               </span>
             )}
           </div>

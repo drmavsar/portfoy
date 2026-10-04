@@ -37,10 +37,9 @@ export function ThemeToggle() {
       className="icon-btn"
       onClick={toggle}
       aria-label={theme === "light" ? "Koyu temaya geç" : "Açık temaya geç"}
-      title={theme === "light" ? "Koyu tema" : "Açık tema"}
-      style={{ width: 30, height: 30 }}
+      title={theme === "light" ? "Koyu temaya geç" : "Açık temaya geç"}
     >
-      <Icon name={theme === "light" ? "moon" : "sun"} size={14} />
+      <Icon name={theme === "light" ? "moon" : "sun"} size={18} />
     </button>
   );
 }

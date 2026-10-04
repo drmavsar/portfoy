@@ -64,26 +64,26 @@ export function Treemap({ data, width = 480, height = 260 }: TreemapProps) {
           <rect x={r.x + 1} y={r.y + 1} width={r.w - 2} height={r.h - 2} fill={r.color} opacity="0.85" rx="3" />
           {r.w > 60 && r.h > 36 && (
             <g>
-              <text x={r.x + 10} y={r.y + 18} fontSize="11" fill="#0a0d14" fontWeight="600">
+              <text x={r.x + 10} y={r.y + 18} fontSize="11" fill="var(--bg)" fontWeight="600">
                 {r.label}
               </text>
               <text
                 x={r.x + 10}
                 y={r.y + 34}
                 fontSize="13"
-                fill="#0a0d14"
+                fill="var(--bg)"
                 fontWeight="700"
                 fontFamily="var(--font-mono)"
               >
                 {fmt.k(r.value)}
               </text>
-              <text x={r.x + 10} y={r.y + 48} fontSize="10" fill="#0a0d14" opacity="0.65">
+              <text x={r.x + 10} y={r.y + 48} fontSize="10" fill="var(--bg)" opacity="0.65">
                 {((r.value / total) * 100).toFixed(1)}%
               </text>
             </g>
           )}
           {r.w > 30 && r.h > 18 && r.w <= 60 && (
-            <text x={r.x + 6} y={r.y + 14} fontSize="10" fill="#0a0d14" fontWeight="600">
+            <text x={r.x + 6} y={r.y + 14} fontSize="10" fill="var(--bg)" fontWeight="600">
               {r.label}
             </text>
           )}
