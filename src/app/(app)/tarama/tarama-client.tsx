@@ -9,6 +9,8 @@ import { fmt } from "@/lib/finance/fmt";
 import type { ScreeningRow } from "@/app/(app)/_lib/stock-screening";
 import type { PatternSignal } from "@/app/(app)/_lib/pattern-detection";
 
+import { PositionSizer, type SizerSetup } from "./position-sizer";
+
 interface EnrichedRow extends ScreeningRow {
   name: string;
   sector: string | null;
@@ -37,6 +39,29 @@ type SortDir = "asc" | "desc";
 interface Props {
   rows: EnrichedRow[];
   symbolCount: number;
+  /** Lot hesabı varsayılanları */
+  defaultEquity: number | null;
+  observedFeeRate: number | null;
+}
+
+/** Satırdan lot hesabı kurulumu: pattern varsa onun giriş/stop/hedefi, yoksa ATR. */
+function setupFromRow(r: EnrichedRow): SizerSetup | null {
+  const p = r.patterns[0];
+  if (p) {
+    return { symbol: r.symbol, price: r.price, entry: p.entry, stop: p.stop, target: p.target, source: p.pattern_label };
+  }
+  if (r.atr14 != null && r.atr14 > 0) {
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    return {
+      symbol: r.symbol,
+      price: r.price,
+      entry: r.price,
+      stop: round2(r.price - 1.5 * r.atr14),
+      target: round2(r.price + 3 * r.atr14),
+      source: "ATR: stop 1,5× · hedef 3×",
+    };
+  }
+  return null;
 }
 
 function scoreLabel(s: number | null): { label: string; color: string; bg: string } {
@@ -56,7 +81,14 @@ function pctColor(v: number | null): string {
   return v >= 0 ? "var(--positive)" : "var(--negative)";
 }
 
-export function TaramaClient({ rows, symbolCount }: Props) {
+export function TaramaClient({ rows, symbolCount, defaultEquity, observedFeeRate }: Props) {
+  const [sizerSetup, setSizerSetup] = useState<SizerSetup | null>(null);
+  const pickForSizer = (r: EnrichedRow) => {
+    const s = setupFromRow(r);
+    if (!s) return;
+    setSizerSetup({ ...s });
+    document.getElementById("lot-hesabi")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
   const [sortKey, setSortKey] = useState<SortKey>("score");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [minScore, setMinScore] = useState<number>(0);
@@ -183,6 +215,8 @@ export function TaramaClient({ rows, symbolCount }: Props) {
         </div>
       </div>
 
+      <PositionSizer defaultEquity={defaultEquity} observedFeeRate={observedFeeRate} setup={sizerSetup} />
+
       <div className="card">
         <div className="card-head" style={{ flexWrap: "wrap", gap: 10 }}>
           <div className="card-title">Hisse Tarama Sonuçları</div>
@@ -222,6 +256,7 @@ export function TaramaClient({ rows, symbolCount }: Props) {
               <SortHead k="rsi"         label="RSI"      sortKey={sortKey} dir={sortDir} onToggle={toggleSort} num />
               <th>MA Trend</th>
               <SortHead k="pattern"     label="Pattern"  sortKey={sortKey} dir={sortDir} onToggle={toggleSort} />
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -386,6 +421,18 @@ export function TaramaClient({ rows, symbolCount }: Props) {
                       <PatternCell pattern={r.patterns[0]} extraCount={r.patterns.length - 1} />
                     ) : (
                       <span className="hint" style={{ fontSize: 11 }}>—</span>
+                    )}
+                  </td>
+                  <td>
+                    {(r.patterns.length > 0 || (r.atr14 != null && r.atr14 > 0)) && (
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => pickForSizer(r)}
+                        title="Lot hesabına aktar (giriş/stop/hedef)"
+                      >
+                        Lot
+                      </button>
                     )}
                   </td>
                 </tr>

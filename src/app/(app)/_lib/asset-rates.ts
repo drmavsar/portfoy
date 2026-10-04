@@ -22,6 +22,7 @@ import { getTcmbRates } from "./fx-rates";
 import { normalizeTruncgilDate } from "@/lib/finance/truncgil-date";
 import { fetchCanlidovizRates } from "./canlidoviz-rates";
 import { fetchTradingViewQuotes } from "./tradingview-quotes";
+import { BILEZIK_ISCILIK, bidRatiosFromQuotes, type BidAskQuote } from "@/lib/finance/liquidation";
 
 const TRUNCGIL_URL = "https://finans.truncgil.com/v4/today.json";
 
@@ -97,7 +98,16 @@ function normalizeKey(k: string): string {
   return k.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+/** Truncgil satış fiyatları (değerleme kaynağı). */
 async function fetchTruncgil(): Promise<Record<string, number>> {
+  const quotes = await fetchTruncgilQuotes();
+  const out: Record<string, number> = {};
+  for (const [code, q] of Object.entries(quotes)) out[code] = q.selling;
+  return out;
+}
+
+/** Truncgil alış + satış (aynı istek; fetch önbelleği paylaşılır). */
+async function fetchTruncgilQuotes(): Promise<Record<string, BidAskQuote>> {
   try {
     const res = await fetch(TRUNCGIL_URL, {
       next: { revalidate: 300, tags: ["asset-rates"] },
@@ -115,16 +125,17 @@ async function fetchTruncgil(): Promise<Record<string, number>> {
       for (const a of aliases) lookup.set(a, code);
     }
 
-    const out: Record<string, number> = {};
+    const out: Record<string, BidAskQuote> = {};
 
     for (const [key, val] of Object.entries(json)) {
       if (typeof val !== "object" || val === null) continue;
       const e = val as TruncgilEntry;
-      const selling = parseNum(e.Selling) ?? parseNum(e.Buying);
+      const buying = parseNum(e.Buying);
+      const selling = parseNum(e.Selling) ?? buying;
       if (selling == null) continue;
 
       const code = lookup.get(normalizeKey(key));
-      if (code) out[code] = selling;
+      if (code) out[code] = { buying: parseNum(e.Selling) != null ? buying : null, selling };
     }
 
     if (Object.keys(out).length === 0) throw new Error("Truncgil boş yanıt");
@@ -133,6 +144,15 @@ async function fetchTruncgil(): Promise<Record<string, number>> {
     console.error("fetchTruncgil error", err);
     return {};
   }
+}
+
+/**
+ * Bozdurma oranları (alış / satış) — Truncgil kotasyonlarından. Uygulamadaki
+ * değer × oran = bozdurulursa eline geçecek tutar. Truncgil düşerse boş döner
+ * (bozdurma değeri "makas verisi yok" gösterilir; tahmini makas uydurulmaz).
+ */
+export async function getAssetBidRatios(): Promise<Record<string, number>> {
+  return bidRatiosFromQuotes(await fetchTruncgilQuotes());
 }
 
 async function fetchYahooXauUsd(): Promise<number | null> {
@@ -461,10 +481,10 @@ export async function getAssetRates(): Promise<Record<string, number>> {
   //      bilezik değeri korunur.
   const canliGram = canli.rates.XAU;
   if (typeof canliGram === "number" && canliGram > 0) {
-    const ISCILIK = 1.0258; // canlidoviz bilezik primi (22 ayar kalibrasyonu)
-    out.BILEZIK22 = canliGram * (22 / 24) * ISCILIK;
-    out.BILEZIK18 = canliGram * (18 / 24) * ISCILIK;
-    out.BILEZIK14 = canliGram * (14 / 24) * ISCILIK;
+    // canlidoviz bilezik primi (22 ayar kalibrasyonu)
+    out.BILEZIK22 = canliGram * (22 / 24) * BILEZIK_ISCILIK;
+    out.BILEZIK18 = canliGram * (18 / 24) * BILEZIK_ISCILIK;
+    out.BILEZIK14 = canliGram * (14 / 24) * BILEZIK_ISCILIK;
   }
 
   // 3) XAU yoksa Yahoo fallback (ons × USD/TRY / 31.1035)
