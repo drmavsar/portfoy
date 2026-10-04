@@ -39,6 +39,7 @@ import { TotalWealthDisplay } from "@/app/(app)/_components/total-wealth-display
 import { CashflowCard } from "@/app/(app)/_components/cashflow-card";
 import { PersonEquityChart } from "@/app/(app)/_components/person-equity-chart";
 import { Icon } from "@/components/ui/icon";
+import { ASSET_CLASS } from "@/lib/design/palette";
 import { fmt } from "@/lib/finance/fmt";
 import { addDaysIso, istanbulToday, istanbulYesterday } from "@/lib/finance/istanbul-date";
 import { pointBefore, pointOnOrBefore, type UnitRates, type WealthPoint } from "@/lib/finance/wealth-units";
@@ -50,15 +51,15 @@ interface AssetClassSlice {
 }
 
 function classifyAccountClass(currency: string): { key: string; label: string; color: string } {
-  if (currency === "TRY") return { key: "cash_try", label: "Nakit (₺)", color: "#4cc9b0" };
+  if (currency === "TRY") return { key: "cash_try", label: "Nakit (₺)", color: ASSET_CLASS.cash.color };
   if (["USD", "EUR", "GBP", "CHF", "JPY", "AUD", "CAD"].includes(currency))
-    return { key: "fx", label: "Döviz", color: "#6ea8fe" };
+    return { key: "fx", label: "Döviz", color: ASSET_CLASS.fx.color };
   if (currency === "XAU_OZ" || currency === "XAU" || currency === "XAG" ||
       ["CEYREK", "YARIM", "TAM", "CUMHURIYET", "ATA", "RESAT", "BILEZIK22", "BILEZIK14", "BILEZIK18"].includes(currency))
-    return { key: "metal", label: "Altın & Gümüş", color: "#d4a056" };
+    return { key: "metal", label: "Altın & Gümüş", color: ASSET_CLASS.metal.color };
   if (["BTC", "ETH", "SOL", "USDT", "BNB"].includes(currency))
-    return { key: "crypto", label: "Kripto", color: "#b388f2" };
-  return { key: "other", label: "Diğer", color: "#7d8699" };
+    return { key: "crypto", label: "Kripto", color: ASSET_CLASS.crypto.color };
+  return { key: "other", label: "Diğer", color: ASSET_CLASS.other.color };
 }
 
 export const dynamic = "force-dynamic";
@@ -364,15 +365,15 @@ export default async function OzetPage() {
   for (const h of enriched) {
     const asset = assetMap[h.asset_id];
     if (asset?.asset_class === "equity_tr" || asset?.asset_class === "equity_us") {
-      addSlice("equity", "Hisse", "#e26a8f", h.mv);
+      addSlice("equity", "Hisse", ASSET_CLASS.equity.color, h.mv);
     } else if (asset?.asset_class === "crypto") {
-      addSlice("crypto", "Kripto", "#b388f2", h.mv);
+      addSlice("crypto", "Kripto", ASSET_CLASS.crypto.color, h.mv);
     } else if (asset?.asset_class === "metal") {
-      addSlice("metal", "Altın & Gümüş", "#d4a056", h.mv);
+      addSlice("metal", "Altın & Gümüş", ASSET_CLASS.metal.color, h.mv);
     } else if (asset?.asset_class === "fx") {
-      addSlice("fx", "Döviz", "#6ea8fe", h.mv);
+      addSlice("fx", "Döviz", ASSET_CLASS.fx.color, h.mv);
     } else {
-      addSlice("other", "Diğer", "#7d8699", h.mv);
+      addSlice("other", "Diğer", ASSET_CLASS.other.color, h.mv);
     }
   }
   const assetClassSlices = Array.from(assetClassMap.values()).sort((a, b) => b.value - a.value);
@@ -437,11 +438,11 @@ export default async function OzetPage() {
       quoteLatestUnix = quote.market_time;
     }
     if (asset.asset_class === "equity_tr" || asset.asset_class === "equity_us") {
-      bumpDay("equity", "Hisse", "#e26a8f", dayDelta, h.mv, "TradingView · 15dk", null);
+      bumpDay("equity", "Hisse", ASSET_CLASS.equity.color, dayDelta, h.mv, "TradingView · 15dk", null);
     } else if (asset.asset_class === "crypto") {
-      bumpDay("crypto", "Kripto", "#b388f2", dayDelta, h.mv, "TradingView · 15dk", null);
+      bumpDay("crypto", "Kripto", ASSET_CLASS.crypto.color, dayDelta, h.mv, "TradingView · 15dk", null);
     } else if (asset.asset_class === "metal") {
-      bumpDay("metal", "Altın & Gümüş", "#d4a056", dayDelta, h.mv, "TradingView · 15dk", null);
+      bumpDay("metal", "Altın & Gümüş", ASSET_CLASS.metal.color, dayDelta, h.mv, "TradingView · 15dk", null);
     }
   }
   const quoteLastUpdate = quoteLatestUnix
@@ -778,10 +779,10 @@ export default async function OzetPage() {
                       borderTop: "1px solid var(--border-soft)",
                     }}
                   >
-                    {renderCell("PORTFÖY", investmentMv, equityDay, "wealth", "#e26a8f", "equity")}
-                    {renderCell("ALTIN", metalTotal, metalDay, "diamond", "#d4a056", "metal")}
-                    {renderCell("DÖVİZ", fxTotal, fxDay, "swap", "#6ea8fe", "fx")}
-                    {renderCell("NAKİT", cashTotal, cashDay, "wallet", "#4cc9b0", "cash_try")}
+                    {renderCell("PORTFÖY", investmentMv, equityDay, "wealth", ASSET_CLASS.equity.color, "equity")}
+                    {renderCell("ALTIN", metalTotal, metalDay, "diamond", ASSET_CLASS.metal.color, "metal")}
+                    {renderCell("DÖVİZ", fxTotal, fxDay, "swap", ASSET_CLASS.fx.color, "fx")}
+                    {renderCell("NAKİT", cashTotal, cashDay, "wallet", ASSET_CLASS.cash.color, "cash_try")}
                   </div>
                 );
               })()}

@@ -379,7 +379,7 @@ export function Ledger<T>(p: Props<T>) {
                           <span className="bar">
                             <span style={{ width: `${Math.max(1, share * 100)}%` }} />
                           </span>
-                          <span className="hint tabular">%{Math.round(share * 100)}</span>
+                          <span className="hint tabular privacy-safe">%{Math.round(share * 100)}</span>
                         </span>
                       )}
                       <span className="ledger-group-total">{(p.groupSummary ?? p.summary)(group.rows)}</span>

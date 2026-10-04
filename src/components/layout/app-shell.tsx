@@ -83,16 +83,19 @@ export function AppShell({
           const items = NAV.filter((n) => n.section === s);
           if (items.length === 0) return null;
           return (
-            <div key={s}>
+            <div key={s} className="nav-section">
               <div className="nav-section-title">{s}</div>
               {items.map((n) => (
                 <Link
                   key={n.href}
                   href={n.href}
                   className={`nav-item ${active?.href === n.href ? "active" : ""}`}
+                  aria-current={active?.href === n.href ? "page" : undefined}
+                  aria-label={desktopCollapsed ? n.label : undefined}
+                  data-tip={n.label}
                 >
                   <span className="icon">
-                    <Icon name={n.icon} size={15} />
+                    <Icon name={n.icon} size={18} />
                   </span>
                   <span>{n.label}</span>
                   {n.badge && <span className="badge">{n.badge}</span>}
@@ -107,7 +110,7 @@ export function AppShell({
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
               style={{
-                fontSize: 12,
+                fontSize: 13,
                 fontWeight: 600,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -118,8 +121,8 @@ export function AppShell({
             </div>
             <div className="hint">mavsar@gmail.com</div>
           </div>
-          <button className="icon-btn" data-tip="Çıkış">
-            <Icon name="power" size={14} />
+          <button className="icon-btn icon-btn-ghost" data-tip="Çıkış" aria-label="Çıkış">
+            <Icon name="power" size={16} />
           </button>
         </div>
       </aside>
@@ -129,13 +132,17 @@ export function AppShell({
           className="menu-btn"
           onClick={toggleSidebar}
           aria-label={desktopCollapsed || !drawerOpen ? "Menüyü aç" : "Menüyü kapat"}
+          title={desktopCollapsed ? "Menüyü genişlet" : "Menüyü daralt"}
         >
-          <Icon name="filter" size={16} />
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+            <rect x="2" y="2.5" width="12" height="11" rx="2" />
+            <path d="M6 2.5v11" />
+          </svg>
         </button>
 
         <div className="crumb">
           <span>Mehmet&apos;s Assets</span>
-          <Icon name="chev" size={11} />
+          <Icon name="chev" size={12} />
           <b>{sub}</b>
         </div>
 

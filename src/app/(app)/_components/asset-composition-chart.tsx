@@ -12,6 +12,7 @@ import {
 } from "recharts";
 
 import type { DailySnapshotRow } from "@/app/(app)/_lib/daily-snapshots-actions";
+import { ASSET_CLASS } from "@/lib/design/palette";
 import { istanbulToday } from "@/lib/finance/istanbul-date";
 
 interface LiveSnapshot {
@@ -64,10 +65,10 @@ function applyLive(rows: DailySnapshotRow[], live?: LiveSnapshot): DailySnapshot
 }
 
 const SERIES: Array<{ key: "Nakit TRY" | "Döviz TRY" | "Altın TRY" | "Hisse"; color: string; field: "_cash" | "_fx" | "_metal" | "_equity" }> = [
-  { key: "Nakit TRY", color: "#4cc9b0", field: "_cash" },
-  { key: "Döviz TRY", color: "#e0b341", field: "_fx" },
-  { key: "Altın TRY", color: "#d4843a", field: "_metal" },
-  { key: "Hisse",     color: "#6ea8fe", field: "_equity" },
+  { key: "Nakit TRY", color: ASSET_CLASS.cash.color, field: "_cash" },
+  { key: "Döviz TRY", color: ASSET_CLASS.fx.color, field: "_fx" },
+  { key: "Altın TRY", color: ASSET_CLASS.metal.color, field: "_metal" },
+  { key: "Hisse",     color: ASSET_CLASS.equity.color, field: "_equity" },
 ];
 
 export function AssetCompositionChart({ rows: rawRows, live }: Props) {
@@ -107,10 +108,10 @@ export function AssetCompositionChart({ rows: rawRows, live }: Props) {
   const lastTotal = (last?._cash ?? 0) + (last?._fx ?? 0) + (last?._metal ?? 0) + (last?._equity ?? 0);
   const pct = (n: number) => (lastTotal > 0 ? (n / lastTotal) * 100 : 0);
   const kpis = [
-    { label: "Nakit", value: pct(last?._cash ?? 0), color: "#4cc9b0" },
-    { label: "Döviz", value: pct(last?._fx ?? 0), color: "#e0b341" },
-    { label: "Altın", value: pct(last?._metal ?? 0), color: "#d4843a" },
-    { label: "Hisse", value: pct(last?._equity ?? 0), color: "#6ea8fe" },
+    { label: "Nakit", value: pct(last?._cash ?? 0), color: ASSET_CLASS.cash.color },
+    { label: "Döviz", value: pct(last?._fx ?? 0), color: ASSET_CLASS.fx.color },
+    { label: "Altın", value: pct(last?._metal ?? 0), color: ASSET_CLASS.metal.color },
+    { label: "Hisse", value: pct(last?._equity ?? 0), color: ASSET_CLASS.equity.color },
   ];
 
   return (
@@ -118,7 +119,7 @@ export function AssetCompositionChart({ rows: rawRows, live }: Props) {
       <div style={{ width: "100%", height: 360 }}>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 8, right: 12, left: 12, bottom: 8 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-soft)" />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
             <XAxis dataKey="label" stroke="var(--muted)" fontSize={10} tickLine={false} />
             <YAxis
               stroke="var(--muted)"
