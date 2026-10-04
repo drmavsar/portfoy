@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { DataGrid, type GridColumn } from "@/components/grid/data-grid";
 import { moneyTotals } from "@/components/grid/model";
+import { Ledger, type LedgerExportColumn, type LedgerFacet } from "@/components/ledger/ledger";
 import { useEffect, useMemo, useState, useTransition } from "react";
 
 import type { AccountRow, BeneficiaryLite, CustodyRow } from "@/app/(app)/hesaplar/actions";
@@ -49,11 +49,6 @@ function Lbl({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
-}
-
-function fmtDate(iso: string): string {
-  const [y, m, d] = iso.split("-");
-  return `${d}.${m}.${y.slice(2)}`;
 }
 
 type RangeKey = "month" | "ytd" | "last30" | "last90" | "all" | "custom";
@@ -117,7 +112,7 @@ export function CashflowClient({
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
 
-  const [gridRows, setGridRows] = useState<TransactionRow[] | null>(null);
+  const [listRows, setListRows] = useState<TransactionRow[] | null>(null);
 
   const isInflow = direction === "inflow";
   const color = isInflow ? "var(--positive)" : "var(--negative)";
@@ -148,14 +143,38 @@ export function CashflowClient({
     if (range === "custom" && (!customFrom || !customTo || customFrom > customTo)) return [];
     return bounds ? rows.filter(r => r.occurred_on >= bounds.from && r.occurred_on <= bounds.to) : rows;
   }, [rows, range, customFrom, customTo]);
-  const columns: GridColumn<TransactionRow>[] = [
-    { id: "date", title: "Tarih", value: r => r.occurred_on, render: r => fmtDate(r.occurred_on), width: 130 },
-    { id: "description", title: "Açıklama", value: r => r.description, width: 300, render: r => <div>{r.description ?? "—"}{r.notes && <div className="hint">{r.notes}</div>}</div> },
-    { id: "category", title: "Kategori", groupable: true, value: r => r.category_id ? catMap[r.category_id]?.name ?? "Atanmamış" : "Atanmamış" },
-    { id: "person", title: "Kişi / Hane", groupable: true, value: r => r.beneficiary_id ? benMap[r.beneficiary_id]?.name ?? "Atanmamış" : "Atanmamış" },
-    { id: "account", title: "Hesap", groupable: true, width: 220, value: r => { const c = custodyOf(r.account_id); return [c?.name, accMap[r.account_id]?.name ?? "Bilinmeyen hesap"].filter(Boolean).join(" / "); } },
-    { id: "currency", title: "Para birimi", groupable: true, value: r => r.currency, width: 110 },
-    { id: "amount", title: "Tutar", numeric: true, value: r => Number(r.amount), render: r => <span style={{ color, whiteSpace: "nowrap" }}>{totalText([r])}</span>, width: 180 },
+  const categoryName = (r: TransactionRow) => (r.category_id ? catMap[r.category_id]?.name ?? "Kategorisiz" : "Kategorisiz");
+  const personName = (r: TransactionRow) => (r.beneficiary_id ? benMap[r.beneficiary_id]?.name ?? "Kişi yok" : "Kişi yok");
+  const accountName = (r: TransactionRow) => {
+    const c = custodyOf(r.account_id);
+    return [c?.name, accMap[r.account_id]?.name ?? "Bilinmeyen hesap"].filter(Boolean).join(" / ");
+  };
+  const facets: LedgerFacet<TransactionRow>[] = [
+    {
+      id: "category", label: "Kategori", value: categoryName, filter: true, group: true, meta: true,
+      render: (r) => <>{r.category_id && catMap[r.category_id]?.icon ? `${catMap[r.category_id]?.icon} ` : ""}{categoryName(r)}</>,
+    },
+    {
+      id: "person", label: "Kişi", value: personName, filter: true, group: true, meta: true,
+      render: (r) => (
+        <>
+          <span className="sd" style={{ width: 6, height: 6, marginRight: 5, verticalAlign: "middle", background: (r.beneficiary_id && benMap[r.beneficiary_id]?.color) || "var(--muted-2)" }} />
+          {personName(r)}
+        </>
+      ),
+    },
+    { id: "account", label: "Hesap", value: accountName, filter: true, group: true, meta: true },
+    { id: "currency", label: "Para birimi", value: (r) => r.currency, filter: true, group: true },
+  ];
+  const exportColumns: LedgerExportColumn<TransactionRow>[] = [
+    { title: "Tarih", value: (r) => r.occurred_on },
+    { title: "Açıklama", value: (r) => r.description },
+    { title: "Not", value: (r) => r.notes },
+    { title: "Kategori", value: categoryName },
+    { title: "Kişi / Hane", value: personName },
+    { title: "Hesap", value: accountName },
+    { title: "Para birimi", value: (r) => r.currency },
+    { title: "Tutar", value: (r) => Number(r.amount) * (isInflow ? 1 : -1) },
   ];
 
   const remove = (id: string) => {
@@ -263,8 +282,8 @@ export function CashflowClient({
         </div>
         <div className="card" style={{ padding: 16 }}>
           <div className="hint" style={{ fontSize: 11, marginBottom: 6 }}>FİLTRELİ TOPLAM</div>
-          <div className="tabular" style={{ fontSize: 24, fontWeight: 700, color }}>{totalText(gridRows ?? filteredRows)}</div>
-          <div className="hint" style={{ fontSize: 11 }}>{(gridRows ?? filteredRows).length} kayıt</div>
+          <div className="tabular" style={{ fontSize: 24, fontWeight: 700, color }}>{totalText(listRows ?? filteredRows)}</div>
+          <div className="hint" style={{ fontSize: 11 }}>{(listRows ?? filteredRows).length} kayıt</div>
         </div>
       </div>
 
@@ -305,17 +324,29 @@ export function CashflowClient({
         </div>
 
         {range === "custom" && (!customFrom || !customTo || customFrom > customTo) && <p role="alert" style={{ padding: 14 }}>Geçerli bir başlangıç ve bitiş tarihi seçin.</p>}
-        <DataGrid
+        <Ledger
           rows={filteredRows}
-          columns={columns}
-          rowId={r => r.id}
-          storageKey={`cashflow-grid-v1-${direction}`}
+          rowId={(r) => r.id}
+          date={(r) => r.occurred_on}
+          amount={(r) => Number(r.amount)}
+          currency={(r) => r.currency}
+          searchText={(r) => [r.description, r.notes, categoryName(r), personName(r), accountName(r), String(r.amount)].filter(Boolean).join(" ")}
+          searchPlaceholder="Ara: açıklama, kategori, kişi…"
+          title={(r) => <span title={r.description ?? undefined}>{r.description ?? "—"}</span>}
+          extra={(r) => (r.notes ? <span title={r.notes} style={{ fontStyle: "italic" }}>{r.notes}</span> : null)}
+          value={(r) => <span style={{ color }}>{totalText([r])}</span>}
+          facets={facets}
           summary={totalText}
-          onFilteredRows={setGridRows}
-          actions={r => <div style={{ display: "flex", gap: 4 }}>
-            <button className="icon-btn" aria-label="Düzenle" title="Düzenle" disabled={!configured || busy} onClick={() => setEditing(r)}><Icon name="edit" size={12} /></button>
-            <button className="icon-btn" aria-label="Sil" title="Sil" disabled={!configured || busy} onClick={() => remove(r.id)}><Icon name="trash" size={12} /></button>
-          </div>}
+          exportColumns={exportColumns}
+          exportName={isInflow ? "gelirler" : "giderler"}
+          storageKey={`cashflow-ledger-v1-${direction}`}
+          onFilteredRows={setListRows}
+          actions={(r) => (
+            <>
+              <button className="icon-btn" aria-label="Düzenle" title="Düzenle" disabled={!configured || busy} onClick={() => setEditing(r)}><Icon name="edit" size={12} /></button>
+              <button className="icon-btn" aria-label="Sil" title="Sil" disabled={!configured || busy} onClick={() => remove(r.id)}><Icon name="trash" size={12} /></button>
+            </>
+          )}
         />
       </div>
 
