@@ -12,6 +12,7 @@ dizisine yazılır. Yalnızca borsapy import / sembol komple başarısızsa
 `ok: false` döner.
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import json
@@ -33,20 +34,50 @@ def num(x):
     return v
 
 
-def find_row(df, patterns):
+# Python'un str.lower() Türkçe değildir: "KARI".lower() → "kari" (noktalı i),
+# "İşletme".lower() → "i̇şletme" (i + U+0307). İş Yatırım kalem adları büyük/
+# karışık harf geldiğinden kalıplar eşleşmiyor, net kâr yanlış satıra
+# ("Durdurulan Faaliyetler ... Dönem Karı (Zararı)" = 0) oturuyordu.
+_TR_UPPER = str.maketrans({"İ": "i", "I": "ı"})
+_PUNCT = re.compile(r"[()/\-:,.]")
+_SPACES = re.compile(r"\s+")
+
+
+def norm(s):
+    """Türkçe-uyumlu küçük harf + noktalama/boşluk normalizasyonu.
+    'DÖNEM KARI (ZARARI)' ve 'Dönem Kârı/Zararı' → 'dönem karı zararı'."""
+    s = str(s).translate(_TR_UPPER).lower().replace("̇", "")
+    s = s.replace("â", "a").replace("î", "i").replace("û", "u")
+    s = _PUNCT.sub(" ", s)
+    return _SPACES.sub(" ", s).strip()
+
+
+def find_row(df, patterns, exclude=()):
     """
-    DataFrame index'inde (mali tablo kalem adları) sırayla `patterns`
-    içindeki ilk eşleşen satırı döndür. Pattern sırası önceliklidir —
-    daha spesifik kalıbı listenin başına koy.
+    DataFrame index'inde (mali tablo kalem adları) `patterns` ile eşleşen
+    satırı döndür. Üç geçiş: önce TAM eşleşme, sonra "ile başlar", en son
+    "içerir" — böylece "DÖNEM KARI (ZARARI)" toplam satırı, kendisini içeren
+    "Durdurulan Faaliyetler ... Dönem Karı (Zararı)" alt satırından önce
+    bulunur. Her geçişte pattern sırası önceliklidir. `exclude` içindeki
+    ifadeleri barındıran satırlar (ör. "durdurulan", "öncesi") atlanır.
     """
     if df is None or getattr(df, "empty", True):
         return None
-    index_list = [str(i) for i in df.index]
-    for pat in patterns:
-        p = pat.lower()
-        for i, name in enumerate(index_list):
-            if p in name.lower():
-                return df.iloc[i]
+    names = [norm(i) for i in df.index]
+    pats = [norm(p) for p in patterns]
+    excl = [norm(e) for e in exclude]
+    candidates = [
+        (i, n) for i, n in enumerate(names) if not any(e in n for e in excl)
+    ]
+    for match in (
+        lambda n, p: n == p,
+        lambda n, p: n.startswith(p),
+        lambda n, p: p in n,
+    ):
+        for p in pats:
+            for i, n in candidates:
+                if match(n, p):
+                    return df.iloc[i]
     return None
 
 
@@ -81,15 +112,21 @@ def df_to_table(df, max_periods=6):
         return None
 
 
-# Mali tablo kalem adı kalıpları (İş Yatırım itemDescTr — küçük harf eşleşme)
+# Mali tablo kalem adı kalıpları (İş Yatırım itemDescTr). Eşleşme norm() ile
+# Türkçe-uyumlu yapılır; "kâr"/"kar" ve parantez/eğik çizgi farkları önemsizdir.
+# Önce tam eşleşen toplam satırı bulunsun diye spesifik kalıp başa yazılır.
 REVENUE_PATTERNS = ["satış gelirleri", "hasılat", "esas faaliyet gelirleri"]
 NET_INCOME_PATTERNS = [
-    "dönem karı (zararı)", "dönem kârı (zararı)",
-    "net dönem karı", "net dönem kârı",
+    "dönem karı (zararı)", "dönem net karı (zararı)", "net dönem karı (zararı)",
+    "dönem net kar/zararı", "net dönem karı", "dönem karı",
 ]
-GROSS_PROFIT_PATTERNS = ["brüt kar", "brüt kâr"]
+# Alt kırılım/ara satırlar — net kâr toplamı sanılmasın
+NET_INCOME_EXCLUDE = ["durdurulan", "dağılımı", "vergi öncesi", "hisse başına"]
+GROSS_PROFIT_PATTERNS = ["brüt kar (zarar)", "brüt kar (zararı)", "brüt kar"]
+GROSS_PROFIT_EXCLUDE = ["ticari faaliyetlerden", "finans sektörü"]
 EQUITY_PATTERNS = ["toplam özkaynaklar", "özkaynaklar"]
-TOTAL_ASSETS_PATTERNS = ["toplam varlıklar", "toplam aktifler"]
+EQUITY_EXCLUDE = ["ana ortaklığa ait", "kaynaklar toplamı"]
+TOTAL_ASSETS_PATTERNS = ["toplam varlıklar", "toplam aktifler", "aktif toplamı"]
 CURRENT_ASSETS_PATTERNS = ["dönen varlıklar"]
 CURRENT_LIAB_PATTERNS = ["kısa vadeli yükümlülükler"]
 OCF_PATTERNS = [
@@ -98,25 +135,31 @@ OCF_PATTERNS = [
     "işletme faaliyetlerinden",
 ]
 CAPEX_PATTERNS = [
+    "sabit sermaye yatırımları",
     "maddi ve maddi olmayan duran varlık",
     "maddi duran varlık alım",
     "duran varlıkların alım",
 ]
 # Altman Z + Piotroski F için ek kalem kalıpları
 RETAINED_PATTERNS = [
-    "geçmiş yıllar kar", "geçmiş yıllar kâr", "geçmiş yıl kar", "geçmiş yıl kâr",
-    "birikmiş kar", "birikmiş kâr", "dağıtılmamış kar", "dağıtılmamış kâr",
+    "geçmiş yıllar karları", "geçmiş yıllar kar", "geçmiş yıl kar",
+    "birikmiş kar", "dağıtılmamış kar",
 ]
+# Bilançodaki dönem net kârı (yıl başından) — birikmiş kâra eklenir
+PERIOD_PROFIT_BAL_PATTERNS = ["dönem net kar/zararı", "dönem net karı", "dönem karı"]
 EBIT_PATTERNS = [
-    "esas faaliyet kar", "esas faaliyet kâr",
-    "faaliyet kar", "faaliyet kâr",
+    "faaliyet karı (zararı)", "esas faaliyet karı (zararı)",
+    "esas faaliyet kar", "faaliyet kar",
 ]
+# "Faaliyet Karı Öncesi Diğer Gelir..." ve "Finansman Gideri Öncesi Faaliyet
+# Karı" (yatırım gelirli) faaliyet kârı değildir; "Net Faaliyet" de değil.
+EBIT_EXCLUDE = ["öncesi", "net faaliyet"]
 LONG_TERM_LIAB_PATTERNS = ["uzun vadeli yükümlülükler", "uzun vadeli yükümlülük"]
 
 
-def annual_series(df, patterns, max_periods=5):
+def annual_series(df, patterns, max_periods=5, exclude=()):
     """Yıllık mali tablodan bir kalemin yıl→değer listesini çıkar."""
-    row = find_row(df, patterns)
+    row = find_row(df, patterns, exclude)
     if row is None:
         return []
     out = []
@@ -127,16 +170,91 @@ def annual_series(df, patterns, max_periods=5):
     return out
 
 
-def two_period(df, patterns):
+def two_period(df, patterns, exclude=()):
     """[en güncel dönem, bir önceki dönem] değerlerini döndür (Piotroski YoY için).
     İlk kolon en güncel dönemdir; yoksa None."""
-    row = find_row(df, patterns)
+    row = find_row(df, patterns, exclude)
     if row is None:
         return [None, None]
     cols = list(row.index)
     cur = num(row[cols[0]]) if len(cols) >= 1 else None
     prev = num(row[cols[1]]) if len(cols) >= 2 else None
     return [cur, prev]
+
+
+# ---------------------------------------------------------------------------
+# TTM — İş Yatırım çeyrek verisi YIL BAŞINDAN KÜMÜLATİFTİR (3/6/9/12 ay; 4.
+# çeyrek kolonu yıllık rakamla birebir aynıdır). borsapy'nin get_ttm_* metodu
+# son 4 kolonu topluyor → 3+6+9+12 = 30 aylık tutar (~2,5×). Doğru TTM:
+#   son çeyrek Q4 ise  → o kolon (tam yıl)
+#   değilse            → YTD(yıl, q) + yıllık(yıl-1) − YTD(yıl-1, q)
+# ---------------------------------------------------------------------------
+_QCOL = re.compile(r"^(\d{4})Q([1-4])$")
+
+
+def quarter_values(row):
+    """Çeyreklik satırı {(yıl, çeyrek): değer} sözlüğüne çevir (boşlar hariç)."""
+    out = {}
+    if row is None:
+        return out
+    for col in row.index:
+        m = _QCOL.match(str(col))
+        v = num(row[col])
+        if m and v is not None:
+            out[(int(m.group(1)), int(m.group(2)))] = v
+    return out
+
+
+def latest_quarter(qdf, patterns, exclude=()):
+    """Verisi yayımlanmış en güncel çeyrek (gelir satırında sıfır olmayan)."""
+    vals = quarter_values(find_row(qdf, patterns, exclude))
+    published = [k for k, v in vals.items() if v != 0]
+    return max(published) if published else None
+
+
+def ttm_at(qdf, patterns, period, exclude=()):
+    """Kümülatif çeyreklik tablodan `period` (yıl, çeyrek) itibarıyla TTM."""
+    if period is None:
+        return None
+    vals = quarter_values(find_row(qdf, patterns, exclude))
+    y, q = period
+    if q == 4:
+        return vals.get((y, 4))
+    cur = vals.get((y, q))
+    prev_annual = vals.get((y - 1, 4))
+    prev_same = vals.get((y - 1, q))
+    if cur is None or prev_annual is None or prev_same is None:
+        return None
+    return cur + prev_annual - prev_same
+
+
+# borsapy get_company_metrics "Net Borç"u `re.sub(r"[^\d.]", "", value)` ile
+# ayrıştırırken eksi işaretini siliyor → net NAKİT pozisyonundaki şirketler
+# net BORÇLU görünüyor (borçluluk puanı cezalanıyor). Şirket kartındaki ham
+# değerin işaretini okuyup borsapy değerine uygularız.
+_NET_DEBT_RE = re.compile(
+    r"<th[^>]*>\s*Net Borç[^<]*</th>\s*<td[^>]*>\s*([^<]+?)\s*</td>"
+)
+
+
+def net_debt_is_negative(symbol):
+    """İş Yatırım şirket kartında Net Borç negatif mi? Bilinemezse None."""
+    try:
+        from borsapy._providers.isyatirim import get_isyatirim_provider
+
+        url = (
+            "https://www.isyatirim.com.tr/tr-tr/analiz/hisse/Sayfalar/"
+            f"sirket-karti.aspx?hisse={symbol}"
+        )
+        html = get_isyatirim_provider()._client.get(url, timeout=8).text
+        idx = html.find("Cari Değerler")
+        m = _NET_DEBT_RE.search(html[idx: idx + 3000] if idx > 0 else html)
+        if not m:
+            return None
+        raw = m.group(1).strip()
+        return raw.startswith(("-", "−", "("))
+    except Exception:
+        return None
 
 
 def build_financials(ticker, warnings):
@@ -178,50 +296,88 @@ def build_financials(ticker, warnings):
 
     derived = fin["derived"]
 
-    # TTM gelir tablosu — son 4 çeyrek toplamı
+    # --- Çeyreklik (kümülatif) tablolar → doğru TTM + en güncel bilanço ---
+    # last_n=5: son çeyrek + geçen yılın aynı çeyreği tek çağrıda gelir.
+    qinc = qcf = qbal = None
     try:
-        ttm_inc = ticker.get_ttm_income_stmt(financial_group=group)
-        derived["revenue_ttm"] = series_val(find_row(ttm_inc, REVENUE_PATTERNS))
-        derived["net_income_ttm"] = series_val(find_row(ttm_inc, NET_INCOME_PATTERNS))
-        derived["gross_profit_ttm"] = series_val(find_row(ttm_inc, GROSS_PROFIT_PATTERNS))
+        qinc = ticker.get_income_stmt(quarterly=True, financial_group=group, last_n=5)
     except Exception as e:
-        warnings.append(f"TTM gelir tablosu çekilemedi: {e}")
-
-    # TTM nakit akış
+        warnings.append(f"çeyreklik gelir tablosu çekilemedi: {e}")
     try:
-        ttm_cf = ticker.get_ttm_cashflow(financial_group=group)
-        derived["operating_cf_ttm"] = series_val(find_row(ttm_cf, OCF_PATTERNS))
-        capex = series_val(find_row(ttm_cf, CAPEX_PATTERNS))
-        # capex genelde negatif (nakit çıkışı) — mutlak değer sakla
-        derived["capex_ttm"] = abs(capex) if capex is not None else None
+        qcf = ticker.get_cashflow(quarterly=True, financial_group=group, last_n=5)
     except Exception as e:
-        warnings.append(f"TTM nakit akış çekilemedi: {e}")
+        warnings.append(f"çeyreklik nakit akış çekilemedi: {e}")
+    try:
+        qbal = ticker.get_balance_sheet(quarterly=True, financial_group=group, last_n=2)
+    except Exception as e:
+        warnings.append(f"çeyreklik bilanço çekilemedi: {e}")
 
-    # Bilanço — en güncel dönem (ilk kolon)
-    if bal is not None and not bal.empty:
-        derived["equity"] = series_val(find_row(bal, EQUITY_PATTERNS))
-        derived["total_assets"] = series_val(find_row(bal, TOTAL_ASSETS_PATTERNS))
-        derived["current_assets"] = series_val(find_row(bal, CURRENT_ASSETS_PATTERNS))
-        derived["current_liabilities"] = series_val(find_row(bal, CURRENT_LIAB_PATTERNS))
+    # TTM dönemi: gelir satırında verisi yayımlanmış en güncel çeyrek (banka
+    # formatında satış satırı yoksa net kârdan).
+    period = latest_quarter(qinc, REVENUE_PATTERNS) or latest_quarter(
+        qinc, NET_INCOME_PATTERNS, NET_INCOME_EXCLUDE
+    )
+
+    def ttm(qdf, adf, patterns, exclude=()):
+        """Kümülatif çeyrekten TTM; hesaplanamazsa son yıllık değer."""
+        v = ttm_at(qdf, patterns, period, exclude)
+        if v is not None:
+            return v
+        return series_val(find_row(adf, patterns, exclude))
+
+    derived["ttm_period"] = f"{period[0]}Q{period[1]}" if period else None
+    derived["revenue_ttm"] = ttm(qinc, inc, REVENUE_PATTERNS)
+    derived["net_income_ttm"] = ttm(qinc, inc, NET_INCOME_PATTERNS, NET_INCOME_EXCLUDE)
+    derived["gross_profit_ttm"] = ttm(qinc, inc, GROSS_PROFIT_PATTERNS, GROSS_PROFIT_EXCLUDE)
+    derived["ebit"] = ttm(qinc, inc, EBIT_PATTERNS, EBIT_EXCLUDE)
+    derived["operating_cf_ttm"] = ttm(qcf, cf, OCF_PATTERNS)
+    capex = ttm(qcf, cf, CAPEX_PATTERNS)
+    # capex genelde negatif (nakit çıkışı) — mutlak değer sakla
+    derived["capex_ttm"] = abs(capex) if capex is not None else None
+
+    # Bilanço — en güncel yayımlanmış çeyrek (nokta-zaman; kümülatif değil).
+    # Çeyreklik yoksa yıllık bilançonun ilk kolonu.
+    bal_period = latest_quarter(qbal, TOTAL_ASSETS_PATTERNS)
+
+    def bal_val(patterns, exclude=()):
+        if bal_period is not None:
+            v = quarter_values(find_row(qbal, patterns, exclude)).get(bal_period)
+            if v is not None:
+                return v
+        return series_val(find_row(bal, patterns, exclude))
+
+    derived["balance_period"] = (
+        f"{bal_period[0]}Q{bal_period[1]}" if bal_period else None
+    )
+    derived["equity"] = bal_val(EQUITY_PATTERNS, EQUITY_EXCLUDE)
+    derived["total_assets"] = bal_val(TOTAL_ASSETS_PATTERNS)
+    derived["current_assets"] = bal_val(CURRENT_ASSETS_PATTERNS)
+    derived["current_liabilities"] = bal_val(CURRENT_LIAB_PATTERNS)
+
+    # Altman X2: birikmiş kâr = geçmiş yıllar kâr/zararı + dönem net kârı
+    # (yalnız "geçmiş yıllar" cari yılın kârını dışarıda bırakıyordu).
+    past = bal_val(RETAINED_PATTERNS)
+    period_profit = bal_val(PERIOD_PROFIT_BAL_PATTERNS)
+    derived["retained_earnings"] = (
+        past + (period_profit or 0) if past is not None else None
+    )
 
     # Yıllık büyüme için seri
     derived["revenue_annual"] = annual_series(inc, REVENUE_PATTERNS)
-    derived["net_income_annual"] = annual_series(inc, NET_INCOME_PATTERNS)
+    derived["net_income_annual"] = annual_series(
+        inc, NET_INCOME_PATTERNS, exclude=NET_INCOME_EXCLUDE
+    )
 
-    # Altman Z (mevcut dönem): birikmiş kâr + EBIT (faaliyet kârı)
-    if bal is not None and not bal.empty:
-        derived["retained_earnings"] = series_val(find_row(bal, RETAINED_PATTERNS))
-    derived["ebit"] = series_val(find_row(inc, EBIT_PATTERNS))
-
-    # Piotroski F — kalemlerin [güncel, önceki] yıl değerleri (YoY karşılaştırma)
+    # Piotroski F — kalemlerin [güncel, önceki] YIL değerleri (YoY karşılaştırma;
+    # yıllık tablo kullanılır ki mevsimsellik karışmasın)
     derived["piotroski"] = {
         "total_assets": two_period(bal, TOTAL_ASSETS_PATTERNS),
         "current_assets": two_period(bal, CURRENT_ASSETS_PATTERNS),
         "current_liabilities": two_period(bal, CURRENT_LIAB_PATTERNS),
         "long_term_liabilities": two_period(bal, LONG_TERM_LIAB_PATTERNS),
-        "gross_profit": two_period(inc, GROSS_PROFIT_PATTERNS),
+        "gross_profit": two_period(inc, GROSS_PROFIT_PATTERNS, GROSS_PROFIT_EXCLUDE),
         "revenue": two_period(inc, REVENUE_PATTERNS),
-        "net_income": two_period(inc, NET_INCOME_PATTERNS),
+        "net_income": two_period(inc, NET_INCOME_PATTERNS, NET_INCOME_EXCLUDE),
         "operating_cf": two_period(cf, OCF_PATTERNS),
     }
 
@@ -322,6 +478,11 @@ def build_payload(symbol):
 
     warnings = []
     ticker = bp.Ticker(symbol)
+
+    # Net borç işaret kontrolü ayrı HTTP isteği — diğer çağrılarla paralel
+    # çalışsın ki toplam süreyi (60s sınırı) uzatmasın.
+    pool = ThreadPoolExecutor(max_workers=1)
+    net_debt_neg_future = pool.submit(net_debt_is_negative, symbol)
 
     out = {
         "ok": True,
@@ -434,6 +595,16 @@ def build_payload(symbol):
     except Exception as e:
         warnings.append(f"mali tablolar çekilemedi: {e}")
         out["financials"] = {"derived": {}}
+
+    # Net borç işaretini düzelt (borsapy eksiyi siliyor; bkz. net_debt_is_negative)
+    try:
+        negative = net_debt_neg_future.result(timeout=10)
+    except Exception:
+        negative = None
+    pool.shutdown(wait=False)
+    nd = out["valuation"].get("net_debt")
+    if nd is not None and negative is not None:
+        out["valuation"]["net_debt"] = -abs(nd) if negative else abs(nd)
 
     return out
 

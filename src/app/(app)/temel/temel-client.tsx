@@ -13,7 +13,9 @@ import {
   type NewsItem,
 } from "@/app/(app)/_lib/fundamentals-extra";
 import {
+  ALTMAN_ZONES,
   bandVerdict,
+  piotroskiVerdict,
   FAIR_PE,
   type AltmanZone,
   type Fundamentals,
@@ -699,18 +701,31 @@ function SaglikTab({ data }: { data: Fundamentals }) {
     distress: { label: "Sıkıntı bölgesi", verdict: "bad" },
     na: { label: "Hesaplanamadı", verdict: "na" },
   };
-  const zm = zoneMeta[altman.zone];
+  const zm =
+    altman.model === "financial"
+      ? { label: "Finansal şirket — uygulanmaz", verdict: "na" as Verdict }
+      : zoneMeta[altman.zone];
+  const isClassic = altman.model === "manufacturing";
+  const zones = altman.model === "financial" ? null : ALTMAN_ZONES[altman.model];
+  const d = data.raw.financials?.derived ?? {};
 
   const pScore = piotroski.score;
-  const pVerdict: Verdict =
-    pScore == null ? "na" : pScore >= 7 ? "good" : pScore >= 4 ? "warn" : "bad";
+  const pVerdict: Verdict = piotroskiVerdict(piotroski);
 
   return (
     <div>
       {/* Altman Z-Score */}
       <div className="card" style={{ padding: 16, borderLeft: `3px solid ${verdictColor(zm.verdict)}` }}>
         <div style={{ fontSize: 14, fontWeight: 650 }}>
-          Altman Z-Score <span className="hint">· iflas riski göstergesi</span>
+          Altman {isClassic ? "Z" : "Z''"}-Score{" "}
+          <span className="hint">
+            · iflas riski göstergesi ·{" "}
+            {altman.model === "manufacturing"
+              ? "imalat modeli"
+              : altman.model === "non_manufacturing"
+                ? "imalat dışı model"
+                : "finansal"}
+          </span>
         </div>
         <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginTop: 8, marginBottom: 4 }}>
           <span
@@ -727,12 +742,33 @@ function SaglikTab({ data }: { data: Fundamentals }) {
           <Metric label="İşletme Serm./Varlık (X1)" value={dec(altman.components.working_capital_ta, 2)} />
           <Metric label="Birikmiş Kâr/Varlık (X2)" value={dec(altman.components.retained_earnings_ta, 2)} />
           <Metric label="FVÖK/Varlık (X3)" value={dec(altman.components.ebit_ta, 2)} />
-          <Metric label="PD/Yabancı Kaynak (X4)" value={dec(altman.components.equity_mv_tl, 2)} />
-          <Metric label="Satışlar/Varlık (X5)" value={dec(altman.components.sales_ta, 2)} />
+          {isClassic ? (
+            <>
+              <Metric label="PD/Yabancı Kaynak (X4)" value={dec(altman.components.equity_mv_tl, 2)} />
+              <Metric label="Satışlar/Varlık (X5)" value={dec(altman.components.sales_ta, 2)} />
+            </>
+          ) : (
+            <Metric label="Özkaynak/Yabancı Kaynak (X4)" value={dec(altman.components.equity_bv_tl, 2)} />
+          )}
         </MetricGrid>
         <SectionNote>
-          Z &gt; 2.99 güvenli · 1.81–2.99 gri · &lt; 1.81 sıkıntı. Klasik imalat modeli; banka/sigorta gibi
-          finansal şirketler için anlamlı değildir. Bir bileşen eksikse skor hesaplanamaz.
+          {zones ? (
+            <>
+              Z &gt; {zones[1]} güvenli · {zones[0]}–{zones[1]} gri · &lt; {zones[0]} sıkıntı.{" "}
+              {isClassic
+                ? "Klasik imalat modeli (satış/varlık dahil)."
+                : "İmalat dışı Z'' modeli: satış/varlık terimi sektöre göre çok oynadığından çıkarılır, defter değeri kullanılır."}{" "}
+              Bir bileşen eksikse skor hesaplanamaz.
+            </>
+          ) : (
+            "Banka, sigorta, holding ve GYO gibi finansal şirketlerde bilanço yapısı farklı olduğundan Altman Z anlamlı değildir."
+          )}
+          {d.ttm_period || d.balance_period ? (
+            <>
+              {" "}
+              Kâr/satış: TTM {d.ttm_period ?? "son yıl"} · bilanço: {d.balance_period ?? "son yıl"}.
+            </>
+          ) : null}
         </SectionNote>
       </div>
 
@@ -769,6 +805,8 @@ function SaglikTab({ data }: { data: Fundamentals }) {
         <SectionNote>
           9 kriterden geçilen sayısı; yüksek = daha güçlü mali profil. &quot;Yeni pay ihracı yok&quot;
           kriteri pay adedi geçmişi olmadığından hesaplanamaz (bu yüzden payda {piotroski.computable}).
+          Renk, geçilen kriterlerin hesaplanabilenlere oranına göredir; 6&apos;dan az kriter
+          hesaplanabiliyorsa değerlendirme yapılmaz.
         </SectionNote>
       </div>
     </div>

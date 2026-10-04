@@ -89,7 +89,11 @@ export interface FundamentalsRaw {
       current_liabilities?: number | null;
       revenue_annual?: AnnualPoint[];
       net_income_annual?: AnnualPoint[];
-      // Altman Z + Piotroski F ek kalemleri (bist-fundamentals.py)
+      // TTM'in hesaplandığı son çeyrek ("2026Q2") ve bilanço dönemi
+      ttm_period?: string | null;
+      balance_period?: string | null;
+      // Altman Z + Piotroski F ek kalemleri (bist-fundamentals.py).
+      // retained_earnings = geçmiş yıllar kâr/zararı + dönem net kârı
       retained_earnings?: number | null;
       ebit?: number | null;
       piotroski?: {
@@ -139,15 +143,33 @@ export interface FundamentalScore {
 
 export type AltmanZone = "safe" | "grey" | "distress" | "na";
 
+/**
+ * Altman modeli şirketin faaliyet alanına göre seçilir:
+ * - manufacturing: klasik 5 faktörlü Z (satış/varlık dahil) — imalat sanayi
+ * - non_manufacturing: Z'' (4 faktör, satış terimi yok, defter değeri) —
+ *   ulaştırma, perakende, enerji, bilişim vb. Satış/varlık sektöre göre çok
+ *   oynadığından (perakende ~3, GYO ~0.05) klasik model bu şirketlerde yanıltır.
+ * - financial: banka/sigorta/holding/GYO — Altman anlamlı değil, hesaplanmaz.
+ */
+export type AltmanModel = "manufacturing" | "non_manufacturing" | "financial";
+
+/** Model başına bölge eşikleri: [gri alt sınır, güvenli alt sınır]. */
+export const ALTMAN_ZONES: Record<Exclude<AltmanModel, "financial">, [number, number]> = {
+  manufacturing: [1.81, 2.99],
+  non_manufacturing: [1.1, 2.6],
+};
+
 export interface AltmanZ {
   z: number | null;
   zone: AltmanZone;
+  model: AltmanModel;
   components: {
     working_capital_ta: number | null; // X1
     retained_earnings_ta: number | null; // X2
     ebit_ta: number | null; // X3
-    equity_mv_tl: number | null; // X4
-    sales_ta: number | null; // X5
+    equity_mv_tl: number | null; // X4 (klasik): piyasa değeri / toplam borç
+    equity_bv_tl: number | null; // X4 (Z''): defter değeri / toplam borç
+    sales_ta: number | null; // X5 (yalnız klasik)
   };
 }
 
@@ -328,8 +350,20 @@ export function scoreFundamentals(
     });
   }
 
-  // Karlılık — ROE yüksekse iyi.
-  if (isNum(derived.roe)) {
+  // Karlılık — ROE yüksekse iyi. Özkaynak ≤ 0 ise ROE anlamsızdır (null) ama
+  // sütunu atlamak teknik olarak batık şirketi "Güçlü" gösterebiliyordu
+  // (ağırlık kalan sütunlara dağılıyordu) → açıkça "bad" puanla.
+  const equity = raw.financials?.derived?.equity ?? null;
+  if (isNum(equity) && equity <= 0) {
+    pillars.push({
+      key: "profitability",
+      label: "Karlılık",
+      weight: 25,
+      ratio: 0,
+      verdict: "bad",
+      detail: "Negatif özkaynak",
+    });
+  } else if (isNum(derived.roe)) {
     const roe = derived.roe;
     let r: number;
     if (roe < 0) r = 0;
@@ -402,13 +436,17 @@ export function scoreFundamentals(
     });
   }
 
-  // Temettü — verim varsa küçük bonus sütun.
-  const dy = raw.dividend?.yield ?? null;
+  // Temettü — küçük bonus sütun. Son 12 ayda temettü ödemeyen şirkette borsapy
+  // verimi null döner (oranı 0); eskiden sütun atlanıyordu ve %1 veren şirket
+  // (r=0.3) hiç vermeyen şirketten DÜŞÜK skor alıyordu. Ödeme yok → verim 0.
+  const dy =
+    raw.dividend?.yield ?? (raw.dividend?.annual_rate === 0 ? 0 : null);
   if (isNum(dy)) {
     let r: number;
     if (dy >= 4) r = 1;
     else if (dy >= 2) r = 0.6;
-    else r = 0.3;
+    else if (dy > 0) r = 0.3;
+    else r = 0.1;
     pillars.push({
       key: "dividend",
       label: "Temettü",
@@ -455,11 +493,32 @@ type Pair = [number | null, number | null] | undefined;
 const pairCur = (p: Pair): number | null => (p && isNum(p[0]) ? p[0] : null);
 const pairPrev = (p: Pair): number | null => (p && isNum(p[1]) ? p[1] : null);
 
+// KAP/İş Yatırım sektör metni ("MALİ KURULUŞLAR / BANKALAR", "İMALAT SANAYİ /
+// KİMYA..."). Finansal önce kontrol edilir (holding adında "SANAYİ" geçebilir).
+const FINANCIAL_SECTOR_RE =
+  /MALİ KURULUŞ|BANKA|SİGORTA|FİNANSAL KİRALAMA|FAKTORİNG|HOLDİNG|YATIRIM ORTAKLI|GAYRİMENKUL|ARACI KURUM|EMEKLİLİK|VARLIK YÖNETİM/;
+const MANUFACTURING_SECTOR_RE = /İMALAT|SANAYİ/;
+
+/** Profil sektör metninden uygun Altman modelini seç. Bilinmiyorsa Z''. */
+export function altmanModelFor(raw: FundamentalsRaw): AltmanModel {
+  const p = raw.profile ?? { sector: null, industry: null, summary: null };
+  const text = [p.sector, p.industry, p.summary]
+    .filter(Boolean)
+    .join(" ")
+    .toLocaleUpperCase("tr-TR");
+  if (FINANCIAL_SECTOR_RE.test(text)) return "financial";
+  if (MANUFACTURING_SECTOR_RE.test(text)) return "manufacturing";
+  return "non_manufacturing";
+}
+
 /**
- * Altman Z-Score (klasik 5-faktör imalat modeli). Finansal (banka/sigorta)
- * şirketler için anlamlı değildir. Tüm bileşenler gerekli; biri eksikse "na".
+ * Altman Z-Score — şirketin alanına göre model (bkz. AltmanModel):
+ *   klasik  Z   = 1.2·X1 + 1.4·X2 + 3.3·X3 + 0.6·X4(PD/borç) + 1.0·X5
+ *   Z''         = 6.56·X1 + 3.26·X2 + 6.72·X3 + 1.05·X4(defter değeri/borç)
+ * Finansal şirketlerde hesaplanmaz. Gerekli bileşenden biri eksikse "na".
  */
 export function computeAltmanZ(raw: FundamentalsRaw): AltmanZ {
+  const model = altmanModelFor(raw);
   const d = raw.financials?.derived ?? {};
   const ta = d.total_assets ?? null;
   const ca = d.current_assets ?? null;
@@ -471,33 +530,44 @@ export function computeAltmanZ(raw: FundamentalsRaw): AltmanZ {
   const mve = raw.quote?.market_cap ?? null;
 
   const taOk = isNum(ta) && ta > 0;
+  const tl = isNum(ta) && isNum(equity) ? ta - equity : null; // toplam yabancı kaynak
+  const tlOk = isNum(tl) && tl > 0;
   const components = {
     working_capital_ta: taOk && isNum(ca) && isNum(cl) ? (ca - cl) / ta : null,
     retained_earnings_ta: taOk && isNum(re) ? re / ta : null,
     ebit_ta: taOk && isNum(ebit) ? ebit / ta : null,
-    equity_mv_tl:
-      isNum(mve) && isNum(ta) && isNum(equity) && ta - equity > 0 ? mve / (ta - equity) : null,
+    equity_mv_tl: tlOk && isNum(mve) ? mve / tl : null,
+    equity_bv_tl: tlOk && isNum(equity) ? equity / tl : null,
     sales_ta: taOk && isNum(sales) ? sales / ta : null,
   };
 
+  if (model === "financial") return { z: null, zone: "na", model, components };
+
   const c = components;
+  const x4 = model === "manufacturing" ? c.equity_mv_tl : c.equity_bv_tl;
   if (
     !isNum(c.working_capital_ta) ||
     !isNum(c.retained_earnings_ta) ||
     !isNum(c.ebit_ta) ||
-    !isNum(c.equity_mv_tl) ||
-    !isNum(c.sales_ta)
+    !isNum(x4) ||
+    (model === "manufacturing" && !isNum(c.sales_ta))
   ) {
-    return { z: null, zone: "na", components };
+    return { z: null, zone: "na", model, components };
   }
   const z =
-    1.2 * c.working_capital_ta +
-    1.4 * c.retained_earnings_ta +
-    3.3 * c.ebit_ta +
-    0.6 * c.equity_mv_tl +
-    1.0 * c.sales_ta;
-  const zone: AltmanZone = z >= 2.99 ? "safe" : z >= 1.81 ? "grey" : "distress";
-  return { z, zone, components };
+    model === "manufacturing"
+      ? 1.2 * c.working_capital_ta +
+        1.4 * c.retained_earnings_ta +
+        3.3 * c.ebit_ta +
+        0.6 * x4 +
+        1.0 * (c.sales_ta as number)
+      : 6.56 * c.working_capital_ta +
+        3.26 * c.retained_earnings_ta +
+        6.72 * c.ebit_ta +
+        1.05 * x4;
+  const [grey, safe] = ALTMAN_ZONES[model];
+  const zone: AltmanZone = z >= safe ? "safe" : z >= grey ? "grey" : "distress";
+  return { z, zone, model, components };
 }
 
 /**
@@ -542,7 +612,8 @@ export function computePiotroskiF(raw: FundamentalsRaw): PiotroskiF {
     {
       key: "lev_down",
       label: "Kaldıraç azalıyor (UV yük./varlık)",
-      pass: isNum(lev) && isNum(levP) ? lev < levP : null,
+      // İki yılda da uzun vadeli borcu olmayan şirket (0 → 0) kriteri geçer.
+      pass: isNum(lev) && isNum(levP) ? lev < levP || (lev === 0 && levP === 0) : null,
     },
     { key: "cr_up", label: "Cari oran artıyor (YoY)", pass: gt(cr, crP) },
     { key: "shares", label: "Yeni pay ihracı yok", pass: null }, // pay adedi geçmişi yok
@@ -554,6 +625,17 @@ export function computePiotroskiF(raw: FundamentalsRaw): PiotroskiF {
   const computable = computableList.length;
   const score = computable > 0 ? computableList.filter((x) => x.pass === true).length : null;
   return { score, computable, criteria };
+}
+
+/** Piotroski'yi hesaplanabilen kriter oranına göre renklendir. Payda sabit
+ * değil (en fazla 8; önceki yıl yoksa 3), bu yüzden mutlak eşik (≥7 iyi)
+ * 3/3 geçen şirketi "kötü" gösteriyordu. 6'dan az kriter → güvenilmez ("na"). */
+export function piotroskiVerdict(f: PiotroskiF): Verdict {
+  if (f.score == null || f.computable < 6) return "na";
+  const r = f.score / f.computable;
+  if (r >= 0.75) return "good";
+  if (r >= 0.45) return "warn";
+  return "bad";
 }
 
 export function computeHealth(raw: FundamentalsRaw): HealthScores {
