@@ -213,10 +213,15 @@ export function computePortfolioHealth(
   );
   const opportunity = round1(0.6 * driftScore + 0.4 * gapScore);
 
-  // 8) Sağlık
-  const health = round1(0.5 * quality + 0.5 * (100 - risk));
+  // 8) Sağlık. Skorlanabilir pozisyon yoksa (yalnız fon/altın/nakit ya da
+  // tarama kısmen başarısız) kalite 0 sayılıp sağlık 50'de tavan yapıyordu →
+  // o durumda sağlık yalnız riskten.
+  const qualityAvailable = scoredValue > 0;
+  const health = qualityAvailable
+    ? round1(0.5 * quality + 0.5 * (100 - risk))
+    : round1(100 - risk);
 
-  const scores: ScoreTriple = { quality, risk, opportunity, health };
+  const scores: ScoreTriple = { quality, qualityAvailable, risk, opportunity, health };
 
   return {
     totalValue,

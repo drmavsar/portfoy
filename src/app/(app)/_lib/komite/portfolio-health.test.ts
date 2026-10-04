@@ -71,7 +71,15 @@ describe("computePortfolioHealth — değerleme & ağırlık", () => {
     const v = computePortfolioHealth(input({}));
     expect(v.totalValue).toBe(0);
     expect(v.scores.quality).toBe(0);
+    expect(v.scores.qualityAvailable).toBe(false);
     expect(v.positions).toHaveLength(0);
+  });
+
+  it("puanlanabilir pozisyon yoksa sağlık yalnız riskten (50 tavanı yok)", () => {
+    const v = computePortfolioHealth(input({ cashTry: 1000 }));
+    expect(v.scores.qualityAvailable).toBe(false);
+    expect(v.scores.health).toBeCloseTo(100 - v.scores.risk, 5);
+    expect(v.scores.health).toBeGreaterThan(50);
   });
 });
 

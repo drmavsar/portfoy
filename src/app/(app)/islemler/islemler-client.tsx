@@ -20,6 +20,12 @@ import {
   deleteTrade,
   updateTrade,
 } from "@/app/(app)/_lib/wealth-actions";
+import {
+  addDaysIso,
+  istanbulMonthStart,
+  istanbulToday,
+  istanbulYearStart,
+} from "@/lib/finance/istanbul-date";
 
 const inp: React.CSSProperties = {
   background: "var(--surface)",
@@ -53,8 +59,9 @@ function fmtDate(iso: string): string {
   return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getFullYear()).slice(2)}`;
 }
 
+// İşlem zamanının İstanbul takvim günü (UTC'de gece işlemi bir gün önce görünüyordu)
 function toDateInput(iso: string): string {
-  return new Date(iso).toISOString().slice(0, 10);
+  return istanbulToday(new Date(iso));
 }
 
 function qtyDecimals(assetClass: string | undefined, symbol: string | undefined): number {
@@ -73,21 +80,16 @@ function tradeAmount(t: TradeRow): number {
 }
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return istanbulToday();
 }
 function addDays(iso: string, days: number): string {
-  const d = new Date(iso + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
+  return addDaysIso(iso, days);
 }
 function rangeBounds(key: RangeKey, customFrom: string, customTo: string): { from: string; to: string } | null {
   const today = todayIso();
   if (key === "all") return null;
-  if (key === "month") {
-    const now = new Date();
-    return { from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`, to: today };
-  }
-  if (key === "ytd") return { from: `${new Date().getFullYear()}-01-01`, to: today };
+  if (key === "month") return { from: istanbulMonthStart(), to: today };
+  if (key === "ytd") return { from: istanbulYearStart(), to: today };
   if (key === "last30") return { from: addDays(today, -29), to: today };
   if (key === "last90") return { from: addDays(today, -89), to: today };
   if (key === "custom") {
@@ -542,7 +544,7 @@ function TradeModal({
   const [quantity, setQuantity] = useState(initial ? String(initial.quantity) : "");
   const [price, setPrice] = useState(initial ? String(initial.price) : "");
   const [fees, setFees] = useState(initial ? String(initial.fees) : "0");
-  const [date, setDate] = useState(initial ? toDateInput(initial.executed_at) : new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(initial ? toDateInput(initial.executed_at) : istanbulToday());
   const [custodyId, setCustodyId] = useState(initial?.custody_id ?? "");
   const [beneficiaryId, setBeneficiaryId] = useState(initial?.beneficiary_id ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");

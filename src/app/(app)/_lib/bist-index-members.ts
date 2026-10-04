@@ -24,7 +24,7 @@ const BIST_100_FALLBACK = [
   "TCELL", "THYAO", "TKFEN", "TOASO", "TRGYO", "TSKB", "TTKOM", "TTRAK",
   "TUKAS", "TUPRS", "ULKER", "VAKBN", "VESBE", "VESTL", "YKBNK", "YEOTK",
   "ZOREN", "TURSG", "PEKGY", "AKCNS", "ALCTL", "AHGAZ", "BTCIM", "GENIL",
-  "JANTS", "KZBGY", "TABGD", "AGESA", "ENERY",
+  "JANTS", "KZBGY", "TABGD", "AGESA",
 ];
 
 export interface IndexMember {
@@ -92,27 +92,32 @@ export async function getBistIndexMembers(): Promise<IndexMember[]> {
   }
   // Statik fallback — yaklaşık BIST 100 listesi
   console.log("[bist-csv] fallback: statik BIST 100 listesi (~100 sembol)");
-  return BIST_100_FALLBACK.map((s) => ({
-    index_code: "XK100",
+  return Array.from(new Set(BIST_100_FALLBACK)).map((s) => ({
+    index_code: "XU100",
     index_name: "BIST 100",
     symbol: s,
     name: s,
   }));
 }
 
+/**
+ * BIST 100 (XU100) üyeleri — tarama, radar, temel ve komite evreni.
+ *
+ * Ad tarihsel (XK100); Borsa İstanbul'da XK100 = BIST KATILIM 100'dür. Eskiden
+ * `code.includes("XK100")` ve `name.includes("BIST 100")` ile süzülüyordu →
+ * Katılım 100'ün BIST 100 dışı üyeleri evrene karışıyordu. Artık yalnız XU100
+ * kodu ya da adı tam "BIST 100" olan endeks.
+ */
 export async function getXK100Symbols(): Promise<string[]> {
   const all = await getBistIndexMembers();
   const filtered = all
     .filter((m) => {
-      const code = (m.index_code ?? "").toUpperCase();
-      const name = (m.index_name ?? "").toUpperCase();
-      return (
-        code.includes("XK100") ||
-        code.includes("XU100") ||
-        name.includes("BIST 100") ||
-        name.includes("BIST100") ||
-        name.includes("BİST 100")
-      );
+      const code = (m.index_code ?? "").trim().toUpperCase();
+      const name = (m.index_name ?? "")
+        .toLocaleUpperCase("tr-TR")
+        .replace(/\s+/g, " ")
+        .trim();
+      return code === "XU100" || name === "BIST 100" || name === "BİST 100";
     })
     .map((m) => m.symbol)
     .filter(Boolean);
@@ -120,7 +125,7 @@ export async function getXK100Symbols(): Promise<string[]> {
   if (uniq.length > 0) return uniq;
   // CSV var ama filter sıfır → statik liste son çare
   console.log("[bist-csv] filter sıfır eşleşti, statik liste kullanılıyor");
-  return BIST_100_FALLBACK;
+  return Array.from(new Set(BIST_100_FALLBACK));
 }
 
 export interface IndexBadge {

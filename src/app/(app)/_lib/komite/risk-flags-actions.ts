@@ -7,15 +7,21 @@ import { revalidatePath } from "next/cache";
 
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
 import { createClient } from "@/lib/supabase/server";
+import { istanbulToday } from "@/lib/finance/istanbul-date";
 import type { RiskFlagKind, RiskFlagRow } from "@/lib/types/database";
 
 export async function listActiveRiskFlags(): Promise<RiskFlagRow[]> {
   if (!(await isSupabaseConfigured())) return [];
   const supabase = await createClient();
+  // Süresi dolmuş bayrak (expires_at < bugün, İstanbul) aktif sayılmaz.
+  // Eskiden expires_at hiç kontrol edilmiyordu: kalkış tarihi geçmiş bir VBTS
+  // bayrağı hisseyi süresiz karantinada tutuyordu.
+  const today = istanbulToday();
   const { data, error } = await supabase
     .from("risk_flags")
     .select("*")
     .eq("active", true)
+    .or(`expires_at.is.null,expires_at.gte.${today}`)
     .order("symbol");
   if (error) {
     console.error("listActiveRiskFlags error", error);

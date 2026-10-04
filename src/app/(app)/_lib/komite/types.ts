@@ -60,7 +60,9 @@ export interface PositionView {
 }
 
 export interface ScoreTriple {
-  quality: number; // 0..100
+  quality: number; // 0..100 (qualityAvailable=false ise anlamsız, 0)
+  /** Skorlanabilir (puanı olan) pozisyon var mı. Yoksa kalite sağlığa katılmaz. */
+  qualityAvailable: boolean;
   risk: number; // 0..100 (yüksek = kötü)
   opportunity: number; // 0..100
   health: number; // 0..100

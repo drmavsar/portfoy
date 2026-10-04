@@ -5,6 +5,13 @@ describe("expense comparison", () => {
   it("uses inclusive equal-length periods across year boundaries", () => {
     expect(previousPeriod({ from: "2026-01-01", to: "2026-01-08" }, "period")).toEqual({ from: "2025-12-24", to: "2025-12-31" });
   });
+  it("tam ay → önceki tam ay (31. gün atlanmaz)", () => {
+    expect(previousPeriod({ from: "2026-09-01", to: "2026-09-30" }, "month")).toEqual({ from: "2026-08-01", to: "2026-08-31" });
+    expect(previousPeriod({ from: "2026-02-01", to: "2026-02-28" }, "month")).toEqual({ from: "2026-01-01", to: "2026-01-31" });
+  });
+  it("ay içi kısmi dönem → önceki ayın aynı günleri", () => {
+    expect(previousPeriod({ from: "2026-10-01", to: "2026-10-15" }, "month")).toEqual({ from: "2026-09-01", to: "2026-09-15" });
+  });
   it("clamps previous month dates for leap years", () => {
     expect(previousPeriod({ from: "2024-03-01", to: "2024-03-31" }, "month")).toEqual({ from: "2024-02-01", to: "2024-02-29" });
   });

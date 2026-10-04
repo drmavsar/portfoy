@@ -953,14 +953,17 @@ function ConcentrationRow({
   );
 }
 
+const signedPct = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+
 function PlanCell({ plan }: { plan: TradePlan }) {
-  // Tooltip mesajı tüm detayı içerir; hücre kompakt rozet + T1/S1 mesafesi
+  // Tooltip mesajı tüm detayı içerir; hücre kompakt rozet + T1/S1 mesafesi.
+  // Seviyeler girişe (WAC) çapalı; mesafeler anlık fiyattan (aşıldıysa negatif).
   const tooltip = [
     `Sağlık: ${plan.health_label}`,
-    `T1: ${fmt.tr(plan.t1, 2)} (+${plan.delta_t1_pct.toFixed(1)}%) · RR ${plan.rr1.toFixed(2)}`,
-    `T2: ${fmt.tr(plan.t2, 2)} (+${plan.delta_t2_pct.toFixed(1)}%) · RR ${plan.rr2.toFixed(2)}`,
-    `S1: ${fmt.tr(plan.s1, 2)} (${plan.delta_s1_pct.toFixed(1)}%)`,
-    `S2: ${fmt.tr(plan.s2, 2)} (${plan.delta_s2_pct.toFixed(1)}%)`,
+    `T1: ${fmt.tr(plan.t1, 2)} (${signedPct(plan.delta_t1_pct)})${plan.rr1 > 0 ? ` · kalan RR ${plan.rr1.toFixed(2)}` : ""}`,
+    `T2: ${fmt.tr(plan.t2, 2)} (${signedPct(plan.delta_t2_pct)})${plan.rr2 > 0 ? ` · kalan RR ${plan.rr2.toFixed(2)}` : ""}`,
+    `S1: ${fmt.tr(plan.s1, 2)} (${signedPct(plan.delta_s1_pct)})${plan.trailing ? " · MA20'ye göre iz süren" : ""}`,
+    `S2: ${fmt.tr(plan.s2, 2)} (${signedPct(plan.delta_s2_pct)})`,
     plan.high_52w_distance_pct != null
       ? `52W high'a uzaklık: ${plan.high_52w_distance_pct.toFixed(1)}%`
       : null,
@@ -987,7 +990,7 @@ function PlanCell({ plan }: { plan: TradePlan }) {
         {plan.health_label}
       </span>
       <div className="tabular hint" style={{ fontSize: 10, lineHeight: 1.3 }}>
-        T1 +{plan.delta_t1_pct.toFixed(1)}% · S1 {plan.delta_s1_pct.toFixed(1)}%
+        T1 {signedPct(plan.delta_t1_pct)} · S1 {signedPct(plan.delta_s1_pct)}
       </div>
     </div>
   );

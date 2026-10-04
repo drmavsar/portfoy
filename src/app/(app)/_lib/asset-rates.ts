@@ -19,10 +19,21 @@
 //   CoinGecko simple/price?vs_currencies=try (BTC/ETH/SOL/USDT/BNB), 5 dk cache
 
 import { getTcmbRates } from "./fx-rates";
+import { normalizeTruncgilDate } from "@/lib/finance/truncgil-date";
 import { fetchCanlidovizRates } from "./canlidoviz-rates";
 import { fetchTradingViewQuotes } from "./tradingview-quotes";
 
 const TRUNCGIL_URL = "https://finans.truncgil.com/v4/today.json";
+
+/** Fiyatı canlidoviz'den gelen altın türleri — Truncgil bunları ezmez. */
+const CANLI_GOLD = new Set([
+  "XAU", "XAG", "XAU_OZ", "CEYREK", "YARIM", "TAM", "CUMHURIYET", "ATA",
+]);
+/** canlidoviz gram altından türetilen kodlar (aynı % değişime sahip). */
+const DERIVED_FROM_GRAM = ["XAU_OZ", "BILEZIK22", "BILEZIK18", "BILEZIK14"] as const;
+
+const COINGECKO_URL = (ids: string) =>
+  `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=try&include_24hr_change=true`;
 
 const COINGECKO_IDS: Record<string, string> = {
   BTC: "bitcoin",
@@ -146,16 +157,35 @@ async function fetchYahooXauUsd(): Promise<number | null> {
 async function fetchCoingeckoPrices(): Promise<Record<string, number>> {
   try {
     const ids = Object.values(COINGECKO_IDS).join(",");
-    const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=try`,
-      { next: { revalidate: 300 } },
-    );
+    const res = await fetch(COINGECKO_URL(ids), {
+      next: { revalidate: 300, tags: ["asset-rates"] },
+    });
     if (!res.ok) return {};
     const json = (await res.json()) as Record<string, { try?: number }>;
     const out: Record<string, number> = {};
     for (const [code, cgId] of Object.entries(COINGECKO_IDS)) {
       const v = json[cgId]?.try;
       if (typeof v === "number" && v > 0) out[code] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** CoinGecko 24 saatlik % değişim (fiyatla aynı istek — fetch önbelleği paylaşılır). */
+async function fetchCoingeckoChanges(): Promise<Record<string, number>> {
+  try {
+    const ids = Object.values(COINGECKO_IDS).join(",");
+    const res = await fetch(COINGECKO_URL(ids), {
+      next: { revalidate: 300, tags: ["asset-rates"] },
+    });
+    if (!res.ok) return {};
+    const json = (await res.json()) as Record<string, { try_24h_change?: number }>;
+    const out: Record<string, number> = {};
+    for (const [code, cgId] of Object.entries(COINGECKO_IDS)) {
+      const v = json[cgId]?.try_24h_change;
+      if (typeof v === "number" && Number.isFinite(v)) out[code] = v;
     }
     return out;
   } catch {
@@ -220,11 +250,12 @@ export async function getTruncgilUpdateDate(): Promise<string | null> {
     if (!res.ok) return null;
     const json = (await res.json()) as Record<string, unknown>;
     const ud = json.Update_Date ?? json.update_date ?? json.updateDate;
-    return typeof ud === "string" ? ud : null;
+    return typeof ud === "string" ? normalizeTruncgilDate(ud) : null;
   } catch {
     return null;
   }
 }
+
 
 /**
  * Currency → günlük % değişim.
@@ -235,6 +266,11 @@ export async function getTruncgilUpdateDate(): Promise<string | null> {
  * günlük değişimi gösterilir (eskiden Truncgil boşsa altın/döviz "+0" kalıyordu).
  */
 export async function getAssetChanges(): Promise<Record<string, number>> {
+  // Kural: günlük değişim, FİYATIN geldiği kaynaktan gelir (getAssetRates ile
+  // aynı öncelik). Eskiden Truncgil değişimi altın türlerinde de canlidoviz'in
+  // üstüne yazıyordu → fiyat canlidoviz, değişim Truncgil (tutarsız); bilezik
+  // ve ons değişimi Truncgil düşünce tamamen kayboluyordu.
+
   // 1) Güvenilir taban — canlidoviz
   let out: Record<string, number> = {};
   try {
@@ -243,8 +279,10 @@ export async function getAssetChanges(): Promise<Record<string, number>> {
   } catch {
     /* canlidoviz başarısızsa Truncgil'e düş */
   }
+  const canliChanges = { ...out };
 
-  // 2) Truncgil intraday değişimi — varsa taban üzerine yazar
+  // 2) Truncgil intraday değişimi — FX'te taban üzerine yazar (FX fiyatı
+  //    Truncgil'den); fiyatı canlidoviz'den gelen altınlarda yazmaz.
   try {
     const res = await fetch(TRUNCGIL_URL, {
       next: { revalidate: 300, tags: ["asset-rates"] },
@@ -270,12 +308,23 @@ export async function getAssetChanges(): Promise<Record<string, number>> {
         }
         if (chg == null) continue;
         const code = lookup.get(normalizeKey(key));
-        if (code) out[code] = chg;
+        if (!code) continue;
+        if (CANLI_GOLD.has(code) && typeof canliChanges[code] === "number") continue;
+        out[code] = chg;
       }
     }
   } catch {
     /* Truncgil başarısızsa canlidoviz tabanı kalır */
   }
+
+  // 3) Gramdan türetilen kodlar (ons = gram × 31.1035, bilezik = gram × ayar
+  //    × işçilik) gramla aynı % değişime sahiptir — fiyatla tutarlı.
+  if (typeof canliChanges.XAU === "number") {
+    for (const code of DERIVED_FROM_GRAM) out[code] = canliChanges.XAU;
+  }
+
+  // 4) Kripto — CoinGecko 24 saatlik değişim (eskiden hiç yoktu → "Bugün" 0).
+  Object.assign(out, await fetchCoingeckoChanges());
 
   return out;
 }
@@ -310,6 +359,8 @@ function ratesLookSane(rates: Record<string, number>): boolean {
     ["XAU", 1000, 50_000],     // gram altın TL
     ["CEYREK", 3000, 200_000], // çeyrek altın TL
     ["BTC", 100_000, 50_000_000],
+    // JPY tek yen başına (TCMB 100 yen kotar) — 100× hata snapshot'a yazılmasın
+    ["JPY", 0.05, 5],
   ];
   for (const [k, lo, hi] of checks) {
     const v = rates[k];
@@ -384,9 +435,6 @@ export async function getAssetRates(): Promise<Record<string, number>> {
   //    Truncgil yalnızca canlidoviz'in vermediği altınları doldurur — reşat ve
   //    (canlidoviz gram düşerse) bilezik — artı FX override. Bilezik canlidoviz
   //    gram varken 2.6'da türetilir (Truncgil bilezik değeri ezilir).
-  const CANLI_GOLD = new Set([
-    "XAU", "XAG", "XAU_OZ", "CEYREK", "YARIM", "TAM", "CUMHURIYET", "ATA",
-  ]);
   for (const [k, v] of Object.entries(truncgil)) {
     if (CANLI_GOLD.has(k) && typeof canli.rates[k] === "number" && canli.rates[k] > 0) {
       continue; // canlidoviz altın değeri korunur (Truncgil ezmez)

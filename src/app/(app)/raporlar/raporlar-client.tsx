@@ -16,25 +16,30 @@ import type { CategoryRow } from "@/app/(app)/ayarlar/actions";
 import type { BeneficiaryLite } from "@/app/(app)/hesaplar/actions";
 
 import { CashflowCard } from "@/app/(app)/_components/cashflow-card";
+import {
+  istanbulMonthStart,
+  istanbulMonthsAgoStart,
+  istanbulToday,
+  istanbulYearStart,
+} from "@/lib/finance/istanbul-date";
 
+// Tarihler İstanbul takvimine göre: UTC kullanılınca gece 00:00-03:00 arası
+// "bu ay/bugün" bir önceki güne kayıyordu; setMonth→setDate sırası ayın
+// 31'inde bir ay kaybettiriyordu.
 function isoToday(): string {
-  return new Date().toISOString().slice(0, 10);
+  return istanbulToday();
 }
 
 function isoStartOfYear(): string {
-  return `${new Date().getFullYear()}-01-01`;
+  return istanbulYearStart();
 }
 
 function isoMonthsAgo(months: number): string {
-  const d = new Date();
-  d.setMonth(d.getMonth() - months);
-  d.setDate(1);
-  return d.toISOString().slice(0, 10);
+  return istanbulMonthsAgoStart(months);
 }
 
 function isoStartOfMonth(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  return istanbulMonthStart();
 }
 
 type RangeKey = "this-month" | "ytd" | "3m" | "6m" | "12m" | "custom";

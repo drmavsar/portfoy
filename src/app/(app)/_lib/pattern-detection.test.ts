@@ -141,6 +141,32 @@ describe("detectDoubleBottom", () => {
     const closes = Array(50).fill(100);
     expect(detectDoubleBottom(buildOHLC(closes), 1.5, null)).toBeNull();
   });
+
+  /** 90 bar: düz 100, iki dip (80) ve aradaki tepe 99 → boyun çizgisi 100 (high). */
+  function dbSeries(tail: number[]): OHLC {
+    const closes: number[] = Array(30).fill(100);
+    closes.push(95, 88, 80, 88, 95, 99, 95, 88, 80, 88, 95); // dipler 32 ve 38. barda
+    while (closes.length < 90 - tail.length) closes.push(96);
+    closes.push(...tail);
+    return { close: closes, high: closes.map((c) => c + 1), low: closes.map((c) => c - 1) };
+  }
+
+  it("boyun çizgisine yakın taze formasyon → sinyal", () => {
+    const r = detectDoubleBottom(dbSeries([98, 99.5]), 2, 97);
+    expect(r).not.toBeNull();
+    expect(r?.pattern).toBe("double_bottom");
+  });
+
+  it("çoktan kırılmış (fiyat hedefin/boyun +%6'nın üstünde) → sinyal yok", () => {
+    // boyun ≈ 101, hedef ≈ 123; son fiyat 112 (+%11) → giriş kaçmış
+    const r = detectDoubleBottom(dbSeries([104, 108, 112]), 2, 104);
+    expect(r).toBeNull();
+  });
+
+  it("ikinci dipten sonra daha düşük dip → formasyon bozuk, sinyal yok", () => {
+    const r = detectDoubleBottom(dbSeries([70, 99.5]), 2, 97);
+    expect(r).toBeNull();
+  });
 });
 
 describe("scanAllPatterns", () => {
