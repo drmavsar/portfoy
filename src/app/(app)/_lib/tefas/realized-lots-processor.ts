@@ -270,3 +270,61 @@ export async function processSellTrade(
     total_realized_pnl_try: result.total_realized_pnl_try,
   };
 }
+
+/**
+ * Bir (user, portfolio, asset) kapsamındaki tüm realized_lots kayıtlarını sil
+ * ve satışları kronolojik sırayla yeniden işle. Alım geriye tarihlenince,
+ * alım/satım düzenlenip silinince FIFO zincirinin bütünlüğünü korur.
+ * Idempotent; processSellTrade hatasını yutar (raporlar eksik görünür ama
+ * trade yazımı bloklanmaz).
+ *
+ * Silme KAPSAM bazında yapılır (eskiden mevcut satış ID'lerine göreydi): bir
+ * satış alıma çevrilince listeden düştüğü için eski lotları da silinmeden
+ * kalıyor, kapsamda hiç satış kalmadıysa fonksiyon silmeden çıkıyordu →
+ * Raporlar'da hayalet gerçekleşen K/Z ve alım lotu "tüketilmiş" görünüyordu.
+ *
+ * "use server" dosyasında DEĞİL: oradan export edilse istemciden rastgele
+ * userId ile çağrılabilen bir server action olurdu.
+ */
+export async function reprocessRealizedLotsForScope(
+  supabase: DbClient,
+  userId: string,
+  portfolioId: string,
+  assetId: string,
+): Promise<{ failed: { sellId: string; error: string }[] }> {
+  const failed: { sellId: string; error: string }[] = [];
+  const { error: delErr } = await supabase
+    .from("realized_lots")
+    .delete()
+    .eq("user_id", userId)
+    .eq("portfolio_id", portfolioId)
+    .eq("asset_id", assetId);
+  if (delErr) {
+    console.error("reprocessRealizedLotsForScope delete error", delErr);
+    return { failed: [{ sellId: "*", error: delErr.message }] };
+  }
+
+  const { data: sells, error } = await supabase
+    .from("trades")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("portfolio_id", portfolioId)
+    .eq("asset_id", assetId)
+    .eq("side", "sell")
+    // FIFO işlemcisiyle aynı deterministik sıra: (executed_at, id)
+    .order("executed_at", { ascending: true })
+    .order("id", { ascending: true });
+  if (error) {
+    console.error("reprocessRealizedLotsForScope list error", error);
+    return { failed: [{ sellId: "*", error: error.message }] };
+  }
+
+  for (const { id } of (sells ?? []) as { id: string }[]) {
+    const r = await processSellTrade(supabase, id);
+    if (!r.ok) {
+      console.error("processSellTrade error", id, r.error);
+      failed.push({ sellId: id, error: r.error ?? "bilinmeyen hata" });
+    }
+  }
+  return { failed };
+}

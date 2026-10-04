@@ -6,56 +6,7 @@ import { revalidatePath } from "next/cache";
 
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
 import { createClient } from "@/lib/supabase/server";
-import { processSellTrade } from "@/app/(app)/_lib/tefas/realized-lots-processor";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@/lib/types/database";
-
-type DbClient = SupabaseClient<Database>;
-
-/**
- * Bir (user, portfolio, asset) scope'undaki tüm sell'lerin realized_lots
- * kayıtlarını sil ve chronological olarak yeniden hesaplat. Buy backdate,
- * buy edit/delete veya sell edit/delete sonrasında FIFO chain'in bütünlüğünü
- * korur. Idempotent. processSellTrade hatasını yutar (raporlar boş görünür
- * ama trade yazımı bloklanmaz).
- */
-async function reprocessRealizedLotsForScope(
-  supabase: DbClient,
-  userId: string,
-  portfolioId: string,
-  assetId: string,
-): Promise<void> {
-  const { data: sells, error } = await supabase
-    .from("trades")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("portfolio_id", portfolioId)
-    .eq("asset_id", assetId)
-    .eq("side", "sell")
-    .order("executed_at", { ascending: true });
-  if (error) {
-    console.error("reprocessRealizedLotsForScope list error", error);
-    return;
-  }
-  const sellIds = (sells ?? []).map((s: { id: string }) => s.id);
-  if (sellIds.length === 0) return;
-
-  const { error: delErr } = await supabase
-    .from("realized_lots")
-    .delete()
-    .in("sell_trade_id", sellIds);
-  if (delErr) {
-    console.error("reprocessRealizedLotsForScope delete error", delErr);
-    return;
-  }
-
-  for (const sellId of sellIds) {
-    const r = await processSellTrade(supabase, sellId);
-    if (!r.ok) {
-      console.error("processSellTrade error", sellId, r.error);
-    }
-  }
-}
+import { reprocessRealizedLotsForScope } from "@/app/(app)/_lib/tefas/realized-lots-processor";
 
 export interface AssetRow {
   id: string;
@@ -137,6 +88,36 @@ export async function listTrades(): Promise<TradeRow[]> {
   return readAll<TradeRow>((from, to) => supabase.from("trades")
     .select("id, portfolio_id, custody_id, account_id, asset_id, beneficiary_id, side, executed_at, quantity, price, currency, fees, notes", { count: "exact" })
     .order("executed_at", { ascending: false }).order("id", { ascending: true }).range(from, to), r => r.id);
+}
+
+export interface RealizedBySell {
+  /** FIFO gerçekleşen K/Z (TRY, komisyonlar dahil, stopaj öncesi) */
+  pnl_try: number;
+  /** Satılan lotların FIFO maliyeti (TRY) */
+  cost_try: number;
+}
+
+/**
+ * realized_lots'u satış işlemine göre topla. İşlemler'deki sembol özeti
+ * gerçekleşen K/Z'yi buradan alır — Raporlar ile aynı FIFO kaynağı. Eskiden
+ * yalnız seçili dönemdeki alımların ortalamasıyla hesaplanıyordu (dönem
+ * öncesi alımlar yok sayılıyordu; ör. 2025'te 200'den alınıp 2026'da satılan
+ * hisse YTD filtresinde yanlış maliyetle görünüyordu).
+ */
+export async function listRealizedBySellTrade(): Promise<Record<string, RealizedBySell>> {
+  if (!(await isSupabaseConfigured())) return {};
+  const supabase = await createClient();
+  type Row = { id: string; sell_trade_id: string; realized_pnl_try: number; cost_basis_try: number };
+  const rows = await readAll<Row>((from, to) => supabase.from("realized_lots")
+    .select("id, sell_trade_id, realized_pnl_try, cost_basis_try", { count: "exact" })
+    .order("id", { ascending: true }).range(from, to), r => r.id);
+  const out: Record<string, RealizedBySell> = {};
+  for (const r of rows) {
+    const acc = (out[r.sell_trade_id] ??= { pnl_try: 0, cost_try: 0 });
+    acc.pnl_try += Number(r.realized_pnl_try);
+    acc.cost_try += Number(r.cost_basis_try);
+  }
+  return out;
 }
 
 export async function listHoldings(): Promise<HoldingRow[]> {

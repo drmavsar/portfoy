@@ -14,6 +14,7 @@ import type { BeneficiaryLite, CustodyRow } from "@/app/(app)/hesaplar/actions";
 import {
   type AssetRow,
   type PortfolioRow,
+  type RealizedBySell,
   type TradeRow,
   createTrade,
   deleteTrade,
@@ -98,6 +99,8 @@ function rangeBounds(key: RangeKey, customFrom: string, customTo: string): { fro
 
 interface Props {
   initialTrades: TradeRow[];
+  /** satış trade id → FIFO gerçekleşen K/Z (realized_lots; Raporlar ile aynı) */
+  realizedBySell: Record<string, RealizedBySell>;
   assets: AssetRow[];
   portfolios: PortfolioRow[];
   custodies: CustodyRow[];
@@ -107,6 +110,7 @@ interface Props {
 
 export function IslemlerClient({
   initialTrades,
+  realizedBySell,
   assets,
   portfolios,
   custodies,
@@ -176,6 +180,10 @@ export function IslemlerClient({
       buyGross: number;
       sellQty: number;
       sellGross: number;
+      sells: number; // dönemdeki satış işlemi sayısı
+      realizedSells: number; // FIFO lotu bulunan satış sayısı
+      realizedPnl: number; // FIFO gerçekleşen K/Z (TRY)
+      realizedCost: number; // satılan lotların FIFO maliyeti (TRY)
     }
     const map = new Map<string, Row>();
     for (const t of filtered) {
@@ -194,6 +202,10 @@ export function IslemlerClient({
           buyGross: 0,
           sellQty: 0,
           sellGross: 0,
+          sells: 0,
+          realizedSells: 0,
+          realizedPnl: 0,
+          realizedCost: 0,
         };
         map.set(key, row);
       }
@@ -206,12 +218,19 @@ export function IslemlerClient({
       } else {
         row.sellQty += qty;
         row.sellGross += gross - fees;
+        row.sells += 1;
+        const lot = realizedBySell[t.id];
+        if (lot) {
+          row.realizedSells += 1;
+          row.realizedPnl += lot.pnl_try;
+          row.realizedCost += lot.cost_try;
+        }
       }
     }
     return Array.from(map.values()).sort((a, b) =>
       a.symbol.localeCompare(b.symbol, "tr"),
     );
-  }, [filtered, assetMap]);
+  }, [filtered, assetMap, realizedBySell]);
 
   const summaryTotals = useMemo(() => {
     let buyGross = 0;
@@ -221,13 +240,10 @@ export function IslemlerClient({
     for (const r of symbolSummary) {
       buyGross += r.buyGross;
       sellGross += r.sellGross;
-      if (r.buyQty > 0 && r.sellQty > 0) {
-        const buyWac = r.buyGross / r.buyQty;
-        realized += r.sellGross - r.sellQty * buyWac;
-        realizedBasis += r.sellQty * buyWac;
-      }
+      realized += r.realizedPnl;
+      realizedBasis += r.realizedCost;
     }
-    return { buyGross, sellGross, realized, realizedBasis, singleCurrency: new Set(symbolSummary.map(r => r.currency)).size === 1 };
+    return { buyGross, sellGross, realized, realizedBasis };
   }, [symbolSummary]);
 
   const remove = (id: string) => {
@@ -373,10 +389,11 @@ export function IslemlerClient({
               {symbolSummary.map((r) => {
                 const buyWac = r.buyQty > 0 ? r.buyGross / r.buyQty : null;
                 const sellWac = r.sellQty > 0 ? r.sellGross / r.sellQty : null;
-                const hasBoth = r.buyQty > 0 && r.sellQty > 0;
-                const pnl = hasBoth ? r.sellGross - r.sellQty * (buyWac as number) : null;
-                const basis = hasBoth ? r.sellQty * (buyWac as number) : null;
-                const pct = pnl != null && basis != null && basis !== 0 ? (pnl / basis) * 100 : null;
+                // FIFO gerçekleşen K/Z — dönem dışındaki eski alışlar da doğru
+                // maliyetle hesaba girer (Raporlar ile aynı kaynak).
+                const pnl = r.realizedSells > 0 ? r.realizedPnl : null;
+                const pct = pnl != null && r.realizedCost > 0 ? (pnl / r.realizedCost) * 100 : null;
+                const partial = r.realizedSells > 0 && r.realizedSells < r.sells;
                 const qtyD = qtyDecimals(r.asset_class, r.symbol);
                 const pnlColor = pnl == null ? undefined : pnl >= 0 ? "var(--positive)" : "var(--negative)";
                 return (
@@ -404,7 +421,14 @@ export function IslemlerClient({
                       {r.sellQty > 0 ? moneyTotals([r], () => r.sellGross, r => r.currency) : <span className="hint">—</span>}
                     </td>
                     <td className="num tabular" style={{ color: pnlColor, fontWeight: 600 }}>
-                      {pnl != null ? moneyTotals([r], () => pnl, r => r.currency) : <span className="hint">—</span>}
+                      {pnl != null ? (
+                        <span title={partial ? "Bazı satışların FIFO kaydı henüz yok — kısmi toplam" : undefined}>
+                          {moneyTotals([r], () => pnl, () => "TRY")}
+                          {partial ? "*" : ""}
+                        </span>
+                      ) : (
+                        <span className="hint">—</span>
+                      )}
                     </td>
                     <td className="num tabular" style={{ color: pnlColor, fontWeight: 600 }}>
                       {pct != null ? fmt.pct(pct, 2) : <span className="hint">—</span>}
@@ -439,7 +463,7 @@ export function IslemlerClient({
                   }}
                 >
                   {summaryTotals.realizedBasis > 0
-                    ? moneyTotals(symbolSummary.filter(r => r.buyQty > 0 && r.sellQty > 0), r => r.sellGross - r.sellQty * r.buyGross / r.buyQty, r => r.currency)
+                    ? moneyTotals(symbolSummary.filter(r => r.realizedSells > 0), r => r.realizedPnl, () => "TRY")
                     : "—"}
                 </td>
                 <td
@@ -455,7 +479,6 @@ export function IslemlerClient({
                   }}
                 >
                   {summaryTotals.realizedBasis > 0
-                    && summaryTotals.singleCurrency
                     ? fmt.pct((summaryTotals.realized / summaryTotals.realizedBasis) * 100, 2)
                     : "—"}
                 </td>
@@ -463,8 +486,9 @@ export function IslemlerClient({
             </tfoot>
           </table>
           <div style={{ padding: "10px 16px", fontSize: 11, color: "var(--muted)", borderTop: "1px solid var(--border-soft)" }}>
-            Kar/Zarar hesabı, seçili dönemdeki alış ortalaması ile satış tutarı arasındaki farka dayanır. Dönem
-            dışındaki eski alışlar dikkate alınmaz — bu nedenle yalnızca satış olan sembollerde kar/zarar boş bırakılır.
+            Kar/Zarar, seçili dönemdeki satışların FIFO yöntemiyle gerçekleşen kârıdır (komisyonlar dahil, stopaj
+            öncesi, TRY) — satılan lotlar dönem dışında alınmış olsa da gerçek alış maliyetiyle hesaplanır ve
+            Raporlar ile aynıdır. * işaretli satırlarda bazı satışların FIFO kaydı henüz oluşmamıştır.
           </div>
         </div>
       )}
