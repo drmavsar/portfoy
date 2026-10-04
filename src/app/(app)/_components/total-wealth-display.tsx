@@ -3,53 +3,76 @@
 import { useState } from "react";
 
 import { fmt } from "@/lib/finance/fmt";
+import {
+  UNIT_META,
+  inUnit,
+  unitChange,
+  unitDayChange,
+  type UnitRates,
+  type WealthPoint,
+  type WealthUnit,
+} from "@/lib/finance/wealth-units";
 
-type Currency = "TRY" | "USD" | "EUR";
-
-const SYMBOL: Record<Currency, string> = { TRY: "₺", USD: "$", EUR: "€" };
+interface WealthRef {
+  key: string;
+  /** "30 günde", "2026 başından" */
+  label: string;
+  point: WealthPoint;
+}
 
 interface Props {
   /** TL cinsinden toplam servet (anlık) */
   totalTry: number;
-  /** TL cinsinden bugünkü değişim */
+  /** TL cinsinden bugünkü PİYASA kaynaklı değişim (nakit akışı hariç) */
   dayChangeTry: number;
-  /** USD/TRY (1 USD = X TRY) */
-  usdRate?: number | null;
-  /** EUR/TRY (1 EUR = X TRY) */
-  eurRate?: number | null;
+  /** "YYYY-MM-DD" (İstanbul) */
+  today: string;
+  /** Anlık kurlar (1 birim = X TRY; XAU = gram altın) */
+  rates: UnitRates;
+  /** Bir önceki snapshot'ın kurları — birim cinsinden günlük değişim için */
+  prevRates: UnitRates | null;
+  /** Karşılaştırma noktaları (kendi günlerinin kuruyla) */
+  refs: WealthRef[];
 }
 
-export function TotalWealthDisplay({ totalTry, dayChangeTry, usdRate, eurRate }: Props) {
-  const [ccy, setCcy] = useState<Currency>("TRY");
+const UNITS: WealthUnit[] = ["TRY", "USD", "EUR", "XAU"];
 
-  const rate = ccy === "TRY" ? 1 : ccy === "USD" ? (usdRate ?? null) : (eurRate ?? null);
-  const sym = SYMBOL[ccy];
+function formatAmount(v: number, unit: WealthUnit): string {
+  if (unit === "TRY") return fmt.trydp(v);
+  const m = UNIT_META[unit];
+  return `${v.toLocaleString("tr-TR", { minimumFractionDigits: m.decimals, maximumFractionDigits: m.decimals })} ${m.suffix}`;
+}
 
-  const amount = rate && rate > 0 ? totalTry / rate : totalTry;
-  const dayChange = rate && rate > 0 ? dayChangeTry / rate : dayChangeTry;
-  const pct =
-    totalTry > 0 && dayChangeTry !== 0
-      ? (dayChangeTry / (totalTry - dayChangeTry || totalTry)) * 100
-      : 0;
+function signed(v: number, d: number): string {
+  return `${v >= 0 ? "+" : "−"}${fmt.tr(Math.abs(v), d)}`;
+}
 
-  const dayColor = dayChange >= 0 ? "var(--positive)" : "var(--negative)";
+export function TotalWealthDisplay({ totalTry, dayChangeTry, today, rates, prevRates, refs }: Props) {
+  const [unit, setUnit] = useState<WealthUnit>("TRY");
+  const meta = UNIT_META[unit];
+
+  const amount = inUnit(totalTry, unit, rates) ?? totalTry;
+  // Birim cinsinden günlük değişim kur hareketini de içerir (dünkü kurla)
+  const dayChange = unitDayChange(totalTry, dayChangeTry, unit, rates, prevRates);
+  const dayBase = dayChange == null ? null : amount - dayChange;
+  const dayPct = dayChange != null && dayBase != null && dayBase > 0 ? (dayChange / dayBase) * 100 : null;
+  const dayColor = (dayChange ?? 0) >= 0 ? "var(--positive)" : "var(--negative)";
+  const dayDecimals = unit === "XAU" ? 1 : 0;
+
+  const nowPoint: WealthPoint = { date: today, totalTry, rates };
 
   return (
     <div style={{ flex: "0 0 auto" }}>
-      {/* Currency toggle */}
+      {/* Birim seçici */}
       <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
-        {(["TRY", "USD", "EUR"] as const).map((c) => {
-          const active = c === ccy;
-          const disabled = c !== "TRY" && (!rate || rate <= 0)
-            ? c === "USD"
-              ? !usdRate
-              : !eurRate
-            : false;
+        {UNITS.map((u) => {
+          const active = u === unit;
+          const disabled = inUnit(1, u, rates) == null;
           return (
             <button
-              key={c}
+              key={u}
               type="button"
-              onClick={() => !disabled && setCcy(c)}
+              onClick={() => !disabled && setUnit(u)}
               disabled={disabled}
               style={{
                 fontSize: 11,
@@ -62,50 +85,57 @@ export function TotalWealthDisplay({ totalTry, dayChangeTry, usdRate, eurRate }:
                 cursor: disabled ? "not-allowed" : "pointer",
                 opacity: disabled ? 0.4 : 1,
               }}
-              title={disabled ? `${c} kuru çekilemedi` : `${c} cinsinden göster`}
+              title={disabled ? `${UNIT_META[u].label} kuru çekilemedi` : `${UNIT_META[u].label} cinsinden göster`}
             >
-              {SYMBOL[c]} {c}
+              {UNIT_META[u].label}
             </button>
           );
         })}
       </div>
 
       {/* Büyük servet rakamı */}
-      <div
-        className="tabular"
-        style={{ fontSize: 36, fontWeight: 700, color: "var(--fg)" }}
-      >
-        {ccy === "TRY"
-          ? fmt.trydp(amount)
-          : `${amount.toLocaleString("tr-TR", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })} ${sym}`}
+      <div className="tabular" style={{ fontSize: 36, fontWeight: 700, color: "var(--fg)" }}>
+        {formatAmount(amount, unit)}
       </div>
 
       {/* Bugünkü değişim */}
-      <div
-        className="tabular"
-        style={{
-          fontSize: 14,
-          fontWeight: 600,
-          marginTop: 6,
-          color: dayColor,
-        }}
-      >
-        {dayChange >= 0 ? "+" : ""}
-        {fmt.tr(dayChange, 0)} {sym}
-        {totalTry > 0 && dayChangeTry !== 0 && (
+      <div className="tabular" style={{ fontSize: 14, fontWeight: 600, marginTop: 6, color: dayChange == null ? "var(--muted)" : dayColor }}>
+        {dayChange == null ? (
+          "—"
+        ) : (
           <>
-            {" · "}
-            {pct >= 0 ? "+" : ""}
-            {pct.toFixed(2)}%
+            {signed(dayChange, dayDecimals)} {meta.suffix}
+            {dayPct != null && dayChange !== 0 && <> · {signed(dayPct, 2)}%</>}
           </>
         )}
       </div>
       <div className="hint" style={{ fontSize: 11, marginTop: 4 }}>
-        Bugünkü değişim
+        {unit === "TRY"
+          ? "Bugünkü değişim"
+          : dayChange == null
+            ? "Dünkü kur yok — günlük değişim hesaplanamadı"
+            : "Bugünkü değişim (kur hareketi dahil)"}
       </div>
+
+      {/* Dönem karşılaştırmaları — birikim dahil servet değişimi */}
+      {refs.length > 0 && (
+        <div
+          style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10, fontSize: 12 }}
+          title="Servet değişimi: yeni birikim ve harcamalar dahil (getiri değil). Her tarih kendi günün kuruyla çevrilir."
+        >
+          {refs.map((r) => {
+            const c = unitChange(nowPoint, r.point, unit);
+            if (!c || c.pct == null) return null;
+            const color = c.pct >= 0 ? "var(--positive)" : "var(--negative)";
+            return (
+              <span key={r.key} className="tabular">
+                <span className="hint">{r.label} </span>
+                <span style={{ color, fontWeight: 650 }}>{signed(c.pct * 100, 1)}%</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

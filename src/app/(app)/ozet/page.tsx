@@ -1,5 +1,6 @@
 import Link from "next/link";
 import {
+  listAccountActivity,
   listAccounts,
   listBeneficiariesLite,
   listCustodyLocations,
@@ -16,7 +17,13 @@ import { getAssetChanges, getAssetRates, getTruncgilUpdateDate } from "@/app/(ap
 import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
 import { listTransactionsForReports } from "@/app/(app)/_lib/reports-actions";
 import { listBenchmarkPoints, listWealthSnapshots } from "@/app/(app)/_lib/wealth-snapshots-actions";
-import { captureDailySnapshot, listDailySnapshots } from "@/app/(app)/_lib/daily-snapshots-actions";
+import {
+  captureDailySnapshot,
+  getDailySnapshotOnOrBefore,
+  listDailySnapshots,
+  type DailySnapshotRow,
+} from "@/app/(app)/_lib/daily-snapshots-actions";
+import { findStaleBalances } from "@/app/(app)/_lib/stale-balances";
 import { AssetCompositionChart } from "@/app/(app)/_components/asset-composition-chart";
 import { RefreshButton } from "@/app/(app)/_components/refresh-button";
 import { TotalWealthDisplay } from "@/app/(app)/_components/total-wealth-display";
@@ -24,7 +31,8 @@ import { CashflowCard } from "@/app/(app)/_components/cashflow-card";
 import { PersonEquityChart } from "@/app/(app)/_components/person-equity-chart";
 import { Icon } from "@/components/ui/icon";
 import { fmt } from "@/lib/finance/fmt";
-import { istanbulToday, istanbulYesterday } from "@/lib/finance/istanbul-date";
+import { addDaysIso, istanbulToday, istanbulYesterday } from "@/lib/finance/istanbul-date";
+import { pointBefore, pointOnOrBefore, type UnitRates, type WealthPoint } from "@/lib/finance/wealth-units";
 
 interface AssetClassSlice {
   label: string;
@@ -46,6 +54,19 @@ function classifyAccountClass(currency: string): { key: string; label: string; c
 
 export const dynamic = "force-dynamic";
 
+function positiveOrNull(v: number | string | null | undefined): number | null {
+  const n = v == null ? NaN : Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function snapshotPoint(s: DailySnapshotRow): WealthPoint {
+  return {
+    date: s.snapshot_date,
+    totalTry: Number(s.total_wealth),
+    rates: { USD: positiveOrNull(s.usdtry), EUR: positiveOrNull(s.eurtry), XAU: positiveOrNull(s.xau_gram_try) },
+  };
+}
+
 function tryValueOf(a: AccountRow, fxRates: Record<string, number | undefined>): number {
   if (a.currency === "TRY") return a.balance_try ?? a.opening_balance ?? 0;
   const native = a.balance_native;
@@ -55,7 +76,8 @@ function tryValueOf(a: AccountRow, fxRates: Record<string, number | undefined>):
 }
 
 export default async function OzetPage() {
-  const [accounts, custodies, beneficiaries, fxRates, fxChanges, truncgilUpdate, holdings, assets, portfolios, trades, txns, wealthSnapshots, benchmarkPoints] = await Promise.all([
+  const prevYearEnd = `${Number(istanbulToday().slice(0, 4)) - 1}-12-31`;
+  const [accounts, custodies, beneficiaries, fxRates, fxChanges, truncgilUpdate, holdings, assets, portfolios, trades, txns, wealthSnapshots, benchmarkPoints, accountActivity, prevYearEndSnapshot] = await Promise.all([
     listAccounts(),
     listCustodyLocations(),
     listBeneficiariesLite(),
@@ -69,6 +91,8 @@ export default async function OzetPage() {
     listTransactionsForReports(12),
     listWealthSnapshots(),
     listBenchmarkPoints(),
+    listAccountActivity(),
+    getDailySnapshotOnOrBefore(prevYearEnd),
   ]);
 
   const benMap: Record<string, BeneficiaryLite> = Object.fromEntries(beneficiaries.map((b) => [b.id, b]));
@@ -302,6 +326,9 @@ export default async function OzetPage() {
       equity_mv: investmentMv,
       crypto_try: 0,
       equity_by_person: equityByPerson,
+      usdtry: positiveOrNull(fxRates.USD),
+      eurtry: positiveOrNull(fxRates.EUR),
+      xau_gram_try: positiveOrNull(fxRates.XAU),
     });
   }
   const dailySnapshots = await listDailySnapshots(180);
@@ -465,6 +492,46 @@ export default async function OzetPage() {
     else if (t.direction === "outflow") m.outflow += Number(t.amount);
   }
 
+  // Servet döviz/altın cinsinden: her referans noktası KENDİ günün kuruyla.
+  const nowRates: UnitRates = {
+    USD: positiveOrNull(fxRates.USD),
+    EUR: positiveOrNull(fxRates.EUR),
+    XAU: positiveOrNull(fxRates.XAU),
+  };
+  const wealthHistory = dailySnapshots.map(snapshotPoint);
+  const prevWealthPoint = pointBefore(wealthHistory, todayTr);
+  const d30Point = pointOnOrBefore(wealthHistory, addDaysIso(todayTr, -30));
+  // Yıl başı: önceki yılın son günlük snapshot'ı; yoksa elle girilen yıl sonu
+  // serveti + yıl sonu kurları (v_benchmark_year_end).
+  let ytdPoint: WealthPoint | null = prevYearEndSnapshot ? snapshotPoint(prevYearEndSnapshot) : null;
+  if (!ytdPoint) {
+    const prevYear = String(currentYear - 1);
+    const ws = wealthSnapshots.find((w) => String(w.period) === prevYear);
+    const yearEnd = (code: string) =>
+      positiveOrNull(benchmarkPoints.find((b) => b.code === code && b.as_of.startsWith(prevYear))?.value);
+    if (ws) {
+      ytdPoint = {
+        date: prevYearEnd,
+        totalTry: Number(ws.total_try),
+        rates: { USD: yearEnd("USDTRY"), EUR: yearEnd("EURTRY"), XAU: yearEnd("XAUTRY") },
+      };
+    }
+  }
+  const wealthRefs = [
+    d30Point ? { key: "d30", label: "30 günde", point: d30Point } : null,
+    ytdPoint ? { key: "ytd", label: `${currentYear} başından`, point: ytdPoint } : null,
+  ].filter((r): r is { key: string; label: string; point: WealthPoint } => r != null);
+
+  // Bayat bakiye: elle girilen bakiyeler uzun süre güncellenmediyse ya da
+  // güncellemeden sonra hareket girildiyse toplam servet yanlış görünür.
+  const staleAccounts = findStaleBalances(
+    accounts,
+    new Map(accountActivity.map((a) => [a.account_id, { last_txn_on: a.last_txn_on, txn_count: a.txn_count }])),
+    todayTr,
+  );
+  const custodyName = new Map(custodies.map((c) => [c.id, c.name]));
+  const accountCustody = new Map(accounts.map((a) => [a.id, a.custody_id]));
+
   return (
     <div>
       <div className="page-head">
@@ -485,6 +552,40 @@ export default async function OzetPage() {
         <Link className="btn btn-sm" href="/yatirimlar">Portföy</Link>
         <Link className="btn btn-sm" href="/raporlar">Raporlar</Link>
       </nav>
+      {staleAccounts.length > 0 && (
+        <div className="card" style={{ padding: 14, marginBottom: 16, borderLeft: "3px solid var(--warning)" }}>
+          <div style={{ fontSize: 13, fontWeight: 650, marginBottom: 8 }}>
+            Bakiyesi güncel olmayabilecek {staleAccounts.length} hesap — toplam servet buna göre sapabilir
+          </div>
+          <div style={{ display: "grid", gap: 4 }}>
+            {staleAccounts.slice(0, 6).map((s) => {
+              const custody = custodyName.get(accountCustody.get(s.id) ?? "") ?? null;
+              const owner = s.beneficiary_id ? benMap[s.beneficiary_id]?.name : null;
+              return (
+                <div key={s.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12, flexWrap: "wrap" }}>
+                  <span>
+                    <b>{[custody, s.name].filter(Boolean).join(" · ")}</b>
+                    {owner && <span className="hint"> · {owner}</span>}
+                    <span className="hint"> · {s.currency}</span>
+                  </span>
+                  <span className="hint">
+                    {s.reason === "activity"
+                      ? `bakiye ${s.updatedOn} tarihinde girildi; sonrasında ${s.lastTxnOn} tarihine kadar hareket var`
+                      : `${s.daysSince} gündür güncellenmedi`}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 12 }}>
+            <span className="hint">
+              {staleAccounts.length > 6 ? `+${staleAccounts.length - 6} hesap daha · ` : ""}
+              Bakiye doğruysa hesabı açıp kaydetmen yeterli.
+            </span>
+            <Link href="/hesaplar">Hesaplar&apos;da güncelle →</Link>
+          </div>
+        </div>
+      )}
       {enriched.some(h => Number(h.quantity) > 0 && !h.quote) && <div className="card" style={{ padding: 14, marginBottom: 16 }}>
         {enriched.filter(h => Number(h.quantity) > 0 && !h.quote).length} pozisyonda fiyat bulunmadığı için bu ekranda maliyet değeri kullanılıyor. <Link href="/yatirimlar">Portföyü incele →</Link>
       </div>}
@@ -513,8 +614,10 @@ export default async function OzetPage() {
                 <TotalWealthDisplay
                   totalTry={grandTotal}
                   dayChangeTry={totalDayChange}
-                  usdRate={fxRates.USD ?? null}
-                  eurRate={fxRates.EUR ?? null}
+                  today={todayTr}
+                  rates={nowRates}
+                  prevRates={prevWealthPoint?.rates ?? null}
+                  refs={wealthRefs}
                 />
                 {dailySnapshots.length >= 2 && (() => {
                   const values = dailySnapshots.map((s) => Number(s.total_wealth));

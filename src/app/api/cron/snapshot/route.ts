@@ -81,6 +81,10 @@ function accountTryValue(a: AccountRow, fxRates: Record<string, number>): number
   return Number(a.balance_try ?? 0);
 }
 
+function positiveOrNull(v: number | undefined): number | null {
+  return typeof v === "number" && v > 0 ? v : null;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SupabaseLike = any;
 
@@ -259,6 +263,10 @@ export async function GET(req: NextRequest) {
           user_id: userId,
           snapshot_date: today,
           ...snap,
+          // Servetin döviz/altın cinsinden değişimi için günün kuru
+          usdtry: positiveOrNull(fxRates.USD),
+          eurtry: positiveOrNull(fxRates.EUR),
+          xau_gram_try: positiveOrNull(fxRates.XAU),
         } as never,
         { onConflict: "user_id,snapshot_date" },
       );

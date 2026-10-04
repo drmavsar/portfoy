@@ -25,6 +25,14 @@ export interface AccountRow {
   balance_try: number | null;
   balance_native: number | null;
   opening_balance: number;
+  /** Son düzenleme (bakiye elle girilir → bayat bakiye uyarısı) */
+  updated_at?: string | null;
+}
+
+export interface AccountActivityRow {
+  account_id: string;
+  last_txn_on: string;
+  txn_count: number;
 }
 
 export interface BeneficiaryLite {
@@ -55,7 +63,7 @@ export async function listAccounts(): Promise<AccountRow[]> {
   const { data, error } = await supabase
     .from("accounts")
     .select(
-      "id, custody_id, beneficiary_id, name, account_type, currency, iban, balance_try, balance_native, opening_balance",
+      "id, custody_id, beneficiary_id, name, account_type, currency, iban, balance_try, balance_native, opening_balance, updated_at",
     )
     .is("archived_at", null)
     .order("created_at", { ascending: true });
@@ -64,6 +72,20 @@ export async function listAccounts(): Promise<AccountRow[]> {
     return [];
   }
   return (data ?? []) as unknown as AccountRow[];
+}
+
+/** Hesap başına son işlem tarihi (v_account_last_activity, RLS'li). */
+export async function listAccountActivity(): Promise<AccountActivityRow[]> {
+  if (!(await isSupabaseConfigured())) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("v_account_last_activity" as never)
+    .select("account_id, last_txn_on, txn_count");
+  if (error) {
+    console.error("listAccountActivity error", error);
+    return [];
+  }
+  return (data ?? []) as unknown as AccountActivityRow[];
 }
 
 export async function listBeneficiariesLite(): Promise<BeneficiaryLite[]> {
@@ -115,7 +137,7 @@ export async function createAccount(input: {
     .from("accounts")
     .insert(insertRow as never)
     .select(
-      "id, custody_id, beneficiary_id, name, account_type, currency, iban, balance_try, balance_native, opening_balance",
+      "id, custody_id, beneficiary_id, name, account_type, currency, iban, balance_try, balance_native, opening_balance, updated_at",
     )
     .single();
 
@@ -156,7 +178,7 @@ export async function updateAccount(input: {
     } as never)
     .eq("id", input.id)
     .select(
-      "id, custody_id, beneficiary_id, name, account_type, currency, iban, balance_try, balance_native, opening_balance",
+      "id, custody_id, beneficiary_id, name, account_type, currency, iban, balance_try, balance_native, opening_balance, updated_at",
     )
     .single();
 
