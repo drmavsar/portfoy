@@ -9,8 +9,9 @@ function pctColor(v: number | null | undefined): string | undefined {
   return v >= 0 ? "var(--positive)" : "var(--negative)";
 }
 
+/** Oran → "+12,3%" (fmt.pct işareti kendisi ekler). */
 function signedPct(v: number): string {
-  return `${v >= 0 ? "+" : ""}${fmt.pct(v * 100, 1)}`;
+  return fmt.pct(v * 100, 1);
 }
 
 /** Hücre: dönem getirisi büyük, yıllık oran küçük (kısa vadede ikincil). */
