@@ -41,3 +41,7 @@ tefas-ingest.log
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Python
+__pycache__/
+*.pyc
