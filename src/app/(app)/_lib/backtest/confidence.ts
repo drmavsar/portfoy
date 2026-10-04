@@ -46,8 +46,26 @@ export interface Sprint6GoNoGo {
 }
 
 /**
+ * GO/NO-GO için senaryo alfası: YALNIZ devreye alınacak (yapılandırılmış)
+ * stratejinin alfası. Eskiden her senaryoda equal_weight ile score_weighted
+ * arasından geriye dönük iyi olan seçiliyordu (bestStrategyAlpha) → seçim
+ * yanlılığı: EW alfaları [+2,−1,+4,−3]% iken güven 100 (GO) çıkabiliyordu,
+ * EW tek başına 50 (NO-GO).
+ */
+export function configuredStrategyAlpha(
+  strategy: "equal_weight" | "score_weighted",
+  equalWeight: VsBenchmarkMetrics | null,
+  scoreWeighted: VsBenchmarkMetrics | null,
+): number | null {
+  const vs = strategy === "equal_weight" ? equalWeight : scoreWeighted;
+  return vs?.alpha_cagr ?? null;
+}
+
+/**
  * Bir senaryo için "best strategy alpha" — equal_weight ve score_weighted
  * arasından max'ı seç (her ikisi de mevcut değilse mevcut olan).
+ * YALNIZ keşif/raporlama için; GO/NO-GO kararında kullanma (seçim yanlılığı) —
+ * bkz. configuredStrategyAlpha.
  */
 export function bestStrategyAlpha(
   equalWeight: VsBenchmarkMetrics | null,

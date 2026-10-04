@@ -6,7 +6,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 import {
-  bestStrategyAlpha,
+  configuredStrategyAlpha,
   computeConfidence,
   evaluateSprint6,
   type ScenarioBenchmarkAlphas,
@@ -251,8 +251,9 @@ export async function loadBacktestSnapshot(): Promise<BacktestUiSnapshot | null>
       );
       const ewVs = ew?.summary.vs_benchmark?.[bench] ?? null;
       const swVs = sw?.summary.vs_benchmark?.[bench] ?? null;
-      const best = bestStrategyAlpha(ewVs, swVs);
-      if (best != null) alphas.push(best);
+      // Yapılandırılmış stratejinin alfası (en iyi olanı seçmek seçim yanlılığı)
+      const alpha = configuredStrategyAlpha(BEST_CONFIG.strategy, ewVs, swVs);
+      if (alpha != null) alphas.push(alpha);
     }
     void ewAlphas;
     void swAlphas;

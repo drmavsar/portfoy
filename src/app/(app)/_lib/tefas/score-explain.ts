@@ -236,12 +236,22 @@ function buildBreakdown(input: ExplainFundScoreInput): ScoreBreakdownItem[] {
     ["long_term_performance", s.long_term_performance_score, p.long_term_weight],
     ["diversification", s.diversification_score, p.diversification_weight],
   ];
+  // Persona ağırlıkları DB'de kesir (0.25), testlerde yüzde (25) gelebiliyor.
+  // Eskiden yüzde varsayılıyordu → fon sayfasında "0.2 / 0.25" görünüyordu.
+  const weightSum = items.reduce((acc, [, , w]) => acc + w, 0);
+  const scale = weightSum > 0 && weightSum <= 1.5 ? 100 : 1;
+  // Skor = Σ raw·w / Σ(mevcut w) (computeMehmetScore). Katkılar da aynı
+  // normalizasyonla ki eksik bileşen varken toplamları skoru versin.
+  const availableWeight = items
+    .filter(([, raw]) => raw != null)
+    .reduce((acc, [, , w]) => acc + w * scale, 0);
   return items.map(([key, raw, weight]) => ({
     key,
     label_tr: COMPONENT_LABELS[key],
     raw_score: raw,
-    weight_pct: weight,
-    contribution: raw == null ? null : (raw * weight) / 100,
+    weight_pct: weight * scale,
+    contribution:
+      raw == null || availableWeight <= 0 ? null : (raw * weight * scale) / availableWeight,
     label_status: statusFor(raw),
   }));
 }

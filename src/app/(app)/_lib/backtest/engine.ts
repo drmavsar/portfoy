@@ -39,7 +39,7 @@ import {
 } from "../tefas/scoring-logic";
 import { getActiveFundsAtDateInMemory } from "../benchmark/active-funds";
 import type { FundStatusEntry } from "../benchmark/types";
-import { addDays, computeRebalanceDates } from "./dates";
+import { addDays, computeRebalanceDates, cpiPeriodFor } from "./dates";
 import {
   computeCagr,
   computeMaxDrawdown,
@@ -161,6 +161,19 @@ function navAt(prices: NavPoint[], date: string): number | null {
     else break;
   }
   return candidate;
+}
+
+/**
+ * TEFAS ileri fiyatlama: t günü verilen emir t'den SONRAKİ ilk NAV ile
+ * gerçekleşir. Eskiden karar ve dolum aynı günün NAV'ıydı (skor `as_of <=
+ * rebDate` ile hesaplanıp `navAt(rebDate)` ile alınıyordu) → her rebalance'ta
+ * bir günlük bedava bilgi (look-ahead). Veri bitmişse son NAV'a düşer.
+ */
+function navFill(prices: NavPoint[], date: string): number | null {
+  for (const p of prices) {
+    if (p.as_of > date) return p.nav;
+  }
+  return navAt(prices, date);
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -390,12 +403,12 @@ export function runBacktestPure(input: BacktestEngineInput): BacktestResult {
       params.strategy,
     );
 
-    // 5. Rebalance portfolio
+    // 5. Rebalance portfolio — alım ve satış ileri fiyatla (navFill: t+1 NAV)
     const navAtRebMap = new Map<string, number>();
     for (const t of topN) {
       const prices = fundPrices[t.fund_code];
       if (!prices) continue;
-      const navVal = navAt(prices, rebDate);
+      const navVal = navFill(prices, rebDate);
       if (navVal != null && navVal > 0) navAtRebMap.set(t.fund_code, navVal);
     }
     // Mevcut holdings için de NAV çek (satış için)
@@ -403,7 +416,7 @@ export function runBacktestPure(input: BacktestEngineInput): BacktestResult {
       if (!navAtRebMap.has(code)) {
         const prices = fundPrices[code];
         if (prices) {
-          const v = navAt(prices, rebDate);
+          const v = navFill(prices, rebDate);
           if (v != null) navAtRebMap.set(code, v);
         }
       }
@@ -505,7 +518,13 @@ function buildSummary(
 
   const cagr = computeCagr(startNav, endNav, years);
   const totalReturn = computeTotalReturn(startNav, endNav);
-  const volatility = computeVolatility(portSeries);
+  // Volatilite yalnız İŞ GÜNÜ noktalarından: seri takvim günü üretiliyor
+  // (hafta sonu NAV bir önceki günden taşınır → 0 getiri). √252 ile
+  // yıllıklandırınca sıfır getirili hafta sonları volatiliteyi ~%15 düşük,
+  // Sharpe'ı şişik gösteriyordu.
+  const volatility = computeVolatility(
+    navSeries.filter((p) => isWeekday(p.as_of)).map((p) => p.portfolio_nav),
+  );
   const maxDd = computeMaxDrawdown(portSeries);
   const sharpe = computeSharpeLike(cagr, volatility, input.riskFreeRate);
 
@@ -598,16 +617,32 @@ function detectPhase(params: BacktestParams): "phase_1" | "phase_2" {
   return "phase_2";
 }
 
+/**
+ * Tarih için TÜFE endeksi: yayın gecikmesi nedeniyle bir önceki ayın değeri
+ * (cpiPeriodFor; üretimdeki cpiPeriodForNavDate ile aynı), yoksa en yakın
+ * önceki dönem.
+ *
+ * Eskiden `p > candidate.toString()` ile dönem metni ("2026-05") TÜFE DEĞERİYLE
+ * ("686.95") karşılaştırılıyordu → aday ilk girişte takılıyor, başlangıç ve
+ * bitiş TÜFE'si eşit çıkıyor, reel CAGR = nominal CAGR oluyordu.
+ */
 function lookupCpiAt(cpi: CpiByPeriod, date: string): number | null {
-  const period = date.slice(0, 7);
-  // Look for exact or earlier
+  const target = cpiPeriodFor(date);
+  let candPeriod: string | null = null;
   let candidate: number | null = null;
   for (const [p, v] of Object.entries(cpi)) {
-    if (p <= period && (candidate == null || p > candidate.toString())) {
+    if (p <= target && (candPeriod == null || p > candPeriod)) {
+      candPeriod = p;
       candidate = v;
     }
   }
   return candidate;
 }
 
-export const __internals = { sliceSeriesAsOf, sliceCpiAsOf, navAt, scoreFundAtDate, normalizeBenchmarkSeries };
+/** "YYYY-MM-DD" hafta içi mi (UTC takvim günü). */
+function isWeekday(iso: string): boolean {
+  const dow = new Date(`${iso}T00:00:00Z`).getUTCDay();
+  return dow !== 0 && dow !== 6;
+}
+
+export const __internals = { sliceSeriesAsOf, sliceCpiAsOf, navAt, navFill, scoreFundAtDate, normalizeBenchmarkSeries, lookupCpiAt };

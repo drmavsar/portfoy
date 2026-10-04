@@ -23,9 +23,10 @@ import {
 import {
   computeConfidence,
   evaluateSprint6,
-  bestStrategyAlpha,
+  configuredStrategyAlpha,
   type ScenarioBenchmarkAlphas,
 } from "@/app/(app)/_lib/backtest/confidence";
+import { BEST_CONFIG } from "@/app/(app)/_lib/backtest/snapshot-loader";
 import type {
   BacktestParams,
   VsBenchmarkMetrics,
@@ -128,8 +129,9 @@ export async function GET(req: NextRequest) {
       const swRun = runs.find((r) => r.scenario === scenario && r.strategy === "score_weighted" && r.ok);
       const ewBench = (ewRun?.summary as { vs_benchmark?: Record<string, VsBenchmarkMetrics> })?.vs_benchmark?.[bench] ?? null;
       const swBench = (swRun?.summary as { vs_benchmark?: Record<string, VsBenchmarkMetrics> })?.vs_benchmark?.[bench] ?? null;
-      const best = bestStrategyAlpha(ewBench, swBench);
-      return best ?? Number.NaN;
+      // GO/NO-GO devreye alınacak stratejiyle (seçim yanlılığı olmadan)
+      const alpha = configuredStrategyAlpha(BEST_CONFIG.strategy, ewBench, swBench);
+      return alpha ?? Number.NaN;
     }).filter((x) => Number.isFinite(x)),
   }));
 

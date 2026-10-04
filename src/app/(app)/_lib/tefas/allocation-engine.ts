@@ -23,7 +23,12 @@ export interface ScoreCandidate {
   fund_code: string;
   mehmet_score: number | null;
   components_used: number | null;
+  /** Skorun hesaplandığı NAV tarihi (YYYY-MM-DD). */
+  as_of?: string | null;
 }
+
+/** En güncel skordan bu kadar gün eski kalan fon "bayat" sayılır. */
+const STALE_SCORE_DAYS = 7;
 
 /**
  * v_fund_scores_latest sonuçlarından Top N seçer:
@@ -36,11 +41,23 @@ export function selectTopN<T extends ScoreCandidate>(
   topN: number = ALLOCATION_DEFAULTS.TOP_N,
   minComponents: number = ALLOCATION_DEFAULTS.MIN_COMPONENTS_USED,
 ): T[] {
+  // Bayat skor (fonun NAV'ı günlerdir gelmiyor; kapanmış/askıya alınmış olabilir)
+  // alınamaz bir hedef önerir ve eski tarihli getirileri güncel sanır → dışla.
+  const latestAsOf = scores.reduce<string | null>(
+    (m, s) => (s.as_of && (!m || s.as_of > m) ? s.as_of : m),
+    null,
+  );
+  const staleCutoff = latestAsOf
+    ? new Date(Date.parse(`${latestAsOf}T00:00:00Z`) - STALE_SCORE_DAYS * 86_400_000)
+        .toISOString()
+        .slice(0, 10)
+    : null;
   const filtered = scores.filter(
     (s) =>
       s.mehmet_score != null &&
       Number.isFinite(s.mehmet_score) &&
-      (s.components_used ?? 0) >= minComponents,
+      (s.components_used ?? 0) >= minComponents &&
+      !(staleCutoff && s.as_of && s.as_of < staleCutoff),
   );
   const sorted = [...filtered].sort((a, b) => {
     const sb = b.mehmet_score ?? -Infinity;
@@ -222,6 +239,11 @@ export interface RawHolding {
  * last_price null ise fallback: WAC (cost basis korunur).
  * Non-fund varlıklar (asset_class != 'fund') current'e dahil ama
  * fund_code null kalır; allocation diff'inde TUT/AZALTMA dışında bırakılır.
+ *
+ * Ağırlık PAYDASI yalnız fonlardır (totalMarketValueTry = fon toplamı).
+ * Eskiden "kapsam dışı" denen hisseler de paydaya giriyordu: 900k hisse +
+ * 100k fon portföyünde her hedef fon %10 × 1M = 100k "EKLEME" ve 900k nakit
+ * ihtiyacı görünüyordu (doğrusu fon sepetinin kendi içinde dengelenmesi).
  */
 export function buildCurrentPositions(
   holdings: RawHolding[],
@@ -231,7 +253,9 @@ export function buildCurrentPositions(
     const mv = h.quantity * price;
     return { h, mv };
   });
-  const total = enriched.reduce((s, x) => s + x.mv, 0);
+  const total = enriched
+    .filter(({ h }) => h.asset_class === "fund")
+    .reduce((s, x) => s + x.mv, 0);
   const positions: AllocationCurrentPosition[] = enriched.map(({ h, mv }) => ({
     asset_id: h.asset_id,
     asset_class: h.asset_class,
@@ -243,7 +267,7 @@ export function buildCurrentPositions(
     cost_basis_try: h.cost_basis_try,
     last_price_try: h.last_price_try,
     market_value_try: round2(mv),
-    weight_pct: total > 0 ? mv / total : 0,
+    weight_pct: h.asset_class === "fund" && total > 0 ? mv / total : 0,
   }));
   return { positions, totalMarketValueTry: round2(total) };
 }

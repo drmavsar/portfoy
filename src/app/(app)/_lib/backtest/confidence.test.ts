@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   bestStrategyAlpha,
   computeConfidence,
+  configuredStrategyAlpha,
   evaluateSprint6,
   type ScenarioBenchmarkAlphas,
 } from "./confidence";
@@ -126,5 +127,30 @@ describe("evaluateSprint6", () => {
     );
     const r = evaluateSprint6(conf);
     expect(r.failures.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("configuredStrategyAlpha (GO/NO-GO seçim yanlılığı)", () => {
+  const vs = (a: number) => ({ alpha_cagr: a, win_ratio: null, benchmark_cagr: null });
+  const ew = [0.02, -0.01, 0.04, -0.03];
+  const sw = [-0.01, 0.02, 0.01, 0.01];
+
+  it("yalnız yapılandırılmış stratejinin alfasını döner", () => {
+    expect(configuredStrategyAlpha("equal_weight", vs(0.02), vs(0.05))).toBe(0.02);
+    expect(configuredStrategyAlpha("score_weighted", vs(0.02), vs(0.05))).toBe(0.05);
+    expect(configuredStrategyAlpha("equal_weight", null, vs(0.05))).toBeNull();
+  });
+
+  it("senaryo başına 'en iyisi' güveni şişiriyordu; EW tek başına daha düşük", () => {
+    const best: ScenarioBenchmarkAlphas[] = [
+      { benchmark: "KAT_FON_SEPETI", alphas: ew.map((a, i) => bestStrategyAlpha(vs(a), vs(sw[i]))!) },
+    ];
+    const ewOnly: ScenarioBenchmarkAlphas[] = [
+      { benchmark: "KAT_FON_SEPETI", alphas: ew.map((a, i) => configuredStrategyAlpha("equal_weight", vs(a), vs(sw[i]))!) },
+    ];
+    const cBest = computeConfidence(best).per_benchmark[0].confidence;
+    const cEw = computeConfidence(ewOnly).per_benchmark[0].confidence;
+    expect(cBest).toBe(100);
+    expect(cEw).toBe(50);
   });
 });

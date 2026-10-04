@@ -130,7 +130,8 @@ export async function getFundPortfolioInfo(
     const nav = fc ? navByCode.get(fc) ?? null : null;
     const price = nav ?? Number(h.wac_try);
     const mv = Number(h.quantity) * price;
-    totalMv += mv;
+    // Ağırlık paydası yalnız fonlar (allocation-engine ile aynı kural).
+    if (isFund) totalMv += mv;
     if (h.asset_id === assetId) {
       thisQty = Number(h.quantity);
       thisMv = mv;

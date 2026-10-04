@@ -9,8 +9,8 @@ import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
 import {
   applyRule,
   categorySlugCandidates,
+  occurrenceKey,
   parseAmountAuto,
-  parseTurkishAmount,
   parseTurkishDate,
   type ClassificationRule,
 } from "@/app/(app)/_lib/ekstre-parse";
@@ -186,14 +186,17 @@ export async function parseStatementXls(
       };
     }
 
-    // Format'a göre tutar parser'ı: hesap US (1,234.56), kart TR (1.234,56)
-    const parseAmount = isBank ? parseAmountAuto : parseTurkishAmount;
+    // Tutar biçimi otomatik algılanır (TR 1.234,56 / US 1,234.56). Kart için
+    // eskiden yalnız TR ayrıştırıcı kullanılıyordu: hücre sayısal gelince
+    // sheet_to_json "-626.5" verir, noktalar silinip −6.265 okunuyordu.
+    const parseAmount = parseAmountAuto;
 
     const rows: StatementPreviewRow[] = [];
     let skipped = 0;
     let periodStart: string | undefined;
     let periodEnd: string | undefined;
     const seenHashes = new Set<string>();
+    const occurrenceCounts = new Map<string, number>();
 
     for (let r = headerRow + 1; r < grid.length; r++) {
       const row = grid[r] ?? [];
@@ -236,7 +239,10 @@ export async function parseStatementXls(
       const suggestedBen = is_transfer ? null : ruleMatch.beneficiary_id;
 
       const hash = sha256(
-        `${source}|${card_last4 ?? "????"}|${date}|${rawAmount.toFixed(2)}|${merchant}`,
+        occurrenceKey(
+          `${source}|${card_last4 ?? "????"}|${date}|${rawAmount.toFixed(2)}|${merchant}`,
+          occurrenceCounts,
+        ),
       );
       if (seenHashes.has(hash)) continue;
       seenHashes.add(hash);

@@ -53,11 +53,13 @@ export async function runBacktestWithPersistence(
   const t0 = Date.now();
   const { supabase, params } = opts;
 
-  // 1. Funds + persona
+  // 1. Funds + persona. `is_active` ile SÜZME: bugün kapalı bir fon, aktif
+  // olduğu yıllarda da evrenden düşüyordu (hayatta kalma yanlılığı → getiri
+  // yukarı yanlı). Her rebalance tarihindeki evren zaten fund_status_history
+  // ile belirleniyor (getActiveFundsAtDateInMemory).
   const { data: fundsData } = await supabase
     .from("funds")
-    .select("code, category_id, investment_universe, is_participation, is_equity_intensive")
-    .eq("is_active", true);
+    .select("code, category_id, investment_universe, is_participation, is_equity_intensive");
   type FundRow = {
     code: string;
     category_id: number | null;
