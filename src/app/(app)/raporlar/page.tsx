@@ -7,6 +7,7 @@ import {
 import { listRealValueSeries } from "@/app/(app)/_lib/wealth-snapshots-actions";
 import { benchmarkComparison } from "@/app/(app)/_lib/benchmark-compare-actions";
 import { xirrReport } from "@/app/(app)/_lib/xirr-actions";
+import { savingsReport } from "@/app/(app)/_lib/savings-actions";
 import { Icon } from "@/components/ui/icon";
 
 import { RaporlarClient } from "./raporlar-client";
@@ -15,7 +16,7 @@ export const dynamic = "force-dynamic";
 
 export default async function RaporlarPage() {
   // Nakit hareketleri tam geçmiş: önceki dönem karşılaştırmaları kesilmemeli.
-  const [txns, realized, categories, beneficiaries, realValue, benchmark, xirr] = await Promise.all([
+  const [txns, realized, categories, beneficiaries, realValue, benchmark, xirr, savings] = await Promise.all([
     listTransactionsForReports(null),
     listRealizedForReport(24),
     listCategories(),
@@ -25,6 +26,10 @@ export default async function RaporlarPage() {
     // XIRR raporu bağımsız: hata verirse diğer sekmeler etkilenmesin
     xirrReport().catch((e) => {
       console.error("xirrReport error", e);
+      return null;
+    }),
+    savingsReport().catch((e) => {
+      console.error("savingsReport error", e);
       return null;
     }),
   ]);
@@ -59,6 +64,7 @@ export default async function RaporlarPage() {
       realValue={realValue}
       benchmark={benchmark}
       xirr={xirr}
+      savings={savings}
     />
   );
 }

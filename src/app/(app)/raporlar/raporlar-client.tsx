@@ -3,9 +3,11 @@
 import { useMemo, useState } from "react";
 
 import { ExpenseComparison } from "./expense-comparison";
+import { SavingsTab } from "./savings-tab";
 import { TaxYearTab } from "./tax-year-tab";
 import { XirrTab } from "./xirr-tab";
 import type { XirrReport } from "@/app/(app)/_lib/xirr-report";
+import type { SavingsReport } from "@/app/(app)/_lib/savings-analysis";
 import { fmt } from "@/lib/finance/fmt";
 
 import type { RawRealizedLot, RawTxn } from "@/app/(app)/_lib/reports-actions";
@@ -89,21 +91,23 @@ interface Props {
   realValue: RealValueRow[];
   benchmark: BenchmarkCompareResult | null;
   xirr: XirrReport | null;
+  savings: SavingsReport | null;
 }
 
-type TabKey = "expenses" | "cashflow" | "performance" | "realvalue" | "benchmark" | "xirr" | "tax";
+type TabKey = "expenses" | "cashflow" | "performance" | "realvalue" | "benchmark" | "xirr" | "tax" | "savings";
 
 const OWN_RANGE_SUB: Partial<Record<TabKey, string>> = {
   realvalue: "Servetin TÜFE'ye göre reel değeri",
   benchmark: "Portföy ve alternatif yatırımlar",
   xirr: "İlk işlemden bugüne para ağırlıklı getiri",
   tax: "Takvim yılı · kişi bazında vergi özeti",
+  savings: "Yılbaşından bugüne gelir, gider, birikim ve portföy karşılaştırması",
 };
 
-export function RaporlarClient({ txns, realized, categories, beneficiaries, realValue, benchmark, xirr }: Props) {
+export function RaporlarClient({ txns, realized, categories, beneficiaries, realValue, benchmark, xirr, savings }: Props) {
   const [tab, setTab] = useState<TabKey>("cashflow");
   // Kendi dönem seçimi olan sekmeler: üstteki tarih aralığı gizlenir
-  const ownRange = tab === "realvalue" || tab === "benchmark" || tab === "xirr" || tab === "tax";
+  const ownRange = tab === "realvalue" || tab === "benchmark" || tab === "xirr" || tab === "tax" || tab === "savings";
   const [rangeKey, setRangeKey] = useState<RangeKey>("ytd");
   const [customFrom, setCustomFrom] = useState<string>(isoStartOfYear());
   const [customTo, setCustomTo] = useState<string>(isoToday());
@@ -481,6 +485,11 @@ export function RaporlarClient({ txns, realized, categories, beneficiaries, real
         <TabBtn active={tab === "tax"} onClick={() => setTab("tax")}>
           Vergi Yılı
         </TabBtn>
+        {savings && (
+          <TabBtn active={tab === "savings"} onClick={() => setTab("savings")}>
+            Birikim &amp; Hisse
+          </TabBtn>
+        )}
       </div>
 
       {rangeKey === "custom" && !ownRange && (
@@ -510,6 +519,8 @@ export function RaporlarClient({ txns, realized, categories, beneficiaries, real
         benchmark ? <BenchmarkTab data={benchmark} /> : null
       ) : tab === "xirr" ? (
         xirr ? <XirrTab data={xirr} /> : null
+      ) : tab === "savings" ? (
+        savings ? <SavingsTab data={savings} /> : null
       ) : tab === "tax" ? (
         <TaxYearTab realized={realized} txns={txns} categories={categories} beneficiaries={beneficiaries} />
       ) : tab === "realvalue" ? (
