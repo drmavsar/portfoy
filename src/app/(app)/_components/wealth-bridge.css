@@ -1,0 +1,40 @@
+/* Servet köprüsü: sıfırdan sapan yatay çubuklar (artı sağa, eksi sola). */
+.bridge-body { padding: 16px 20px 18px; display: grid; gap: 14px; }
+.bridge-verdict { margin: 0; font-size: 15px; line-height: 1.55; color: var(--fg); max-width: 72ch; }
+.bridge-verdict b { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bridge-periods { display: flex; flex-wrap: wrap; gap: 6px; }
+.bridge-bars { display: grid; gap: 2px; }
+.bridge-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.1fr) minmax(90px, 2fr) minmax(104px, auto);
+  align-items: center; gap: 12px;
+  padding: 6px 0;
+}
+.bridge-label { font-size: 13px; font-weight: 600; min-width: 0; }
+.bridge-hint { display: block; font-size: 12px; font-weight: 400; color: var(--muted); margin-top: 1px; }
+.bridge-track { position: relative; height: 14px; }
+.bridge-zero { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--border); }
+.bridge-fill { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
+.bridge-fill.is-pos { background: var(--positive); border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.bridge-fill.is-neg { background: var(--negative); border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.bridge-value { font-size: 14px; font-weight: 700; text-align: right; white-space: nowrap; }
+.bridge-total { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 10px; }
+.bridge-total .bridge-label, .bridge-total .bridge-value { font-size: 15px; font-weight: 750; }
+.bridge-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; font-size: 13px; }
+.bridge-note { margin: 0; font-size: 12px; line-height: 1.5; }
+.bridge-link { color: var(--accent); font-weight: 600; text-decoration: none; }
+.bridge-link:hover { text-decoration: underline; }
+.bridge-tab { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+
+.bridge-table-wrap { overflow-x: auto; }
+.bridge-table td.num, .bridge-table th.num { text-align: right; white-space: nowrap; }
+.bridge-table td.pre-span { color: var(--muted); font-size: 12px; }
+
+@media (max-width: 640px) {
+  .bridge-body { padding: 14px; }
+  .bridge-row { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; }
+  .bridge-track { grid-column: 1 / -1; grid-row: 2; height: 10px; }
+  .bridge-label { grid-column: 1; grid-row: 1; }
+  .bridge-value { grid-column: 2; grid-row: 1; }
+  .bridge-total .bridge-track { display: none; }
+}

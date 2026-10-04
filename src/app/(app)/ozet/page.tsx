@@ -31,6 +31,8 @@ import {
 import { findStaleBalances } from "@/app/(app)/_lib/stale-balances";
 import { AssetCompositionChart } from "@/app/(app)/_components/asset-composition-chart";
 import { LiquidationCard } from "@/app/(app)/_components/liquidation-card";
+import { WealthBridgeCard } from "@/app/(app)/_components/wealth-bridge-view";
+import { wealthBridgeReport } from "@/app/(app)/_lib/wealth-bridge-actions";
 import { liquidationSummary } from "@/lib/finance/liquidation";
 import { RefreshButton } from "@/app/(app)/_components/refresh-button";
 import { TotalWealthDisplay } from "@/app/(app)/_components/total-wealth-display";
@@ -84,6 +86,11 @@ function tryValueOf(a: AccountRow, fxRates: Record<string, number | undefined>):
 
 export default async function OzetPage() {
   const prevYearEnd = `${Number(istanbulToday().slice(0, 4)) - 1}-12-31`;
+  // Servet köprüsü bağımsız: hata verirse Özet'in geri kalanı etkilenmesin
+  const bridgePromise = wealthBridgeReport().catch((e) => {
+    console.error("wealthBridgeReport error", e);
+    return null;
+  });
   const [accounts, custodies, beneficiaries, fxRates, fxChanges, truncgilUpdate, holdings, assets, portfolios, trades, txns, wealthSnapshots, benchmarkPoints, accountActivity, prevYearEndSnapshot, bidRatios] = await Promise.all([
     listAccounts(),
     listCustodyLocations(),
@@ -102,6 +109,7 @@ export default async function OzetPage() {
     getDailySnapshotOnOrBefore(prevYearEnd),
     getAssetBidRatios().catch(() => ({}) as Record<string, number>),
   ]);
+  const bridge = await bridgePromise;
 
   const benMap: Record<string, BeneficiaryLite> = Object.fromEntries(beneficiaries.map((b) => [b.id, b]));
 
@@ -779,6 +787,8 @@ export default async function OzetPage() {
               })()}
             </div>
           </div>
+
+          {bridge && bridge.periods.length > 0 && <WealthBridgeCard report={bridge} />}
 
           <LiquidationCard data={liquidation} grandTotal={grandTotal} />
 

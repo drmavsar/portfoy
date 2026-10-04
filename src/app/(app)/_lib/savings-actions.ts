@@ -14,8 +14,8 @@ import {
   type WealthAnchor,
 } from "@/app/(app)/_lib/savings-analysis";
 import { taxIncomeKindForCategory } from "@/app/(app)/_lib/tax-year-report";
+import { portfolioCashFlows } from "@/app/(app)/_lib/portfolio-flows";
 import { listAssets, listRealizedBySellTrade, listTrades } from "@/app/(app)/_lib/wealth-actions";
-import { findUnmatchedSells } from "@/app/(app)/_lib/xirr-report";
 import { istanbulToday } from "@/lib/finance/istanbul-date";
 import { createClient } from "@/lib/supabase/server";
 import { readAll } from "@/lib/supabase/read-all";
@@ -105,31 +105,7 @@ export async function savingsReport(year?: number): Promise<SavingsReport | null
       : null;
 
   // ---- Portföy nakit akışları (eşleşmeyen satışlar hariç) -------------------
-  const assetMap = new Map(assets.map((a) => [a.id, a]));
-  const portfolioTrades = trades.filter((t) => PORTFOLIO_CLASSES.has(assetMap.get(t.asset_id)?.asset_class ?? ""));
-  // Alımı girilmemiş satışlarda yalnız eşleşmeyen kısım dışlanır: KTLEV'de
-  // (hiç alım yok) satışın tamamı, BINHO'da (10.000 alım, 10.011 satış) 11 adet.
-  const matchedShare = new Map(
-    findUnmatchedSells(
-      portfolioTrades,
-      (id) => realizedBySell[id] != null,
-      (aid) => assetMap.get(aid)?.symbol ?? "?",
-      () => "",
-    ).map((u) => [u.tradeId, u.soldQty > 0 ? Math.min(1, u.availableQty / u.soldQty) : 0]),
-  );
-  const flows: PortfolioFlow[] = portfolioTrades
-    .map((t) => {
-      const fx = t.currency === "TRY" ? 1 : Number(t.fx_rate_to_try ?? 1) || 1;
-      const gross = Number(t.quantity) * Number(t.price) * fx;
-      const fees = Number(t.fees) * fx;
-      const share = matchedShare.get(t.id) ?? 1;
-      return {
-        date: istanbulToday(new Date(t.executed_at)),
-        amount: (t.side === "buy" ? -(gross + fees) : gross - fees) * share,
-      };
-    })
-    .filter((f) => f.amount !== 0)
-    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const flows: PortfolioFlow[] = portfolioCashFlows(trades, assets, realizedBySell, PORTFOLIO_CLASSES);
 
   // ---- Karşılaştırma serileri ------------------------------------------------
   const codeById = new Map(

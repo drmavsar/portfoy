@@ -4,10 +4,12 @@ import { useMemo, useState } from "react";
 
 import { ExpenseComparison } from "./expense-comparison";
 import { SavingsTab } from "./savings-tab";
+import { WealthBridgeTab } from "./wealth-bridge-tab";
 import { TaxYearTab } from "./tax-year-tab";
 import { XirrTab } from "./xirr-tab";
 import type { XirrReport } from "@/app/(app)/_lib/xirr-report";
 import type { SavingsReport } from "@/app/(app)/_lib/savings-analysis";
+import type { WealthBridgeReport } from "@/app/(app)/_lib/wealth-bridge-actions";
 import { fmt } from "@/lib/finance/fmt";
 
 import type { RawRealizedLot, RawTxn } from "@/app/(app)/_lib/reports-actions";
@@ -92,11 +94,15 @@ interface Props {
   benchmark: BenchmarkCompareResult | null;
   xirr: XirrReport | null;
   savings: SavingsReport | null;
+  bridge: WealthBridgeReport | null;
+  initialTab?: string;
 }
 
-type TabKey = "expenses" | "cashflow" | "performance" | "realvalue" | "benchmark" | "xirr" | "tax" | "savings";
+type TabKey = "bridge" | "expenses" | "cashflow" | "performance" | "realvalue" | "benchmark" | "xirr" | "tax" | "savings";
+const TAB_KEYS: TabKey[] = ["bridge", "expenses", "cashflow", "performance", "realvalue", "benchmark", "xirr", "tax", "savings"];
 
 const OWN_RANGE_SUB: Partial<Record<TabKey, string>> = {
+  bridge: "Servet değişiminin kaynağı: tasarruf mu, yatırım mı?",
   realvalue: "Servetin TÜFE'ye göre reel değeri",
   benchmark: "Portföy ve alternatif yatırımlar",
   xirr: "İlk işlemden bugüne para ağırlıklı getiri",
@@ -104,10 +110,17 @@ const OWN_RANGE_SUB: Partial<Record<TabKey, string>> = {
   savings: "Yılbaşından bugüne gelir, gider, birikim ve portföy karşılaştırması",
 };
 
-export function RaporlarClient({ txns, realized, categories, beneficiaries, realValue, benchmark, xirr, savings }: Props) {
-  const [tab, setTab] = useState<TabKey>("cashflow");
+export function RaporlarClient({ txns, realized, categories, beneficiaries, realValue, benchmark, xirr, savings, bridge, initialTab }: Props) {
+  // Servet köprüsü varsa ilk açılan rapor o; ?tab= ile başka sekme seçilebilir
+  const [tab, setTab] = useState<TabKey>(
+    TAB_KEYS.includes(initialTab as TabKey) && (initialTab !== "bridge" || bridge)
+      ? (initialTab as TabKey)
+      : bridge
+        ? "bridge"
+        : "cashflow",
+  );
   // Kendi dönem seçimi olan sekmeler: üstteki tarih aralığı gizlenir
-  const ownRange = tab === "realvalue" || tab === "benchmark" || tab === "xirr" || tab === "tax" || tab === "savings";
+  const ownRange = tab === "bridge" || tab === "realvalue" || tab === "benchmark" || tab === "xirr" || tab === "tax" || tab === "savings";
   const [rangeKey, setRangeKey] = useState<RangeKey>("ytd");
   const [customFrom, setCustomFrom] = useState<string>(isoStartOfYear());
   const [customTo, setCustomTo] = useState<string>(isoToday());
@@ -460,6 +473,11 @@ export function RaporlarClient({ txns, realized, categories, beneficiaries, real
       </div>
 
       <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: "1px solid var(--border-soft)", flexWrap: "wrap" }}>
+        {bridge && (
+          <TabBtn active={tab === "bridge"} onClick={() => setTab("bridge")}>
+            Servet Köprüsü
+          </TabBtn>
+        )}
         <TabBtn active={tab === "cashflow"} onClick={() => setTab("cashflow")}>
           Nakit Akış
         </TabBtn>
@@ -513,7 +531,9 @@ export function RaporlarClient({ txns, realized, categories, beneficiaries, real
         </div>
       )}
 
-      {tab === "expenses" ? (
+      {tab === "bridge" ? (
+        bridge ? <WealthBridgeTab data={bridge} /> : null
+      ) : tab === "expenses" ? (
         <ExpenseComparison txns={txns} categories={categories} beneficiaries={beneficiaries} from={from} to={to} />
       ) : tab === "benchmark" ? (
         benchmark ? <BenchmarkTab data={benchmark} /> : null
