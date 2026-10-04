@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  altmanModelFor,
   bandVerdict,
   computeAltmanZ,
   computePiotroskiF,
   deriveMetrics,
   enrichFundamentals,
   FAIR_PE,
+  piotroskiVerdict,
   scoreFundamentals,
   type FundamentalsRaw,
 } from "./fundamentals-score";
@@ -204,6 +206,28 @@ describe("scoreFundamentals", () => {
     expect(s.label).toBe("—");
   });
 
+  it("negatif özkaynak → karlılık sütunu atlanmaz, 'bad' puanlanır", () => {
+    const raw = base();
+    raw.valuation.pe = 5;
+    raw.financials.derived = { net_income_ttm: 100, equity: -500 };
+    const s = scoreFundamentals(raw, deriveMetrics(raw));
+    const prof = s.pillars.find((p) => p.key === "profitability");
+    expect(prof?.verdict).toBe("bad");
+    expect(prof?.detail).toBe("Negatif özkaynak");
+    expect(s.label).not.toBe("Güçlü");
+  });
+
+  it("temettü ödemeyen (verim null, oran 0) şirket %1 ödeyenden yüksek puan almaz", () => {
+    const payer = base();
+    payer.dividend = { yield: 1, annual_rate: 1, ex_date: null, history: [] };
+    const nonPayer = base();
+    nonPayer.dividend = { yield: null, annual_rate: 0, ex_date: null, history: [] };
+    const sPayer = scoreFundamentals(payer, deriveMetrics(payer));
+    const sNon = scoreFundamentals(nonPayer, deriveMetrics(nonPayer));
+    expect(sNon.pillars.map((p) => p.key)).toContain("dividend");
+    expect(sNon.score!).toBeLessThanOrEqual(sPayer.score!);
+  });
+
   it("F/K negatifse değerleme sütunu 'bad'", () => {
     const raw = base();
     raw.valuation.pe = -3;
@@ -213,9 +237,28 @@ describe("scoreFundamentals", () => {
   });
 });
 
+const MANUFACTURING = "İMALAT SANAYİ / KİMYA, PETROL KAUÇUK VE PLASTİK ÜRÜNLER";
+
+describe("altmanModelFor", () => {
+  it("sektör metnine göre model seçer", () => {
+    const raw = base();
+    raw.profile.summary = MANUFACTURING;
+    expect(altmanModelFor(raw)).toBe("manufacturing");
+    raw.profile.summary = "ULAŞTIRMA, HABERLEŞME VE DEPOLAMA / ULAŞTIRMA / HAVA TAŞIMACILIĞI";
+    expect(altmanModelFor(raw)).toBe("non_manufacturing");
+    raw.profile.summary = "MALİ KURULUŞLAR / BANKALAR VE ÖZEL FİNANS KURUMLARI";
+    expect(altmanModelFor(raw)).toBe("financial");
+    raw.profile.summary = "MALİ KURULUŞLAR / HOLDİNGLER VE YATIRIM ŞİRKETLERİ";
+    expect(altmanModelFor(raw)).toBe("financial");
+    raw.profile.summary = null;
+    expect(altmanModelFor(raw)).toBe("non_manufacturing"); // bilinmiyorsa Z''
+  });
+});
+
 describe("computeAltmanZ", () => {
   it("sağlıklı imalatçı → Z hesaplanır, 'safe' bölgesi", () => {
     const raw = base();
+    raw.profile.summary = MANUFACTURING;
     raw.quote.market_cap = 800; // TL = 1000 − 600 = 400 → X4 = 2.0
     raw.financials.derived = {
       total_assets: 1000,
@@ -235,6 +278,7 @@ describe("computeAltmanZ", () => {
 
   it("zayıf bilanço → distress bölgesi", () => {
     const raw = base();
+    raw.profile.summary = MANUFACTURING;
     raw.quote.market_cap = 90;
     raw.financials.derived = {
       total_assets: 1000,
@@ -250,8 +294,59 @@ describe("computeAltmanZ", () => {
     expect(z.zone).toBe("distress");
   });
 
+  it("imalat dışı şirket → Z'' (satış terimi yok, defter değeri)", () => {
+    const raw = base();
+    raw.profile.summary = "TOPTAN VE PERAKENDE TİCARET / PERAKENDE TİCARET";
+    raw.quote.market_cap = 5000; // Z''de kullanılmaz
+    raw.financials.derived = {
+      total_assets: 1000,
+      current_assets: 500,
+      current_liabilities: 200, // X1 = 0.3
+      equity: 600, // X4 = 600 / 400 = 1.5
+      retained_earnings: 400, // X2 = 0.4
+      ebit: 200, // X3 = 0.2
+      revenue_ttm: 3000, // perakende — Z''de etkisiz
+    };
+    const z = computeAltmanZ(raw);
+    // 6.56·0.3 + 3.26·0.4 + 6.72·0.2 + 1.05·1.5 = 6.191
+    expect(z.model).toBe("non_manufacturing");
+    expect(z.z).toBeCloseTo(6.191, 3);
+    expect(z.zone).toBe("safe");
+  });
+
+  it("Z'' bölge eşikleri 1.1 / 2.6", () => {
+    const raw = base();
+    raw.profile.summary = "ULAŞTIRMA VE DEPOLAMA";
+    raw.financials.derived = {
+      total_assets: 1000,
+      current_assets: 200,
+      current_liabilities: 250, // X1 = −0.05
+      equity: 250, // X4 = 250 / 750 = 0.333
+      retained_earnings: 100, // X2 = 0.1
+      ebit: 40, // X3 = 0.04
+    };
+    const z = computeAltmanZ(raw);
+    // −0.328 + 0.326 + 0.2688 + 0.35 = 0.6168 → distress
+    expect(z.z).toBeCloseTo(0.6168, 3);
+    expect(z.zone).toBe("distress");
+  });
+
+  it("finansal şirkette hesaplanmaz", () => {
+    const raw = base();
+    raw.profile.summary = "MALİ KURULUŞLAR / BANKALAR";
+    raw.financials.derived = {
+      total_assets: 1000, current_assets: 500, current_liabilities: 200,
+      equity: 100, retained_earnings: 50, ebit: 30, revenue_ttm: 90,
+    };
+    const z = computeAltmanZ(raw);
+    expect(z.model).toBe("financial");
+    expect(z.z).toBeNull();
+    expect(z.zone).toBe("na");
+  });
+
   it("bir bileşen eksikse Z null, zone 'na'", () => {
     const raw = base();
+    raw.profile.summary = MANUFACTURING;
     raw.financials.derived = {
       total_assets: 1000,
       current_assets: 500,
@@ -313,6 +408,29 @@ describe("computePiotroskiF", () => {
     const f = computePiotroskiF(base());
     expect(f.computable).toBe(0);
     expect(f.score).toBeNull();
+  });
+
+  it("iki yılda da uzun vadeli borç yoksa kaldıraç kriteri geçer", () => {
+    const raw = base();
+    raw.financials.derived = {
+      piotroski: { total_assets: [1000, 900], long_term_liabilities: [0, 0] },
+    };
+    const f = computePiotroskiF(raw);
+    expect(f.criteria.find((c) => c.key === "lev_down")?.pass).toBe(true);
+  });
+});
+
+describe("piotroskiVerdict", () => {
+  const mk = (score: number | null, computable: number) => ({ score, computable, criteria: [] });
+  it("oranla renklendirir", () => {
+    expect(piotroskiVerdict(mk(6, 8))).toBe("good"); // %75
+    expect(piotroskiVerdict(mk(4, 8))).toBe("warn"); // %50
+    expect(piotroskiVerdict(mk(3, 8))).toBe("bad"); // %37.5
+    expect(piotroskiVerdict(mk(5, 6))).toBe("good");
+  });
+  it("6'dan az kriter → değerlendirilmez", () => {
+    expect(piotroskiVerdict(mk(3, 3))).toBe("na"); // eskiden 3/3 "kötü" görünüyordu
+    expect(piotroskiVerdict(mk(null, 0))).toBe("na");
   });
 });
 
