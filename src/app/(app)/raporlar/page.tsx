@@ -8,15 +8,22 @@ import { listRealValueSeries } from "@/app/(app)/_lib/wealth-snapshots-actions";
 import { benchmarkComparison } from "@/app/(app)/_lib/benchmark-compare-actions";
 import { xirrReport } from "@/app/(app)/_lib/xirr-actions";
 import { savingsReport } from "@/app/(app)/_lib/savings-actions";
+import { wealthBridgeReport } from "@/app/(app)/_lib/wealth-bridge-actions";
 import { Icon } from "@/components/ui/icon";
 
 import { RaporlarClient } from "./raporlar-client";
 
 export const dynamic = "force-dynamic";
 
-export default async function RaporlarPage() {
+export default async function RaporlarPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string | string[] }>;
+}) {
+  const sp = await searchParams;
+  const initialTab = typeof sp.tab === "string" ? sp.tab : undefined;
   // Nakit hareketleri tam geçmiş: önceki dönem karşılaştırmaları kesilmemeli.
-  const [txns, realized, categories, beneficiaries, realValue, benchmark, xirr, savings] = await Promise.all([
+  const [txns, realized, categories, beneficiaries, realValue, benchmark, xirr, savings, bridge] = await Promise.all([
     listTransactionsForReports(null),
     listRealizedForReport(24),
     listCategories(),
@@ -30,6 +37,10 @@ export default async function RaporlarPage() {
     }),
     savingsReport().catch((e) => {
       console.error("savingsReport error", e);
+      return null;
+    }),
+    wealthBridgeReport().catch((e) => {
+      console.error("wealthBridgeReport error", e);
       return null;
     }),
   ]);
@@ -65,6 +76,8 @@ export default async function RaporlarPage() {
       benchmark={benchmark}
       xirr={xirr}
       savings={savings}
+      bridge={bridge}
+      initialTab={initialTab}
     />
   );
 }
