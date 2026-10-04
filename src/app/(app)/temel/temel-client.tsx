@@ -766,7 +766,9 @@ function SaglikTab({ data }: { data: Fundamentals }) {
           {d.ttm_period || d.balance_period ? (
             <>
               {" "}
-              Kâr/satış: TTM {d.ttm_period ?? "son yıl"} · bilanço: {d.balance_period ?? "son yıl"}.
+              Kâr/satış:{" "}
+              {d.ttm_period?.includes("Q") ? `son 12 ay (${d.ttm_period} itibarıyla)` : (d.ttm_period ?? "son yıl")}{" "}
+              · bilanço: {d.balance_period ?? "son yıl sonu"}.
             </>
           ) : null}
         </SectionNote>

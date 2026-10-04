@@ -13,6 +13,7 @@ dizisine yazılır. Yalnızca borsapy import / sembol komple başarısızsa
 """
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import json
@@ -257,7 +258,88 @@ def net_debt_is_negative(symbol):
         return None
 
 
-def build_financials(ticker, warnings):
+# ---------------------------------------------------------------------------
+# Mali tablo çekimi — tek MaliTablo çağrısı, üç tablo
+# ---------------------------------------------------------------------------
+# İş Yatırım MaliTablo API'si tek çağrıda (≤4 dönem) gelir tablosu + bilanço +
+# nakit akışını BİRLİKTE döndürür. borsapy ise her tabloyu ayrı çağırıyor ve 4
+# dönemi aşan istekleri bölüyor; bölünen tek dönemlik çağrı (ve art arda gelen
+# çağrılar) sık sık boş/hata dönüyor, borsapy de hatayı sessizce yutuyordu →
+# yıllık tablolarda 5 yerine 4 yıl, TTM için gereken geçen yıl çeyreği eksik.
+# Burada gereken dönemleri tek çağrıda isteyip üç tabloyu aynı yanıttan
+# ayrıştırıyoruz (borsapy==0.11.0 iç API'si; requirements'ta sabit).
+_STATEMENTS = ("income_stmt", "balance_sheet", "cashflow")
+
+
+def fetch_statements(symbol, group, periods, quarterly):
+    """`periods` [(yıl, ay)] (≤4) için {tablo: DataFrame}. Hata → exception."""
+    from borsapy._providers.isyatirim import get_isyatirim_provider
+
+    prov = get_isyatirim_provider()
+    params = {
+        "companyCode": symbol,
+        "exchange": "TRY",
+        "financialGroup": group or prov.FINANCIAL_GROUP_INDUSTRIAL,
+    }
+    for i, (year, period) in enumerate(periods[:4], 1):
+        params[f"year{i}"] = year
+        params[f"period{i}"] = period
+    url = f"{prov.BASE_URL}/Data.aspx/MaliTablo"
+    last = None
+    for attempt in range(2):  # geçici hata/429 için bir kez yeniden dene
+        try:
+            data = prov._get(url, params=params).json()
+            return {
+                st: prov._parse_financial_response(
+                    data, periods[:4], quarterly=quarterly, statement_type=st
+                )
+                for st in _STATEMENTS
+            }
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if attempt == 0:
+                time.sleep(0.8)
+    raise last
+
+
+def merge_cols(a, b):
+    """İki dönem tablosunu kolon bazında birleştir (en yeni kolon önde)."""
+    if a is None or getattr(a, "empty", True):
+        return b
+    if b is None or getattr(b, "empty", True):
+        return a
+    new = [c for c in b.columns if c not in a.columns]
+    out = a.join(b[new], how="outer") if new else a
+    return out[sorted(out.columns, key=lambda c: str(c), reverse=True)]
+
+
+def expected_latest_quarter(now):
+    """Yayın gecikmesine göre (borsapy ile aynı kural) beklenen son çeyrek."""
+    y, m = now.year, now.month
+    if m <= 2:
+        return (y - 1, 9)
+    if m <= 5:
+        return (y - 1, 12)
+    if m <= 8:
+        return (y, 3)
+    if m <= 11:
+        return (y, 6)
+    return (y, 9)
+
+
+def prev_quarter(yp):
+    y, p = yp
+    return (y - 1, 12) if p == 3 else (y, p - 3)
+
+
+def ttm_needs(yp):
+    """TTM için gereken (yıl, ay) dönemleri: son çeyrek, önceki yıl sonu,
+    önceki yılın aynı çeyreği (Q4 ise yalnız kendisi)."""
+    y, p = yp
+    return [(y, 12)] if p == 12 else [(y, p), (y - 1, 12), (y - 1, p)]
+
+
+def build_financials(symbol, warnings):
     """Yıllık + TTM mali tablolardan ham tablolar ve türetilmiş kalemleri çıkar."""
     fin = {
         "derived": {},
@@ -265,30 +347,25 @@ def build_financials(ticker, warnings):
         "balance_annual": None,
         "cashflow_annual": None,
     }
+    now = datetime.now()
 
-    # Sanayi (XI_29) varsayılan; gelir tablosu boşsa banka (UFRS) dene.
+    # --- Yıllık: son 4 yıl, TEK çağrı. Sanayi (XI_29) varsayılan; gelir
+    # tablosu boşsa banka (UFRS) dene.
+    annual_periods = [(now.year - 1 - i, 12) for i in range(4)]
     group = None
-    inc = bal = cf = None
-    try:
-        inc = ticker.get_income_stmt()
-        if inc is None or inc.empty:
-            raise ValueError("empty")
-    except Exception:
+    annual = {}
+    for g in (None, "UFRS"):
         try:
-            group = "UFRS"
-            inc = ticker.get_income_stmt(financial_group=group)
-        except Exception as e:
-            warnings.append(f"gelir tablosu çekilemedi: {e}")
-            inc = None
-
-    try:
-        bal = ticker.get_balance_sheet(financial_group=group)
-    except Exception as e:
-        warnings.append(f"bilanço çekilemedi: {e}")
-    try:
-        cf = ticker.get_cashflow(financial_group=group)
-    except Exception as e:
-        warnings.append(f"nakit akış tablosu çekilemedi: {e}")
+            st = fetch_statements(symbol, g, annual_periods, quarterly=False)
+        except Exception as e:  # noqa: BLE001
+            warnings.append(f"yıllık mali tablolar çekilemedi ({g or 'XI_29'}): {e}")
+            continue
+        if st["income_stmt"] is not None and not st["income_stmt"].empty:
+            annual, group = st, g
+            break
+    inc = annual.get("income_stmt")
+    bal = annual.get("balance_sheet")
+    cf = annual.get("cashflow")
 
     fin["income_annual"] = df_to_table(inc)
     fin["balance_annual"] = df_to_table(bal)
@@ -296,27 +373,41 @@ def build_financials(ticker, warnings):
 
     derived = fin["derived"]
 
-    # --- Çeyreklik (kümülatif) tablolar → doğru TTM + en güncel bilanço ---
-    # last_n=5: son çeyrek + geçen yılın aynı çeyreği tek çağrıda gelir.
-    qinc = qcf = qbal = None
+    # --- Çeyreklik (kümülatif) → doğru TTM + en güncel bilanço. Beklenen son
+    # çeyreğin TTM'i için gereken 3 dönem + (yayımlanmamışsa diye) bir önceki
+    # çeyrek → tek çağrı (≤4 dönem).
+    cand = expected_latest_quarter(now)
+    fallback = prev_quarter(cand)
+    qperiods = ttm_needs(cand)
+    if fallback not in qperiods:
+        qperiods.append(fallback)
+    q = {}
     try:
-        qinc = ticker.get_income_stmt(quarterly=True, financial_group=group, last_n=5)
-    except Exception as e:
-        warnings.append(f"çeyreklik gelir tablosu çekilemedi: {e}")
-    try:
-        qcf = ticker.get_cashflow(quarterly=True, financial_group=group, last_n=5)
-    except Exception as e:
-        warnings.append(f"çeyreklik nakit akış çekilemedi: {e}")
-    try:
-        qbal = ticker.get_balance_sheet(quarterly=True, financial_group=group, last_n=2)
-    except Exception as e:
-        warnings.append(f"çeyreklik bilanço çekilemedi: {e}")
+        q = fetch_statements(symbol, group, qperiods, quarterly=True)
+    except Exception as e:  # noqa: BLE001
+        warnings.append(f"çeyreklik mali tablolar çekilemedi: {e}")
+    qinc, qbal, qcf = q.get("income_stmt"), q.get("balance_sheet"), q.get("cashflow")
 
     # TTM dönemi: gelir satırında verisi yayımlanmış en güncel çeyrek (banka
     # formatında satış satırı yoksa net kârdan).
-    period = latest_quarter(qinc, REVENUE_PATTERNS) or latest_quarter(
-        qinc, NET_INCOME_PATTERNS, NET_INCOME_EXCLUDE
-    )
+    def latest():
+        return latest_quarter(qinc, REVENUE_PATTERNS) or latest_quarter(
+            qinc, NET_INCOME_PATTERNS, NET_INCOME_EXCLUDE
+        )
+
+    period = latest()
+    # Beklenen çeyrek henüz yayımlanmadıysa önceki çeyreğin TTM'i için eksik
+    # dönemleri tamamla (ikinci ve son çağrı).
+    if period == (fallback[0], fallback[1] // 3):
+        missing = [p for p in ttm_needs(fallback) if p not in qperiods]
+        if missing:
+            try:
+                extra = fetch_statements(symbol, group, missing, quarterly=True)
+                qinc = merge_cols(qinc, extra.get("income_stmt"))
+                qbal = merge_cols(qbal, extra.get("balance_sheet"))
+                qcf = merge_cols(qcf, extra.get("cashflow"))
+            except Exception as e:  # noqa: BLE001
+                warnings.append(f"önceki çeyrek tabloları çekilemedi: {e}")
 
     def ttm(qdf, adf, patterns, exclude=()):
         """Kümülatif çeyrekten TTM; hesaplanamazsa son yıllık değer."""
@@ -325,7 +416,16 @@ def build_financials(ticker, warnings):
             return v
         return series_val(find_row(adf, patterns, exclude))
 
-    derived["ttm_period"] = f"{period[0]}Q{period[1]}" if period else None
+    # Hangi dönemin kullanıldığını dürüstçe raporla: çeyreklik TTM hesaplanamayıp
+    # yıllığa düşüldüyse "2025 (yıllık)" yaz, çeyrek etiketini değil.
+    if ttm_at(qinc, REVENUE_PATTERNS, period) is not None or ttm_at(
+        qinc, NET_INCOME_PATTERNS, period, NET_INCOME_EXCLUDE
+    ) is not None:
+        derived["ttm_period"] = f"{period[0]}Q{period[1]}"
+    elif inc is not None and not inc.empty:
+        derived["ttm_period"] = f"{inc.columns[0]} (yıllık)"
+    else:
+        derived["ttm_period"] = None
     derived["revenue_ttm"] = ttm(qinc, inc, REVENUE_PATTERNS)
     derived["net_income_ttm"] = ttm(qinc, inc, NET_INCOME_PATTERNS, NET_INCOME_EXCLUDE)
     derived["gross_profit_ttm"] = ttm(qinc, inc, GROSS_PROFIT_PATTERNS, GROSS_PROFIT_EXCLUDE)
@@ -591,7 +691,7 @@ def build_payload(symbol):
 
     # --- mali tablolar ---
     try:
-        out["financials"] = build_financials(ticker, warnings)
+        out["financials"] = build_financials(symbol, warnings)
     except Exception as e:
         warnings.append(f"mali tablolar çekilemedi: {e}")
         out["financials"] = {"derived": {}}
