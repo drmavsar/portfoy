@@ -69,18 +69,23 @@ export async function listRealizedForReport(sinceMonths: number = 24): Promise<R
   } = await supabase.auth.getUser();
   if (!user) return [];
 
+  // Önce ayın 1'ine çek, sonra ay çıkar: tersi 31 Mart'ta (setMonth → 31 Şubat
+  // → 3 Mart) bir ay kaybettiriyordu.
   const since = new Date();
-  since.setMonth(since.getMonth() - sinceMonths);
   since.setDate(1);
+  since.setMonth(since.getMonth() - sinceMonths);
   const sinceIso = since.toISOString();
 
-  // 1. Lazy backfill — kullanıcının bu dönemdeki sell'lerinden realized_lots'ta olmayanları işle.
+  // 1. Lazy backfill — kullanıcının bu dönemdeki sell'lerinden realized_lots'ta
+  // olmayanları işle. FIFO sırası önemli: kronolojik (executed_at, id).
   const { data: sells } = await supabase
     .from("trades")
     .select("id")
     .eq("user_id", user.id)
     .eq("side", "sell")
-    .gte("executed_at", sinceIso);
+    .gte("executed_at", sinceIso)
+    .order("executed_at", { ascending: true })
+    .order("id", { ascending: true });
   const sellIds = ((sells ?? []) as Array<{ id: string }>).map((s) => s.id);
   if (sellIds.length > 0) {
     const { data: existingRaw } = await supabase

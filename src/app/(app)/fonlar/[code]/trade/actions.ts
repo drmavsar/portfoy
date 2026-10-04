@@ -9,7 +9,7 @@ import {
   validateFundTrade,
   type FundTradeInput,
 } from "@/app/(app)/_lib/tefas/trade-validation";
-import { processSellTrade } from "@/app/(app)/_lib/tefas/realized-lots-processor";
+import { reprocessRealizedLotsForScope } from "@/app/(app)/_lib/tefas/realized-lots-processor";
 
 export interface FundTradeAccountOption {
   id: string;
@@ -225,14 +225,20 @@ export async function createFundTrade(
 
   const tradeId = (data as { id: string }).id;
 
-  // Sell ise FIFO processor'ı çağır + realized_lots yaz. Hata trade'i geri
-  // almaz; idempotent processor backfill route ile tekrar denenebilir.
+  // FIFO zincirini kapsam bazında yeniden kur (alım VE satış için). Yalnız yeni
+  // satışı işlemek yetmiyordu: geriye tarihli bir alım sonraki satışların
+  // lotlarını değiştirmiyor, geriye tarihli bir satış ise daha sonraki
+  // satışların tükettiği lotları görüp yanlış lotu tüketiyordu. Hata trade'i
+  // geri almaz; idempotent processor backfill route ile tekrar denenebilir.
   let realizedWarning: string | null = null;
-  if (input.side === "sell") {
-    const procResult = await processSellTrade(supabase, tradeId);
-    if (!procResult.ok) {
-      realizedWarning = `Trade kaydedildi ancak realized_lots yazılamadı: ${procResult.error ?? "bilinmeyen hata"}`;
-    }
+  const { failed } = await reprocessRealizedLotsForScope(
+    supabase,
+    user.id,
+    input.portfolio_id,
+    assetId,
+  );
+  if (failed.length > 0) {
+    realizedWarning = `Trade kaydedildi ancak realized_lots yazılamadı: ${failed[0].error}`;
   }
 
   revalidatePath("/islemler");
