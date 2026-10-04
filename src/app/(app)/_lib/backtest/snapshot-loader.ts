@@ -11,7 +11,16 @@ import {
   evaluateSprint6,
   type ScenarioBenchmarkAlphas,
 } from "./confidence";
+import {
+  MATRIX_REBALANCE_DAYS,
+  MATRIX_STRATEGIES,
+  MATRIX_TOP_NS,
+  backtestScenarios,
+  latestRunsByKey,
+} from "./schedule";
 import type { BacktestStrategy, VsBenchmarkMetrics } from "./types";
+import { istanbulToday } from "@/lib/finance/istanbul-date";
+import { readAll } from "@/lib/supabase/read-all";
 
 /** Sprint-6 best config kararı (kullanıcı onayı 2026-05-31). */
 export const BEST_CONFIG = {
@@ -25,7 +34,8 @@ export const PHASE_1_BASELINE_CONFIG = {
   rebalance_days: 90,
 } as const;
 
-export const ALL_SCENARIOS = ["2022-01-03", "2023-01-02", "2024-01-02", "2025-01-02"] as const;
+/** Senaryo başına matris büyüklüğü (3 TopN × 4 rebalance × 2 strateji). */
+const MATRIX_SIZE = MATRIX_TOP_NS.length * MATRIX_REBALANCE_DAYS.length * MATRIX_STRATEGIES.length;
 
 export const BENCHMARK_KEYS = ["KAT_FON_SEPETI", "XU100", "XAUTRY", "USDTRY", "EURTRY", "CPI_TR"] as const;
 
@@ -61,15 +71,20 @@ export interface BacktestUiSnapshot {
   best_config_sprint6: ReturnType<typeof evaluateSprint6>;
   /** Eksik benchmark verisi uyarısı. */
   missing_benchmarks: string[];
-  /** Faz-2 96 run tam mı? */
+  /** Faz-2 matrisi (senaryo × 24) tam mı? */
   phase_2_complete: { total: number; expected: number; missing: number };
+  /** Değerlendirilen pencere: senaryo başlangıçları + sonuçların bitiş tarihi */
+  window: { scenarios: string[]; end_date: string | null };
 }
 
 // ────────────────────────────────────────────────────────────────────────
 
 interface RunRow {
+  id: string;
+  created_at: string;
   params: {
     start_date: string;
+    end_date: string;
     top_n: number;
     rebalance_days: number;
     strategy: BacktestStrategy;
@@ -150,15 +165,31 @@ export async function loadBacktestSnapshot(): Promise<BacktestUiSnapshot | null>
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const { data, error } = await supabase
-    .from("backtest_runs")
-    .select("params, summary")
-    .eq("ok", true);
-  if (error || !data) {
+  const scenarios = backtestScenarios(istanbulToday());
+  const expected = scenarios.length * MATRIX_SIZE;
+
+  let allRows: RunRow[];
+  try {
+    allRows = await readAll<RunRow>(
+      (from, to) =>
+        supabase
+          .from("backtest_runs")
+          .select("id, created_at, params, summary", { count: "exact" })
+          .eq("ok", true)
+          .order("id", { ascending: true })
+          .range(from, to),
+      (r) => r.id,
+    );
+  } catch (error) {
     console.error("loadBacktestSnapshot failed:", error);
     return null;
   }
-  const rows = data as unknown as RunRow[];
+  // Her senaryo × kombinasyon için yalnız en yeni sonuç (eski motor/eski bitiş
+  // tarihiyle üretilenler yenisi gelince devre dışı); güncel olmayan senaryolar
+  // atlanır.
+  const rows = latestRunsByKey(allRows, scenarios);
+  const endDates = rows.map((r) => r.params.end_date).filter(Boolean).sort();
+  const window = { scenarios, end_date: endDates.length > 0 ? endDates[endDates.length - 1] : null };
   if (rows.length === 0) {
     return {
       total_runs: 0,
@@ -177,7 +208,8 @@ export async function loadBacktestSnapshot(): Promise<BacktestUiSnapshot | null>
         failures: ["Henüz hiç backtest çalıştırılmadı"],
       },
       missing_benchmarks: ["XU100", "XAUTRY"],
-      phase_2_complete: { total: 0, expected: 96, missing: 96 },
+      phase_2_complete: { total: 0, expected, missing: expected },
+      window,
     };
   }
 
@@ -242,7 +274,7 @@ export async function loadBacktestSnapshot(): Promise<BacktestUiSnapshot | null>
         r.params.rebalance_days === BEST_CONFIG.rebalance_days,
     );
     const alphas: number[] = [];
-    for (const scenario of ALL_SCENARIOS) {
+    for (const scenario of scenarios) {
       const ew = bestConfigScenarioRows.find(
         (r) => r.params.start_date === scenario && r.params.strategy === "equal_weight",
       );
@@ -281,8 +313,9 @@ export async function loadBacktestSnapshot(): Promise<BacktestUiSnapshot | null>
     missing_benchmarks: missingBenchmarks,
     phase_2_complete: {
       total: rows.length,
-      expected: 96,
-      missing: Math.max(0, 96 - rows.length),
+      expected,
+      missing: Math.max(0, expected - rows.length),
     },
+    window,
   };
 }

@@ -4,7 +4,7 @@
  * Authorization: Bearer ${CRON_SECRET}.
  *
  * Query parametreleri:
- *   ?start=2022-01-03&end=2026-05-26
+ *   ?start=2022-01-03&end=2026-09-30   (end verilmezse önceki ay sonu)
  *   &top_n=10&rebalance_days=90
  *   &strategy=equal_weight | score_weighted
  *   &persona_id=<uuid>  (verilmezse default persona)
@@ -17,6 +17,8 @@ import { createClient } from "@supabase/supabase-js";
 
 import { runBacktestWithPersistence } from "@/app/(app)/_lib/backtest/run-orchestrator";
 import type { BacktestParams } from "@/app/(app)/_lib/backtest/types";
+import { backtestEndDate } from "@/app/(app)/_lib/backtest/schedule";
+import { istanbulToday } from "@/lib/finance/istanbul-date";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -49,7 +51,7 @@ export async function GET(req: NextRequest) {
 
   const sp = req.nextUrl.searchParams;
   const startDate = sp.get("start") ?? "2022-01-03";
-  const endDate = sp.get("end") ?? "2026-05-26";
+  const endDate = sp.get("end") ?? backtestEndDate(istanbulToday());
   const topN = Number(sp.get("top_n") ?? "10");
   const rebalanceDays = Number(sp.get("rebalance_days") ?? "90");
   const strategy = (sp.get("strategy") ?? "equal_weight") as BacktestParams["strategy"];

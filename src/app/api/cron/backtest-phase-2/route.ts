@@ -7,10 +7,10 @@
  * Authorization: Bearer ${CRON_SECRET}.
  *
  * Kullanım:
- *   ?scenario=2022-01-03   (zorunlu — 4 başlangıç tarihinden biri)
+ *   ?scenario=2022-01-03   (zorunlu — backtestScenarios()'tan biri)
  *   ?skip_existing=1       (idempotent — DB'de aynı param kombosu varsa skip)
  *
- * User 4 kez çağırır (2022/2023/2024/2025) — toplam ~16 dk, 96 run.
+ * Günlük otomatik yenileme: /api/cron/backtest-refresh (tüm senaryolar).
  *
  * Response: { ok, scenario, runs_count, runs: [{top_n, rebalance_days, strategy, run_id, ok}], duration_ms }
  */
@@ -19,7 +19,15 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 import { runBacktestWithPersistence } from "@/app/(app)/_lib/backtest/run-orchestrator";
-import type { BacktestParams, BacktestStrategy } from "@/app/(app)/_lib/backtest/types";
+import {
+  MATRIX_REBALANCE_DAYS,
+  MATRIX_STRATEGIES,
+  MATRIX_TOP_NS,
+  backtestEndDate,
+  backtestScenarios,
+} from "@/app/(app)/_lib/backtest/schedule";
+import type { BacktestParams } from "@/app/(app)/_lib/backtest/types";
+import { istanbulToday } from "@/lib/finance/istanbul-date";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -27,11 +35,6 @@ export const maxDuration = 300;
 
 const WRAPPER_VERSION = "2026-05-31-pr-b2-phase-2";
 
-const VALID_SCENARIOS = new Set(["2022-01-03", "2023-01-02", "2024-01-02", "2025-01-02"]);
-const END_DATE = "2026-05-26";
-const TOP_NS: number[] = [5, 10, 20];
-const REBALANCE_DAYS: number[] = [30, 90, 180, 365];
-const STRATEGIES: BacktestStrategy[] = ["equal_weight", "score_weighted"];
 
 function tag<T extends Record<string, unknown>>(
   body: T,
@@ -55,6 +58,10 @@ export async function GET(req: NextRequest) {
   if (!url || !serviceKey) {
     return tag({ error: "Missing Supabase env" }, { status: 500 });
   }
+
+  const today = istanbulToday();
+  const VALID_SCENARIOS = new Set(backtestScenarios(today));
+  const END_DATE = backtestEndDate(today);
 
   const sp = req.nextUrl.searchParams;
   const scenario = sp.get("scenario") ?? "";
@@ -83,9 +90,9 @@ export async function GET(req: NextRequest) {
 
   // Cartesian: 3 × 4 × 2 = 24 run
   const combos: BacktestParams[] = [];
-  for (const topN of TOP_NS) {
-    for (const rebalance of REBALANCE_DAYS) {
-      for (const strategy of STRATEGIES) {
+  for (const topN of MATRIX_TOP_NS) {
+    for (const rebalance of MATRIX_REBALANCE_DAYS) {
+      for (const strategy of MATRIX_STRATEGIES) {
         combos.push({
           start_date: scenario,
           end_date: END_DATE,
@@ -120,6 +127,7 @@ export async function GET(req: NextRequest) {
         .select("id")
         .eq("ok", true)
         .filter("params->>start_date", "eq", params.start_date)
+        .filter("params->>end_date", "eq", params.end_date)
         .filter("params->>top_n", "eq", String(params.top_n))
         .filter("params->>rebalance_days", "eq", String(params.rebalance_days))
         .filter("params->>strategy", "eq", params.strategy)

@@ -1,8 +1,9 @@
 /**
- * Manual cron — Faz-1 baseline (8 run).
+ * Manual cron — Faz-1 baseline.
  *
- * Top10 × 3ay rebalance × 2 strateji (equal_weight + score_weighted) × 4 başlangıç.
- * Single HTTP call (~80 sn total, Vercel 300s içinde).
+ * Top10 × 3ay rebalance × 2 strateji (equal_weight + score_weighted) × her
+ * senaryo (schedule.ts: 2022'den bu yana her yıl, bitiş önceki ay sonu).
+ * Single HTTP call (~10 sn/run, Vercel 300s içinde).
  *
  * Authorization: Bearer ${CRON_SECRET}.
  *
@@ -13,13 +14,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 import {
-  PHASE_1_END_DATE,
   PHASE_1_REBALANCE_DAYS,
-  PHASE_1_START_DATES,
   PHASE_1_STRATEGIES,
   PHASE_1_TOP_N,
   runBacktestWithPersistence,
 } from "@/app/(app)/_lib/backtest/run-orchestrator";
+import { backtestEndDate, backtestScenarios } from "@/app/(app)/_lib/backtest/schedule";
+import { istanbulToday } from "@/lib/finance/istanbul-date";
 import {
   computeConfidence,
   evaluateSprint6,
@@ -77,7 +78,10 @@ export async function GET(req: NextRequest) {
   }
   const personaId = defaultPersona.id as string;
 
-  // 8 run: 4 başlangıç × 2 strateji
+  // Senaryo × 2 strateji
+  const today = istanbulToday();
+  const scenarios = backtestScenarios(today);
+  const endDate = backtestEndDate(today);
   const runs: Array<{
     scenario: string;
     strategy: string;
@@ -87,11 +91,11 @@ export async function GET(req: NextRequest) {
     summary?: unknown;
   }> = [];
 
-  for (const startDate of PHASE_1_START_DATES) {
+  for (const startDate of scenarios) {
     for (const strategy of PHASE_1_STRATEGIES) {
       const params: BacktestParams = {
         start_date: startDate,
-        end_date: PHASE_1_END_DATE,
+        end_date: endDate,
         rebalance_days: PHASE_1_REBALANCE_DAYS,
         top_n: PHASE_1_TOP_N,
         strategy,
@@ -124,7 +128,7 @@ export async function GET(req: NextRequest) {
   // Confidence + Sprint-6 GO/NO-GO hesabı
   const scenarioAlphas: ScenarioBenchmarkAlphas[] = BENCHMARK_KEYS.map((bench) => ({
     benchmark: bench,
-    alphas: PHASE_1_START_DATES.map((scenario) => {
+    alphas: scenarios.map((scenario) => {
       const ewRun = runs.find((r) => r.scenario === scenario && r.strategy === "equal_weight" && r.ok);
       const swRun = runs.find((r) => r.scenario === scenario && r.strategy === "score_weighted" && r.ok);
       const ewBench = (ewRun?.summary as { vs_benchmark?: Record<string, VsBenchmarkMetrics> })?.vs_benchmark?.[bench] ?? null;

@@ -252,9 +252,7 @@ export async function runBacktestWithPersistence(
   return { ...result, run_id: runId, duration_ms: Date.now() - t0 };
 }
 
-/** Faz-1 baseline: 8 run (Top10 × 3ay × 2 strateji × 4 başlangıç). */
-export const PHASE_1_START_DATES = ["2022-01-03", "2023-01-02", "2024-01-02", "2025-01-02"];
+/** Faz-1 baseline: Top10 × 3ay × 2 strateji × her senaryo (bkz. schedule.ts). */
 export const PHASE_1_STRATEGIES: BacktestStrategy[] = ["equal_weight", "score_weighted"];
-export const PHASE_1_END_DATE = "2026-05-26";
 export const PHASE_1_TOP_N = 10;
 export const PHASE_1_REBALANCE_DAYS = 90;
