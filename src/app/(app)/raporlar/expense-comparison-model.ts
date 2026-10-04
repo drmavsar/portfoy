@@ -13,12 +13,16 @@ export function previousPeriod(period: Period, mode: ComparisonMode): Period | n
   if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return null;
   const iso = (n: number) => new Date(n).toISOString().slice(0, 10);
   if (mode === "period") return { from: iso(from - (to - from + day)), to: iso(from - day) };
-  const shift = (n: number) => {
+  const shift = (n: number, isEnd: boolean) => {
     const d = new Date(n);
     const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 0)).getUTCDate();
-    return iso(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, Math.min(d.getUTCDate(), last)));
+    // Dönem ayın SON gününde bitiyorsa önceki dönem de önceki ayın son gününde
+    // bitsin: 1–30 Eylül ↔ 1–31 Ağustos (eskiden 1–30 Ağustos; 31'i atlanıyordu).
+    const monthEnd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+    const dayOf = isEnd && d.getUTCDate() === monthEnd ? last : Math.min(d.getUTCDate(), last);
+    return iso(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, dayOf));
   };
-  return { from: shift(from), to: shift(to) };
+  return { from: shift(from, false), to: shift(to, true) };
 }
 export interface ComparisonCell { current: number; previous: number; delta: number; percent: number | null }
 export function comparisonCell(current: number, previous: number): ComparisonCell {

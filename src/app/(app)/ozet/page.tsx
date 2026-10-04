@@ -359,7 +359,8 @@ export default async function OzetPage() {
     dayChangeMap.set(key, cur);
   };
 
-  const fxSource = "canlidoviz · Selling";
+  // FX: Truncgil satış (yedek canlidoviz/TCMB); altın: canlidoviz (bkz. asset-rates)
+  const fxSource = "Truncgil · satış (yedek canlidoviz/TCMB) · altın canlidoviz";
 
   for (const a of accounts) {
     if (a.currency === "TRY") {
@@ -426,8 +427,8 @@ export default async function OzetPage() {
       cashEntry.change = cashTotal - prevCash;
       cashEntry.source =
         prev.snapshot_date === yesterdayIso
-          ? "daily_snapshots · dün 23:00'tan beri"
-          : `daily_snapshots · ${prev.snapshot_date} 23:00'tan beri`;
+          ? "bakiye değişimi (giriş/çıkış dahil, toplama katılmaz) · dün 23:00'tan beri"
+          : `bakiye değişimi (giriş/çıkış dahil, toplama katılmaz) · ${prev.snapshot_date} 23:00'tan beri`;
       cashEntry.lastUpdate = prev.snapshot_date;
     } else {
       cashEntry.change = 0;
@@ -436,17 +437,20 @@ export default async function OzetPage() {
     }
   }
 
-  const dayChangeRows = Array.from(dayChangeMap.values())
-    .filter((r) => r.value > 0)
-    .map((r) => ({ ...r, pct: r.value > 0 ? (r.change / r.value) * 100 : 0 }))
-    .sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
-
-  const totalDayChange = dayChangeRows.reduce((s, r) => s + r.change, 0);
+  // Manşet "bugünkü değişim" yalnız PİYASA kaynaklı (fiyat/kur hareketi).
+  // Nakit satırı bakiye farkıdır (maaş, transfer, hisse alımı dahil); onu da
+  // toplamak bankadan hisseye 200 bin aktarınca "−200 bin" gösteriyordu (hisse
+  // satırı yalnız fiyat değişimini içerdiği için akışın karşılığı yoktu).
+  // Nakit değişimi NAKİT kartında ayrı ("akış dahil") gösterilmeye devam eder.
+  const totalDayChange = Array.from(dayChangeMap.entries())
+    .filter(([key, r]) => key !== "cash_try" && r.value > 0)
+    .reduce((s, [, r]) => s + r.change, 0);
 
   // YTD nakit akış — Ocak'tan içinde bulunulan aya
-  const today = new Date();
-  const currentYear = today.getFullYear();
-  const monthsCount = today.getMonth() + 1; // Ocak=1, Aralık=12
+  // İstanbul takvimi (sunucu UTC; 1 Ocak 00:00-03:00 arası önceki yıl sanılıyordu)
+  const todayTr = istanbulToday();
+  const currentYear = Number(todayTr.slice(0, 4));
+  const monthsCount = Number(todayTr.slice(5, 7)); // Ocak=1, Aralık=12
   const months: Array<{ period: string; inflow: number; outflow: number }> = [];
   for (let i = 0; i < monthsCount; i++) {
     const period = `${currentYear}-${String(i + 1).padStart(2, "0")}`;

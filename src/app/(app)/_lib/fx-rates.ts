@@ -29,12 +29,20 @@ export async function getTcmbRates(): Promise<RateMap> {
     const xml = await res.text();
 
     const out: RateMap = {};
-    // <Currency ... Kod="USD" ...><ForexSelling>38.9234</ForexSelling></Currency>
-    const re = /<Currency[^>]+Kod="([A-Z]{3})"[\s\S]*?<ForexSelling>([\d.]+)<\/ForexSelling>[\s\S]*?<\/Currency>/g;
+    // <Currency Kod="JPY"><Unit>100</Unit>…<ForexSelling>28.12</ForexSelling></Currency>
+    // TCMB bazı dövizleri birden fazla birim için kotar (JPY = 100 yen). Unit
+    // okunmazsa JPY hesapları 100× değerlenir (Truncgil JPY'yi vermediğinde bu
+    // değer kullanılıyor ve rate_snapshots'a da yazılıyordu).
+    const blockRe = /<Currency[^>]+Kod="([A-Z]{3})"[^>]*>([\s\S]*?)<\/Currency>/g;
     let m: RegExpExecArray | null;
-    while ((m = re.exec(xml)) !== null) {
+    while ((m = blockRe.exec(xml)) !== null) {
       const code = m[1];
-      const rate = parseFloat(m[2]);
+      const body = m[2];
+      const sell = /<ForexSelling>([\d.]+)<\/ForexSelling>/.exec(body);
+      if (!sell) continue;
+      const unitMatch = /<Unit>(\d+)<\/Unit>/.exec(body);
+      const unit = unitMatch ? Number(unitMatch[1]) : 1;
+      const rate = parseFloat(sell[1]) / (unit > 0 ? unit : 1);
       if (Number.isFinite(rate) && rate > 0) out[code] = rate;
     }
 

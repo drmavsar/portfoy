@@ -17,6 +17,12 @@ import {
 } from "@/app/(app)/_lib/cashflow-actions";
 import { Icon } from "@/components/ui/icon";
 import { ModalPortal } from "@/components/ui/modal-portal";
+import {
+  addDaysIso,
+  istanbulMonthStart,
+  istanbulToday,
+  istanbulYearStart,
+} from "@/lib/finance/istanbul-date";
 
 const inp: React.CSSProperties = {
   background: "var(--surface)",
@@ -52,25 +58,21 @@ function fmtDate(iso: string): string {
 
 type RangeKey = "month" | "ytd" | "last30" | "last90" | "all" | "custom";
 
+// İstanbul takvimi: UTC'de gece 00:00-03:00 arası "Bu Ay" boş, bugünün
+// kayıtları gizli görünüyordu.
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return istanbulToday();
 }
 
 function addDays(iso: string, days: number): string {
-  const d = new Date(iso + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
+  return addDaysIso(iso, days);
 }
 
 function rangeBounds(key: RangeKey, customFrom: string, customTo: string): { from: string; to: string } | null {
   const today = todayIso();
   if (key === "all") return null;
-  if (key === "month") {
-    const now = new Date();
-    const from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-    return { from, to: today };
-  }
-  if (key === "ytd") return { from: `${new Date().getFullYear()}-01-01`, to: today };
+  if (key === "month") return { from: istanbulMonthStart(), to: today };
+  if (key === "ytd") return { from: istanbulYearStart(), to: today };
   if (key === "last30") return { from: addDays(today, -29), to: today };
   if (key === "last90") return { from: addDays(today, -89), to: today };
   if (key === "custom") {
@@ -448,7 +450,7 @@ function TransactionModal({
   const [beneficiaryId, setBeneficiaryId] = useState(initial?.beneficiary_id ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [amount, setAmount] = useState(initial ? String(initial.amount) : "");
-  const [date, setDate] = useState(initial?.occurred_on ?? new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(initial?.occurred_on ?? istanbulToday());
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [busy, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);

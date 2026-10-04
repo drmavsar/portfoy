@@ -49,11 +49,15 @@ const RATE_BOUNDS: Record<string, [number, number]> = {
   ATA: [12_000, 2_000_000],
 };
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-function fmtDate(d: Date): string {
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+// Son nokta bundan eskiyse seri "durmuş" sayılır (bayram tatili ≤ 9 gün ama
+// hafta içi kurlar/altın her gün işlem görür; 4 gün güvenli eşik).
+const MAX_STALE_DAYS = 4;
+// Günlük kapanışlar arası bundan büyük değişim veri hatası sayılır.
+const MAX_DAILY_CHANGE_PCT = 15;
+
+/** UTC gün → "YYYY-MM-DD" */
+function ymd(d: Date): string {
+  return d.toISOString().slice(0, 10);
 }
 
 async function fetchOne(
@@ -72,11 +76,17 @@ async function fetchOne(
     const raw = (await res.json()) as Record<string, unknown>;
     const pts = parseCanlidovizHistory(raw);
     if (pts.length === 0) return null;
-    const rate = pts[pts.length - 1].value;
+    const last = pts[pts.length - 1];
+    // Durmuş seri güncel kur gibi gösterilmesin (ve persistRates'e yazılmasın).
+    const staleCutoff = ymd(new Date(Date.now() - MAX_STALE_DAYS * 86_400_000));
+    if (last.as_of < staleCutoff) return null;
+    const rate = last.value;
     const bounds = RATE_BOUNDS[code];
     if (bounds && (rate < bounds[0] || rate > bounds[1])) return null; // birim tuzağı
     const prev = pts.length >= 2 ? pts[pts.length - 2].value : null;
-    const change = prev && prev > 0 ? ((rate - prev) / prev) * 100 : null;
+    let change = prev && prev > 0 ? ((rate - prev) / prev) * 100 : null;
+    // Hatalı önceki kapanış ±%50 gibi sahte değişim üretmesin.
+    if (change != null && Math.abs(change) > MAX_DAILY_CHANGE_PCT) change = null;
     return { code, rate, change };
   } catch {
     return null;
@@ -94,10 +104,12 @@ export async function fetchCanlidovizRates(
   const targets = (codes ?? Object.keys(CANLIDOVIZ_RATE_IDS)).filter(
     (c) => CANLIDOVIZ_RATE_IDS[c] != null,
   );
-  const end = new Date();
-  const start = new Date(end.getTime() - 8 * 24 * 3600 * 1000);
-  const startStr = fmtDate(start);
-  const endStr = fmtDate(end);
+  // Gün hassasiyetinde aralık → URL gün boyu sabit, `revalidate: 600` önbelleği
+  // gerçekten çalışır. Eskiden endDate saniyeye kadar "şimdi" idi: her çağrı
+  // yeni URL → önbellek hiç tutmuyor, her sayfa ~36 istek (rate-limit riski).
+  const now = new Date();
+  const startStr = `${ymd(new Date(now.getTime() - 8 * 86_400_000))}T00:00:00`;
+  const endStr = `${ymd(now)}T23:59:59`;
 
   const results = await Promise.all(
     targets.map((code) => fetchOne(code, CANLIDOVIZ_RATE_IDS[code], startStr, endStr)),
