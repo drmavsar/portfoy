@@ -19,7 +19,14 @@ export interface DailySnapshotRow {
   equity_mv: number;
   crypto_try: number;
   equity_by_person: Record<string, number>;
+  /** Snapshot anındaki kurlar (0049'dan önce yazılanlar benchmark'tan dolduruldu) */
+  usdtry?: number | null;
+  eurtry?: number | null;
+  xau_gram_try?: number | null;
 }
+
+const SNAPSHOT_COLUMNS =
+  "snapshot_date, total_wealth, cash_try, fx_try, metal_try, equity_mv, crypto_try, equity_by_person, usdtry, eurtry, xau_gram_try";
 
 export async function listDailySnapshots(days: number = 180): Promise<DailySnapshotRow[]> {
   if (!(await isSupabaseConfigured())) return [];
@@ -28,7 +35,7 @@ export async function listDailySnapshots(days: number = 180): Promise<DailySnaps
   since.setDate(since.getDate() - days);
   const { data, error } = await supabase
     .from("daily_snapshots")
-    .select("snapshot_date, total_wealth, cash_try, fx_try, metal_try, equity_mv, crypto_try, equity_by_person")
+    .select(SNAPSHOT_COLUMNS)
     .gte("snapshot_date", since.toISOString().slice(0, 10))
     .order("snapshot_date", { ascending: true });
   if (error) {
@@ -36,6 +43,24 @@ export async function listDailySnapshots(days: number = 180): Promise<DailySnaps
     return [];
   }
   return (data ?? []) as unknown as DailySnapshotRow[];
+}
+
+/** Tarihe ≤ son snapshot (yıl başı karşılaştırması: listDailySnapshots penceresi dışında kalabilir). */
+export async function getDailySnapshotOnOrBefore(date: string): Promise<DailySnapshotRow | null> {
+  if (!(await isSupabaseConfigured())) return null;
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("daily_snapshots")
+    .select(SNAPSHOT_COLUMNS)
+    .lte("snapshot_date", date)
+    .order("snapshot_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error("getDailySnapshotOnOrBefore error", error);
+    return null;
+  }
+  return (data ?? null) as unknown as DailySnapshotRow | null;
 }
 
 export async function captureDailySnapshot(input: {
@@ -46,6 +71,9 @@ export async function captureDailySnapshot(input: {
   equity_mv: number;
   crypto_try: number;
   equity_by_person: Record<string, number>;
+  usdtry?: number | null;
+  eurtry?: number | null;
+  xau_gram_try?: number | null;
 }): Promise<{ ok: boolean; created?: boolean; skipped?: boolean; error?: string }> {
   if (!(await isSupabaseConfigured())) {
     return { ok: false, error: "Supabase yapılandırılmamış." };
@@ -83,6 +111,9 @@ export async function captureDailySnapshot(input: {
     equity_mv: input.equity_mv,
     crypto_try: input.crypto_try,
     equity_by_person: input.equity_by_person,
+    usdtry: input.usdtry ?? null,
+    eurtry: input.eurtry ?? null,
+    xau_gram_try: input.xau_gram_try ?? null,
   } as never);
 
   if (error) return { ok: false, error: error.message };
