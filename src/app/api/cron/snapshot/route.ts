@@ -22,6 +22,7 @@ import { createClient } from "@supabase/supabase-js";
 
 import { getAssetRates } from "@/app/(app)/_lib/asset-rates";
 import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
+import { planYearEndSnapshot, type YearRow } from "@/app/(app)/_lib/year-end-wealth";
 import { istanbulToday } from "@/lib/finance/istanbul-date";
 
 export const dynamic = "force-dynamic";
@@ -204,6 +205,46 @@ async function computeUserSnapshot(
   };
 }
 
+/**
+ * Önceki yılın yıl sonu servetini wealth_snapshots'a yaz (yoksa ya da tahminse).
+ * Hata snapshot'ı düşürmez; sonuç yanıtta raporlanır.
+ */
+async function finalizePreviousYear(
+  supabase: SupabaseLike,
+  userId: string,
+  today: string,
+): Promise<string | null> {
+  const prevYear = Number(today.slice(0, 4)) - 1;
+  const { data: lastDaily, error: dErr } = await supabase
+    .from("daily_snapshots")
+    .select("snapshot_date, total_wealth")
+    .eq("user_id", userId)
+    .lte("snapshot_date", `${prevYear}-12-31`)
+    .order("snapshot_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (dErr) throw new Error(`daily_snapshots: ${dErr.message}`);
+  const { data: existing, error: wErr } = await supabase
+    .from("wealth_snapshots")
+    .select("period, total_try, notes")
+    .eq("user_id", userId)
+    .eq("period", String(prevYear))
+    .maybeSingle();
+  if (wErr) throw new Error(`wealth_snapshots: ${wErr.message}`);
+
+  const plan = planYearEndSnapshot(
+    today,
+    lastDaily ? { snapshot_date: lastDaily.snapshot_date, total_wealth: Number(lastDaily.total_wealth) } : null,
+    (existing as YearRow | null) ?? null,
+  );
+  if (!plan) return null;
+  const { error } = await supabase
+    .from("wealth_snapshots")
+    .upsert({ user_id: userId, ...plan } as never, { onConflict: "user_id,period" });
+  if (error) throw new Error(`wealth_snapshots upsert: ${error.message}`);
+  return plan.period;
+}
+
 export async function GET(req: NextRequest) {
   // Vercel Cron: Authorization: Bearer CRON_SECRET
   const auth = req.headers.get("authorization");
@@ -249,7 +290,14 @@ export async function GET(req: NextRequest) {
   }
 
   const today = istanbulToday();
-  const results: Array<{ user_id: string; ok: boolean; total?: number; error?: string }> = [];
+  const results: Array<{
+    user_id: string;
+    ok: boolean;
+    total?: number;
+    error?: string;
+    year_end?: string | null;
+    year_end_error?: string;
+  }> = [];
 
   for (const userId of userIds) {
     try {
@@ -273,7 +321,21 @@ export async function GET(req: NextRequest) {
       if (error) {
         results.push({ user_id: userId, ok: false, error: error.message });
       } else {
-        results.push({ user_id: userId, ok: true, total: snap.total_wealth });
+        // Yıl başında: önceki yılın yıl sonu servetini kesinleştir
+        let yearEnd: string | null = null;
+        let yearEndError: string | undefined;
+        try {
+          yearEnd = await finalizePreviousYear(supabase, userId, today);
+        } catch (e) {
+          yearEndError = e instanceof Error ? e.message : String(e);
+        }
+        results.push({
+          user_id: userId,
+          ok: true,
+          total: snap.total_wealth,
+          year_end: yearEnd,
+          ...(yearEndError ? { year_end_error: yearEndError } : {}),
+        });
       }
     } catch (err) {
       results.push({

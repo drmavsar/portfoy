@@ -5,7 +5,11 @@
  * için günlük veri vermediğinden bu seriler bayatlıyordu. Bu cron günlük çalışıp
  * son ~10 günü güncel kaynaklardan UPSERT eder:
  *   XAUTRY, USDTRY, EURTRY → canlidoviz (a.canlidoviz.com, token'sız)
- *   XU100                  → TradingView scanner (BIST:XU100 anlık kapanış)
+ *   XU100                  → borsapy günlük kapanış geçmişi (/api/bist-history);
+ *                            yanıt yoksa yedek: TradingView anlık kapanış (yalnız
+ *                            hafta içi, yalnız bugün). Pencerenin tamamı her gün
+ *                            yeniden yazıldığından kaçan günler ve seans sonu
+ *                            sapmaları kendiliğinden düzelir.
  *
  * Güvenlik: her seri için akıl-sınırı (yanlış birim yazmasını engeller) ve
  * seri-başına zarif hata yönetimi. ?dry=1 → UPSERT yapmadan değerleri döndürür.
@@ -16,6 +20,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+import { fetchBistIndexHistory } from "@/app/(app)/_lib/benchmark/bist-index-history";
 import { fetchCanlidovizSeries } from "@/app/(app)/_lib/benchmark/canlidoviz-adapter";
 import { fetchTradingViewQuotes } from "@/app/(app)/_lib/tradingview-quotes";
 import type { BenchmarkPoint } from "@/app/(app)/_lib/benchmark/types";
@@ -25,11 +30,11 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 // Seri başına makul değer aralığı — birim hatası/bozuk veriyi reddeder.
-const SANITY: Record<string, { min: number; max: number; source: "canlidoviz" | "tradingview" }> = {
+const SANITY: Record<string, { min: number; max: number; source: "canlidoviz" | "borsapy" }> = {
   XAUTRY: { min: 100, max: 500_000, source: "canlidoviz" },
   USDTRY: { min: 1, max: 100_000, source: "canlidoviz" },
   EURTRY: { min: 1, max: 100_000, source: "canlidoviz" },
-  XU100: { min: 100, max: 100_000_000, source: "tradingview" },
+  XU100: { min: 100, max: 100_000_000, source: "borsapy" },
 };
 
 interface SeriesResult {
@@ -78,10 +83,11 @@ export async function GET(req: NextRequest) {
 
   // 1) Kaynaklardan çek
   const canliCodes = ["XAUTRY", "USDTRY", "EURTRY"];
-  const [canliResults, tvQuotes] = await Promise.all([
+  const [canliResults, xuHistory, tvQuotes] = await Promise.all([
     Promise.all(
       canliCodes.map((code) => fetchCanlidovizSeries({ code, startDate, endDate }).then((r) => ({ code, r }))),
     ),
+    fetchBistIndexHistory("XU100", days > 60 ? "6mo" : "3mo"),
     fetchTradingViewQuotes(["XU100"]),
   ]);
 
@@ -89,16 +95,26 @@ export async function GET(req: NextRequest) {
   for (const { code, r } of canliResults) {
     rawByCode[code] = { points: r.ok ? r.points : [], error: r.ok ? undefined : r.error };
   }
-  // XU100 — TradingView anlık kapanış → bugünün noktası
-  const xu = tvQuotes["XU100"];
-  rawByCode["XU100"] = xu
-    ? { points: [{ as_of: endDate, value: xu.close }] }
-    : { points: [], error: "TradingView XU100 verisi yok" };
+  // XU100 — borsapy resmi günlük kapanışları (pencere); yoksa TradingView
+  // anlık kapanışı yalnız hafta içi bugüne (hafta sonu sahte nokta yazılmaz).
+  let xuSource = "borsapy";
+  const xuWindow = xuHistory.filter((p) => p.as_of >= startDate && p.as_of <= endDate);
+  if (xuWindow.length > 0) {
+    rawByCode["XU100"] = { points: xuWindow };
+  } else {
+    xuSource = "tradingview";
+    const xu = tvQuotes["XU100"];
+    const dow = new Date(`${endDate}T12:00:00Z`).getUTCDay();
+    rawByCode["XU100"] =
+      xu && dow !== 0 && dow !== 6
+        ? { points: [{ as_of: endDate, value: xu.close }] }
+        : { points: [], error: xu ? "hafta sonu — yeni nokta yok" : "borsapy ve TradingView XU100 verisi yok" };
+  }
 
   // 2) Akıl-sınırı + UPSERT (dry değilse)
   const results: SeriesResult[] = [];
   for (const code of Object.keys(SANITY)) {
-    const bounds = SANITY[code];
+    const bounds = { ...SANITY[code], source: code === "XU100" ? xuSource : SANITY[code].source };
     const raw = rawByCode[code] ?? { points: [] };
     const valid = raw.points.filter((p) => p.value >= bounds.min && p.value <= bounds.max);
     const rejected = raw.points.length - valid.length;

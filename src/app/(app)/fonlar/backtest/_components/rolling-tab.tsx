@@ -25,7 +25,7 @@ export function RollingTab({ snapshot }: { snapshot: BacktestUiSnapshot }) {
             Top 12 Konfigürasyon — KAT_FON_SEPETI Median Alpha DESC
           </div>
           <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-            Her satır 4 senaryonun aggregate&apos;i. ✓ Median ≥ %3 + Conf ≥ 75 → Sprint-6 GO koşullarını sağlar.
+            Her satır tüm senaryoların (2022&apos;den bu yana her yıl) aggregate&apos;i. ✓ Median ≥ %3 + Conf ≥ 75 → Sprint-6 GO koşullarını sağlar.
           </div>
         </div>
         <div style={{ overflowX: "auto" }}>

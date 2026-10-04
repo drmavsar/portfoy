@@ -73,6 +73,8 @@ export interface XirrRow {
 
 /** FIFO'nun eşleştiremediği satış — veri girişi sorunu (alım eksik/fazla satış). */
 export interface UnmatchedSell {
+  /** Satış işleminin kimliği */
+  tradeId: string;
   symbol: string;
   portfolio: string;
   date: string;
@@ -245,6 +247,7 @@ export function findUnmatchedSells(
     // satış sorun değil; yalnız gerçek eksik alımı işaretle.
     if (hasLots(t.id) || before + 1e-9 >= qty) continue;
     out.push({
+      tradeId: t.id,
       symbol: symbolOf(t.asset_id),
       portfolio: portfolioName(t.portfolio_id),
       date: t.executed_at.slice(0, 10),

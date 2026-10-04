@@ -115,6 +115,14 @@ export function SummaryTab({ snapshot }: { snapshot: BacktestUiSnapshot }) {
           <Metric label="Toplam Run" value={String(snapshot.total_runs)} />
           <Metric label="Faz-2 Kapsam" value={`${snapshot.phase_2_complete.total}/${snapshot.phase_2_complete.expected}`} accent={snapshot.phase_2_complete.missing === 0 ? "#4cc9b0" : "#e0b341"} />
           <Metric label="Combo Sayısı" value={String(snapshot.combos.length)} />
+          <Metric
+            label="Pencere"
+            value={`${snapshot.window.scenarios[0]?.slice(0, 4) ?? "—"}–${snapshot.window.scenarios.at(-1)?.slice(0, 4) ?? "—"} → ${snapshot.window.end_date ?? "—"}`}
+          />
+        </div>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, lineHeight: 1.5 }}>
+          {snapshot.window.scenarios.length} senaryo (her yılın ilk iş günü). Sonuçlar her gece kendiliğinden yenilenir:
+          bitiş tarihi her ay başında ilerler; TÜFE güncellenince reel getiriler yeniden hesaplanır.
         </div>
       </div>
     </div>
