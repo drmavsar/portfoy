@@ -2,9 +2,9 @@
 
 import { useMemo, useState, useTransition } from "react";
 
-import { DataGrid, type GridColumn } from "@/components/grid/data-grid";
 import { moneyTotals } from "@/components/grid/model";
 import { quantityTotals } from "@/components/grid/investment-summary";
+import { Ledger, type LedgerExportColumn, type LedgerFacet } from "@/components/ledger/ledger";
 
 import { Icon } from "@/components/ui/icon";
 import { ModalPortal } from "@/components/ui/modal-portal";
@@ -52,11 +52,6 @@ function Lbl({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
-}
-
-function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getFullYear()).slice(2)}`;
 }
 
 // İşlem zamanının İstanbul takvim günü (UTC'de gece işlemi bir gün önce görünüyordu)
@@ -148,28 +143,48 @@ export function IslemlerClient({
 
     return out;
   }, [trades, range, customFrom, customTo, sideFilter]);
-  const [gridRows, setGridRows] = useState<TradeRow[] | null>(null);
-  const filtered = gridRows ?? periodRows;
+  const [listRows, setListRows] = useState<TradeRow[] | null>(null);
+  const filtered = listRows ?? periodRows;
   const totalGross = moneyTotals(filtered, t => Number(t.quantity) * Number(t.price), t => t.currency);
   const portfolioMap = Object.fromEntries(portfolios.map(p => [p.id, p.name]));
-  const columns: GridColumn<TradeRow>[] = [
-    { id: "date", title: "Tarih", value: t => t.executed_at, render: t => fmtDate(t.executed_at), width: 120 },
-    { id: "symbol", title: "Sembol", value: t => assetMap[t.asset_id]?.symbol ?? t.asset_id, groupable: true, render: t => <span title={assetMap[t.asset_id]?.name}>{assetMap[t.asset_id]?.symbol ?? "?"}</span> },
-    { id: "portfolio", title: "Portföy", value: t => portfolioMap[t.portfolio_id] ?? "Atanmamış", groupable: true },
-    { id: "side", title: "Yön", value: t => t.side === "buy" ? "Alış" : "Satış", groupable: true },
-    { id: "qty", title: "Adet", value: t => Number(t.quantity), numeric: true, render: t => fmt.tr(Number(t.quantity), qtyDecimals(assetMap[t.asset_id]?.asset_class, assetMap[t.asset_id]?.symbol)) },
-    { id: "price", title: "Fiyat", value: t => Number(t.price), numeric: true, render: t => fmt.tr(Number(t.price), assetMap[t.asset_id]?.asset_class === "fund" ? 6 : 2) },
-    { id: "fees", title: "Komisyon", value: t => Number(t.fees), numeric: true },
-    { id: "amount", title: "Tutar", value: tradeAmount, numeric: true, render: t => moneyTotals([t], tradeAmount, t => t.currency) },
-    { id: "currency", title: "Para Birimi", value: t => t.currency, groupable: true },
-    { id: "person", title: "Kişi", value: t => t.beneficiary_id ? benMap[t.beneficiary_id]?.name ?? "Atanmamış" : "Atanmamış", groupable: true },
-    { id: "custody", title: "Kurum", value: t => t.custody_id ? custodyMap[t.custody_id]?.name ?? "Atanmamış" : "Atanmamış", groupable: true },
-    { id: "notes", title: "Not", value: t => t.notes },
+  const symbolOf = (t: TradeRow) => assetMap[t.asset_id]?.symbol ?? "?";
+  const sideLabel = (t: TradeRow) => (t.side === "buy" ? "Alış" : "Satış");
+  const portfolioName = (t: TradeRow) => portfolioMap[t.portfolio_id] ?? "Portföy yok";
+  const personName = (t: TradeRow) => (t.beneficiary_id ? benMap[t.beneficiary_id]?.name ?? "Kişi yok" : "Kişi yok");
+  const custodyName = (t: TradeRow) => (t.custody_id ? custodyMap[t.custody_id]?.name ?? "Kurum yok" : "Kurum yok");
+  const qtyText = (t: TradeRow) => fmt.tr(Number(t.quantity), qtyDecimals(assetMap[t.asset_id]?.asset_class, assetMap[t.asset_id]?.symbol));
+  const priceText = (t: TradeRow) => fmt.tr(Number(t.price), assetMap[t.asset_id]?.asset_class === "fund" ? 6 : 2);
+  const facets: LedgerFacet<TradeRow>[] = [
+    { id: "symbol", label: "Sembol", value: symbolOf, filter: true, group: true },
+    { id: "side", label: "Yön", value: sideLabel, group: true },
+    { id: "portfolio", label: "Portföy", value: portfolioName, filter: true, group: true, meta: true },
+    { id: "person", label: "Kişi", value: personName, filter: true, group: true, meta: true },
+    { id: "custody", label: "Kurum", value: custodyName, filter: true, group: true, meta: true },
+    { id: "currency", label: "Para birimi", value: (t) => t.currency, filter: true, group: true },
   ];
-  const tradeSummary = (rows: TradeRow[]) => <span>
-    Alış: {moneyTotals(rows.filter(t => t.side === "buy"), tradeAmount, t => t.currency)} · Satış: {moneyTotals(rows.filter(t => t.side === "sell"), tradeAmount, t => t.currency)} · Komisyon: {moneyTotals(rows, t => Number(t.fees), t => t.currency)}
-    <br />Net adet (alış − satış): {quantityTotals(rows, t => t.asset_id, t => assetMap[t.asset_id]?.symbol ?? t.asset_id, t => Number(t.quantity) * (t.side === "buy" ? 1 : -1))}
-  </span>;
+  const exportColumns: LedgerExportColumn<TradeRow>[] = [
+    { title: "Tarih", value: (t) => toDateInput(t.executed_at) },
+    { title: "Sembol", value: symbolOf },
+    { title: "Varlık", value: (t) => assetMap[t.asset_id]?.name ?? null },
+    { title: "Yön", value: sideLabel },
+    { title: "Adet", value: (t) => Number(t.quantity) },
+    { title: "Fiyat", value: (t) => Number(t.price) },
+    { title: "Komisyon", value: (t) => Number(t.fees) },
+    { title: "Tutar", value: tradeAmount },
+    { title: "Para birimi", value: (t) => t.currency },
+    { title: "Portföy", value: portfolioName },
+    { title: "Kişi", value: personName },
+    { title: "Kurum", value: custodyName },
+    { title: "Not", value: (t) => t.notes },
+  ];
+  const buySell = (rows: TradeRow[]) =>
+    `Alış ${moneyTotals(rows.filter(t => t.side === "buy"), tradeAmount, t => t.currency)} · Satış ${moneyTotals(rows.filter(t => t.side === "sell"), tradeAmount, t => t.currency)}`;
+  const tradeSummary = (rows: TradeRow[]) => `${buySell(rows)} · Komisyon ${moneyTotals(rows, t => Number(t.fees), t => t.currency)}`;
+  // Tek varlıklı grupta net adet anlamlı (sembol bazında gruplayınca)
+  const groupSummary = (rows: TradeRow[]) =>
+    new Set(rows.map(t => t.asset_id)).size === 1
+      ? `${quantityTotals(rows, t => t.asset_id, symbolOf, t => Number(t.quantity) * (t.side === "buy" ? 1 : -1))} net · ${buySell(rows)}`
+      : buySell(rows);
 
   const symbolSummary = useMemo(() => {
     interface Row {
@@ -360,11 +375,42 @@ export function IslemlerClient({
           </div>
         </div>
 
-        <DataGrid rows={periodRows} columns={columns} rowId={t => t.id} storageKey="portfolio-trades-grid-v1" summary={tradeSummary} onFilteredRows={setGridRows}
-          actions={t => <div style={{ display: "flex", gap: 4 }}>
-            <button className="icon-btn" onClick={() => setEditing(t)} disabled={!configured || busy} title="Düzenle"><Icon name="edit" size={12} /></button>
-            <button className="icon-btn" onClick={() => remove(t.id)} disabled={!configured || busy} title="Sil"><Icon name="trash" size={12} /></button>
-          </div>} />
+        <Ledger
+          rows={periodRows}
+          rowId={(t) => t.id}
+          date={(t) => toDateInput(t.executed_at)}
+          amount={tradeAmount}
+          currency={(t) => t.currency}
+          searchText={(t) => [symbolOf(t), assetMap[t.asset_id]?.name, sideLabel(t), portfolioName(t), personName(t), custodyName(t), t.notes].filter(Boolean).join(" ")}
+          searchPlaceholder="Sembol, varlık, not, kurum…"
+          title={(t) => (
+            <span title={assetMap[t.asset_id]?.name}>
+              <b>{symbolOf(t)}</b>{" "}
+              <span className={`chip chip-sm ${t.side === "buy" ? "chip-pos" : "chip-neg"}`}>{sideLabel(t)}</span>{" "}
+              <span className="tabular" style={{ color: "var(--muted)" }}>{qtyText(t)} × {priceText(t)}</span>
+            </span>
+          )}
+          extra={(t) => (
+            <>
+              {Number(t.fees) > 0 && <span className="tabular">Kom. {moneyTotals([t], x => Number(x.fees), x => x.currency)}</span>}
+              {t.notes && <span title={t.notes} style={{ fontStyle: "italic" }}>{t.notes}</span>}
+            </>
+          )}
+          value={(t) => moneyTotals([t], tradeAmount, x => x.currency)}
+          facets={facets}
+          summary={tradeSummary}
+          groupSummary={groupSummary}
+          exportColumns={exportColumns}
+          exportName="islemler"
+          storageKey="portfolio-trades-ledger-v1"
+          onFilteredRows={setListRows}
+          actions={(t) => (
+            <>
+              <button className="icon-btn" aria-label="Düzenle" onClick={() => setEditing(t)} disabled={!configured || busy} title="Düzenle"><Icon name="edit" size={12} /></button>
+              <button className="icon-btn" aria-label="Sil" onClick={() => remove(t.id)} disabled={!configured || busy} title="Sil"><Icon name="trash" size={12} /></button>
+            </>
+          )}
+        />
       </div>
 
       {symbolSummary.length > 0 && (

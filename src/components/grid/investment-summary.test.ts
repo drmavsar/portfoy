@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { quantityTotals } from "./investment-summary";
-import { filterAndSort, groupRows, moneyTotals } from "./model";
+import { filterLedger, groupLedger } from "@/components/ledger/model";
+import { moneyTotals } from "./model";
 
 describe("investment subtotals", () => {
   const rows = [
@@ -13,9 +14,9 @@ describe("investment subtotals", () => {
     expect(total).toBe("AAA: 0,0000001 adet · BBB: 5 adet");
   });
   it("applies person filters before group and currency totals", () => {
-    const columns = [{ id: "person", value: (r: typeof rows[number]) => r.person }];
-    const filtered = filterAndSort(rows, columns, { person: "Mehmet" }, []);
-    const groups = groupRows(filtered, columns, ["person"]);
+    const facets = [{ id: "person", value: (r: typeof rows[number]) => r.person }];
+    const filtered = filterLedger(rows, r => r.symbol, "", facets, { person: "Mehmet" });
+    const groups = groupLedger(filtered, { date: () => "2026-01-01", amount: r => r.amount }, "person", facets, "date-desc");
     expect(groups).toHaveLength(1);
     expect(groups[0].rows).toHaveLength(2);
     const text = moneyTotals(groups[0].rows, r => r.amount, r => r.currency);
