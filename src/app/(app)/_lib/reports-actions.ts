@@ -53,6 +53,10 @@ export interface RawRealizedLot {
   fees_allocated_try: number;
   holding_period_days: number | null;
   method: "FIFO" | "HIFO";
+  /** Satış anındaki vergi kuralı snapshot'ı (vergi yılı görünümü) */
+  applied_tax_kind: string | null;
+  applied_tax_rate: number | null;
+  manual_tax_override: boolean;
 }
 
 /**
@@ -111,7 +115,7 @@ export async function listRealizedForReport(sinceMonths: number = 24): Promise<R
         supabase
           .from("realized_lots")
           .select(
-            "id, closed_at, sell_trade_id, buy_trade_id, asset_id, portfolio_id, quantity, cost_basis_try, proceeds_try, realized_pnl_try, net_realized_pnl_try, withholding_try, fees_allocated_try, holding_period_days, method",
+            "id, closed_at, sell_trade_id, buy_trade_id, asset_id, portfolio_id, quantity, cost_basis_try, proceeds_try, realized_pnl_try, net_realized_pnl_try, withholding_try, fees_allocated_try, holding_period_days, method, applied_tax_kind, applied_tax_rate, manual_tax_override",
             { count: "exact" },
           )
           .eq("user_id", user.id)
@@ -141,6 +145,9 @@ export async function listRealizedForReport(sinceMonths: number = 24): Promise<R
     fees_allocated_try: number;
     holding_period_days: number | null;
     method: "FIFO" | "HIFO";
+    applied_tax_kind: string | null;
+    applied_tax_rate: number | null;
+    manual_tax_override: boolean | null;
   }>;
   if (lots.length === 0) return [];
 
@@ -194,6 +201,9 @@ export async function listRealizedForReport(sinceMonths: number = 24): Promise<R
       fees_allocated_try: Number(l.fees_allocated_try),
       holding_period_days: l.holding_period_days,
       method: l.method,
+      applied_tax_kind: l.applied_tax_kind,
+      applied_tax_rate: l.applied_tax_rate == null ? null : Number(l.applied_tax_rate),
+      manual_tax_override: Boolean(l.manual_tax_override),
     };
   });
 }
