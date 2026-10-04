@@ -23,6 +23,7 @@ function mockPlan(health: TradePlan["health"]): TradePlan {
     delta_s2_pct: -13.64,
     rr1: 1.33,
     rr2: 2.67,
+    trailing: false,
     high_52w_distance_pct: 20,
     ma20_extension_pct: 5,
     health,

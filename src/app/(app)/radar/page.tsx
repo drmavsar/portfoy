@@ -21,16 +21,20 @@ type Mover = {
   analyst: AnalystRating | null;
 };
 
-/** Analist yükseliş potansiyeli %: endpoint upside'ı, yoksa hedef ort. vs fiyat. */
+/**
+ * Analist yükseliş potansiyeli %: önce konsensüs hedef ortalamasının GÜNCEL
+ * fiyata göre farkı (tabloda gösterilen "Ort. Hedef" ile tutarlı). Endpoint'in
+ * upside_pct'si tek bir kurumun (İş Yatırım) hedefini, rapor tarihindeki eski
+ * fiyata göre verir — yalnız ortalama yoksa yedek olarak kullanılır.
+ */
 function analystUpside(r: Mover): number | null {
   const a = r.analyst;
   if (!a) return null;
-  if (a.upside_pct != null) return a.upside_pct;
   const price = r.quote.price;
   if (a.target_mean != null && price != null && price > 0) {
     return ((a.target_mean - price) / price) * 100;
   }
-  return null;
+  return a.upside_pct ?? null;
 }
 
 /** AL/TUT/SAT dağılımını kısa metne çevirir (tooltip için). */

@@ -155,9 +155,13 @@ function ScoreCards({
     >
       <ScoreCard
         label="KALİTE"
-        value={scores.quality}
+        value={scores.qualityAvailable ? scores.quality : null}
         good="high"
-        note="sahip olduklarım kaliteli mi"
+        note={
+          scores.qualityAvailable
+            ? "sahip olduklarım kaliteli mi"
+            : "puanlanabilir hisse yok — sağlığa katılmadı"
+        }
       />
       <ScoreCard
         label="RİSK"
@@ -194,7 +198,7 @@ function ScoreCard({
   highlight,
 }: {
   label: string;
-  value: number;
+  value: number | null;
   good: "high" | "low" | "neutral";
   note: string;
   highlight?: boolean;
@@ -212,9 +216,13 @@ function ScoreCard({
       </div>
       <div
         className="tabular"
-        style={{ fontSize: 26, fontWeight: 700, color: scoreColor(value, good) }}
+        style={{
+          fontSize: 26,
+          fontWeight: 700,
+          color: value == null ? "var(--muted)" : scoreColor(value, good),
+        }}
       >
-        {value.toFixed(0)}
+        {value == null ? "—" : value.toFixed(0)}
         <span style={{ fontSize: 13, color: "var(--muted)", fontWeight: 400 }}> /100</span>
       </div>
       <div className="hint" style={{ fontSize: 11, marginTop: 4 }}>

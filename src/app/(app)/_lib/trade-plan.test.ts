@@ -3,75 +3,100 @@ import { describe, expect, it } from "vitest";
 import { buildTradePlan } from "./trade-plan";
 
 describe("buildTradePlan", () => {
-  it("computes T1 = current + 2*ATR and T2 = current + 4*ATR", () => {
-    const plan = buildTradePlan(100, 110, 5, 130, 105);
-    expect(plan.t1).toBe(120); // 110 + 2*5
-    expect(plan.t2).toBe(130); // 110 + 4*5
-  });
+  describe("seviyeler pozisyona (WAC) çapalı", () => {
+    it("T1 = WAC + 2·ATR, T2 = WAC + 4·ATR — anlık fiyattan bağımsız", () => {
+      const a = buildTradePlan(100, 105, 5, 130, null);
+      const b = buildTradePlan(100, 90, 5, 130, null);
+      expect(a.t1).toBe(110);
+      expect(a.t2).toBe(120);
+      expect(b.t1).toBe(110); // fiyat düşünce hedef de düşmüyor
+      expect(b.s1).toBe(a.s1); // ...stop da düşmüyor (eski hata)
+    });
 
-  it("computes S1 = current - 1.5*ATR", () => {
-    const plan = buildTradePlan(100, 110, 5, 130, 105);
-    expect(plan.s1).toBe(102.5); // 110 - 1.5*5
-  });
+    it("S1 = WAC − 1.5·ATR (iz yoksa)", () => {
+      const plan = buildTradePlan(100, 105, 5, 130, null);
+      expect(plan.s1).toBe(92.5);
+      expect(plan.trailing).toBe(false);
+    });
 
-  it("S2 must respect WAC × 0.95 floor", () => {
-    // WAC 100, current 110, ATR 20 → naive S2 = 110-2.5*20 = 60 ama WAC floor 95
-    const plan = buildTradePlan(100, 110, 20, 130, 105);
-    expect(plan.s2).toBe(95);
-  });
+    it("MA20 maliyetin üstündeyse S1 = MA20 − 1·ATR'ye yükselir (iz süren stop)", () => {
+      const plan = buildTradePlan(100, 140, 5, 150, 135);
+      expect(plan.s1).toBe(130); // max(92.5, 135 − 5)
+      expect(plan.trailing).toBe(true);
+    });
 
-  it("RR1 = (T1 - current) / (current - S1)", () => {
-    const plan = buildTradePlan(100, 110, 5, 130, 105);
-    // T1=120, S1=102.5 → reward=10, risk=7.5 → 1.33
-    expect(plan.rr1).toBeCloseTo(1.33, 1);
+    it("S2 her zaman ≤ S1 ve maliyetin en az %5 altında", () => {
+      const small = buildTradePlan(100, 110, 1, 130, null);
+      expect(small.s1).toBe(98.5);
+      expect(small.s2).toBe(95); // min(97.5, 95, 98.5)
+      const big = buildTradePlan(100, 110, 20, 130, null);
+      expect(big.s1).toBe(70);
+      expect(big.s2).toBe(50); // min(50, 95, 70) — S1'in altında
+    });
+
+    it("kalan RR = (T − fiyat) / (fiyat − S1); hedef aşıldıysa 0", () => {
+      const plan = buildTradePlan(100, 105, 5, 130, null);
+      expect(plan.rr1).toBeCloseTo(0.4, 5); // (110 − 105) / (105 − 92.5)
+      expect(plan.rr2).toBeCloseTo(1.2, 5); // (120 − 105) / 12.5
+      const passed = buildTradePlan(100, 115, 5, 130, null);
+      expect(passed.rr1).toBe(0);
+    });
   });
 
   describe("health durumu", () => {
-    it("current < S1 → below_stop (kritik)", () => {
-      // current=90, ATR=10 → S1 = 90-15 = 75. Eğer current(90) < S1(75)? Hayır.
-      // Bu testi düzgün kur: current'i S1'in altına çekmek için S1'i üst seviyeye al
-      // Aslında S1 her zaman current'in altında. Bu durumun health'ında olabilmesi için
-      // current'i yapay olarak S1'in altına koymalıyım — bu buildTradePlan'ın hesabıyla
-      // hiç oluşmaz! S1 hesabı current'e bağlı.
-      // Bu yüzden buildTradePlan'da below_stop, ardışık fiyat hareketlerinden sonra
-      // gerçek dünyada oluşur. Function-level test yapamayız. Yerine direct expectation:
-      // current=80 ile WAC=100, ATR=5 → S1=80-7.5=72.5 → current > S1, healthy.
-      // below_stop testi için S1 hesabını mock'lamak gerekir veya doğrudan health
-      // fonksiyonunu çağırırız.
-      // Pragmatik: aşağıdaki gibi senaryo - bunu skip:
-      expect(true).toBe(true);
+    it("fiyat stopun altında → below_stop (eskiden hiç oluşamıyordu)", () => {
+      const plan = buildTradePlan(100, 80, 5, 130, 95);
+      expect(plan.health).toBe("below_stop");
+      expect(plan.health_label).toBe("Stop Altı");
+      expect(plan.health_color).toBe("var(--negative)");
     });
 
-    it("current < WAC → below_wac (sarı)", () => {
-      const plan = buildTradePlan(100, 90, 5, 130, 95);
+    it("iz süren stop kırılınca kârdaki pozisyon da below_stop olur", () => {
+      const plan = buildTradePlan(100, 128, 5, 150, 135); // S1 = 130 > fiyat > WAC
+      expect(plan.health).toBe("below_stop");
+    });
+
+    it("stopa 0.5 ATR'den yakın → warn_stop (maliyet altından önce)", () => {
+      const plan = buildTradePlan(100, 94, 5, 130, 98); // S1 92.5, mesafe 0.3 ATR
+      expect(plan.health).toBe("warn_stop");
+      expect(plan.health_label).toBe("Stop Yakın");
+    });
+
+    it("current < WAC (stoptan uzak) → below_wac", () => {
+      const plan = buildTradePlan(100, 97, 5, 130, 98);
       expect(plan.health).toBe("below_wac");
       expect(plan.health_label).toBe("Maliyet Altı");
       expect(plan.health_color).toBe("var(--warning)");
     });
 
-    it("T1'e < 0.5 ATR yakınlık → near_target", () => {
-      // current=110, ATR=2 → T1=114. current+0.3*ATR'i kullanarak T1'e yakınlık testi
-      // current=110, ATR=10 → T1=130. Yakın olması için current'i T1'e yaklaştır.
-      // Direkt: current=110, ATR=2 → T1=114. current(110) → 114'e (114-110)/2 = 2 ATR uzakta.
-      // Bu yakın değil. Yakın için: current=113, ATR=2 → T1=117. 117-113=4=2ATR. Hâlâ uzak.
-      // T1 her zaman current+2ATR, yani current'tan T1'e mesafe SABIT 2 ATR.
-      // Bu yüzden near_target burada normal şartlarda triggerlanmaz; t1-current=2ATR.
-      // İstisna: WAC ile near_target oluşmaz buildTradePlan'da. Bu sağlık durumu
-      // pratikte STATIK formülle erişilemez. Test edilemez → skip.
-      expect(true).toBe(true);
+    it("T1'e < 0.5 ATR → near_target 'Hedef Yakın'", () => {
+      const plan = buildTradePlan(100, 109, 5, 130, 102);
+      expect(plan.health).toBe("near_target");
+      expect(plan.health_label).toBe("Hedef Yakın");
+    });
+
+    it("T1 aşıldı → near_target 'Hedef 1 Aşıldı'", () => {
+      const plan = buildTradePlan(100, 112, 5, 130, 104);
+      expect(plan.health).toBe("near_target");
+      expect(plan.health_label).toBe("Hedef 1 Aşıldı");
+    });
+
+    it("T2 aşıldı → target_hit", () => {
+      const plan = buildTradePlan(100, 140, 5, 150, 135);
+      expect(plan.health).toBe("target_hit");
+      expect(plan.health_label).toBe("Hedef 2 Aşıldı");
     });
 
     it("MA20 + %10 üstü → extended", () => {
-      // current=121, MA20=100 → extension %21 > %10 → extended
-      const plan = buildTradePlan(100, 121, 5, 200, 100);
-      // Önce ihtiyari: current(121) > WAC(100), S1=121-7.5=113.5, current > S1
+      // ATR 15 → T1 130, T2 160 (uzak); MA20 100 → %21 extension
+      const plan = buildTradePlan(100, 121, 15, 200, 100);
       expect(plan.ma20_extension_pct).toBeCloseTo(21, 0);
       expect(plan.health).toBe("extended");
     });
 
     it("normal durumda → healthy", () => {
-      const plan = buildTradePlan(100, 110, 5, 130, 105);
-      // current > WAC, S1 = 102.5, ext = 4.76% < 10%, T1=120 (5 uzak), normal
+      const plan = buildTradePlan(100, 110, 10, 130, 105);
+      // T1 120 (1 ATR uzak), S1 = max(85, 95) = 95 (1.5 ATR uzak), ext %4.8
       expect(plan.health).toBe("healthy");
     });
   });

@@ -46,6 +46,9 @@ const DB_LOOKBACK = 90;
 const DB_MIN_SEP = 5;
 const DB_MAX_SEP = 60;
 const DB_TOLERANCE = 0.05; // 2 dip aynı seviye toleransı
+// Teyitli kırılımda fiyat boyun çizgisinin bu kadar üstüne çıktıysa giriş
+// kaçırılmıştır (artık "taze kırılım" değil).
+const DB_MAX_CHASE = 0.06;
 
 // Cup & handle
 const CUP_LOOKBACK = 120;
@@ -207,18 +210,26 @@ export function detectDoubleBottom(
       const neckline = Math.max(...wHigh.slice(a, b + 1));
       if (neckline <= avgLow) continue;
 
+      const dip = Math.min(low1, low2);
+      // İkinci dipten sonra fiyat diplerin altına indiyse formasyon bozulmuştur.
+      if (Math.min(...wLow.slice(b + 1)) < dip * 0.985) continue;
+
       const breakoutConfirmed = lastClose > neckline;
       const nearBreakout = lastClose >= neckline * (1 - BREAKOUT_PROXIMITY);
       if (!breakoutConfirmed && !nearBreakout) continue;
 
+      const entry = round2(neckline);
+      const target = round2(entry + (entry - dip));
+      // Haftalar önce kırılmış formasyon "taze kırılım" sayılmasın: fiyat hedefe
+      // ulaştıysa ya da boyun çizgisinin %6'dan fazla üstündeyse giriş kaçmıştır
+      // (eskiden giriş eski boyun çizgisinde, hedef fiyatın altında kalabiliyordu).
+      if (lastClose >= target || lastClose > neckline * (1 + DB_MAX_CHASE)) continue;
+
       const setup = classifySetup(breakoutConfirmed, nearBreakout, extended);
       if (!setup) continue;
 
-      const dip = Math.min(low1, low2);
-      const entry = round2(neckline);
       const invalidationStop = round2(dip * 0.985);
       const stop = buildStop(entry, atr14, invalidationStop, recentSwingLow(low, 20));
-      const target = round2(entry + (entry - dip));
       const rr = calcRR(entry, stop, target);
       const quality = Math.max(0, 1 - tolerance / DB_TOLERANCE);
       const rank = quality * rr;
