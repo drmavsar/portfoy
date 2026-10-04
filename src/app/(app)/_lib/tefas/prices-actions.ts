@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { readAll } from "@/lib/supabase/read-all";
 import {
   fetchTefasNav,
   type NavFetchFailure,
@@ -177,17 +178,31 @@ export async function listFundQuotes(codes: string[]): Promise<FundQuote[]> {
   if (codes.length === 0) return [];
   if (!(await isSupabaseConfigured())) return [];
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("fund_prices")
-    .select("fund_code, as_of, nav")
-    .in("fund_code", codes)
-    .order("fund_code", { ascending: true })
-    .order("as_of", { ascending: false });
-  if (error) {
-    console.error("listFundQuotes error", error);
+  // Yalnız son 45 gün (son iki NAV yeter; bayram tatilini de kapsar) ve
+  // sayfalı. Eskiden tüm geçmiş sınırsız okunuyordu: 1000 satır sınırında
+  // alfabetik ilk fon tüm satırları dolduruyor, diğer fonlar NAV'sız kalıp
+  // maliyetten değerleniyordu.
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 45);
+  type Row = { fund_code: string; as_of: string; nav: number };
+  let rows: Row[];
+  try {
+    rows = await readAll<Row>(
+      (from, to) =>
+        supabase
+          .from("fund_prices")
+          .select("fund_code, as_of, nav", { count: "exact" })
+          .in("fund_code", codes)
+          .gte("as_of", cutoff.toISOString().slice(0, 10))
+          .order("fund_code", { ascending: true })
+          .order("as_of", { ascending: false })
+          .range(from, to),
+      (r) => `${r.fund_code}|${r.as_of}`,
+    );
+  } catch (e) {
+    console.error("listFundQuotes error", e);
     return [];
   }
-  const rows = (data ?? []) as Array<{ fund_code: string; as_of: string; nav: number }>;
   const byCode = new Map<string, Array<{ as_of: string; nav: number }>>();
   for (const r of rows) {
     const arr = byCode.get(r.fund_code) ?? [];

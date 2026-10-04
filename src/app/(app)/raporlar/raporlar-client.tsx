@@ -944,6 +944,9 @@ function signedTry(n: number): string {
   return (n >= 0 ? "+" : "") + fmt.tr(n, 0) + " ₺";
 }
 
+const BENCH_NA_TITLE =
+  "Bu benchmark hesaplanamadı: bazı işlem tarihlerinde seri verisi yok (seri daha geç başlıyor) ya da güncel fiyat bulunamadı.";
+
 /** "hisse − benchmark" avantajı (pozitif = hisse kazandı). */
 function edgeOf(actualProfit: number, benchProfit: number): number {
   return actualProfit - benchProfit;
@@ -981,6 +984,14 @@ function BenchmarkTab({ data }: { data: BenchmarkCompareResult }) {
           </div>
           <div style={{ display: "grid", gap: 8 }}>
             {total.benches.map((b) => {
+              if (!b.available) {
+                return (
+                  <div key={b.code} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+                    <span style={{ width: 92, fontWeight: 600 }}>{BENCH_META[b.code].label}</span>
+                    <span className="hint" title={BENCH_NA_TITLE}>hesaplanamadı (veri eksik)</span>
+                  </div>
+                );
+              }
               const edge = edgeOf(total.actualProfit, b.profit);
               const edgeColor = edge >= 0 ? "var(--positive)" : "var(--negative)";
               return (
@@ -1041,6 +1052,11 @@ function BenchmarkTab({ data }: { data: BenchmarkCompareResult }) {
                   <td className="num tabular">{fmt.tr(s.currentMv, 0)} ₺</td>
                   <td className="num tabular" style={{ fontWeight: 600, color: pnlColor }}>{signedTry(s.actualProfit)}</td>
                   {s.benches.map((b) => {
+                    if (!b.available) {
+                      return (
+                        <td key={b.code} className="num tabular hint" title={BENCH_NA_TITLE}>—</td>
+                      );
+                    }
                     const edge = edgeOf(s.actualProfit, b.profit);
                     const color = edge >= 0 ? "var(--positive)" : "var(--negative)";
                     return (
@@ -1062,6 +1078,11 @@ function BenchmarkTab({ data }: { data: BenchmarkCompareResult }) {
                 {signedTry(total.actualProfit)}
               </td>
               {total.benches.map((b) => {
+                if (!b.available) {
+                  return (
+                    <td key={b.code} className="num tabular hint" title={BENCH_NA_TITLE}>—</td>
+                  );
+                }
                 const edge = edgeOf(total.actualProfit, b.profit);
                 const color = edge >= 0 ? "var(--positive)" : "var(--negative)";
                 return (

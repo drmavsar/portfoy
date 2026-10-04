@@ -74,20 +74,30 @@ export interface BenchmarkPoint {
   value: number;
 }
 
+/**
+ * Her benchmark serisinin YIL SONU (cari yıl için en güncel) noktası —
+ * v_benchmark_year_end (0047). Özet "Reel Getiri" tablosu yalnız bunu kullanır.
+ * Eskiden benchmark_points'in tamamı filtresiz/sayfasız okunuyordu; PostgREST
+ * 1000 satır sınırı en ESKİ 1000 satırı döndürdüğü için son yıllar eksik
+ * kalıyordu.
+ */
 export async function listBenchmarkPoints(): Promise<BenchmarkPoint[]> {
   if (!(await isSupabaseConfigured())) return [];
   const supabase = await createClient();
   const { data, error } = await supabase
-    .from("benchmark_points")
-    .select("as_of, value, benchmark_series!inner(code, name)")
-    .order("as_of", { ascending: true });
+    .from("v_benchmark_year_end")
+    .select("code, name, as_of, value")
+    .order("as_of", { ascending: true })
+    .order("code", { ascending: true });
   if (error) {
     console.error("listBenchmarkPoints error", error);
     return [];
   }
-  type Row = { as_of: string; value: number; benchmark_series: { code: string; name: string } | Array<{ code: string; name: string }> };
-  return ((data ?? []) as unknown as Row[]).map((r) => {
-    const s = Array.isArray(r.benchmark_series) ? r.benchmark_series[0] : r.benchmark_series;
-    return { code: s?.code ?? "?", name: s?.name ?? "?", as_of: r.as_of, value: Number(r.value) };
-  });
+  type Row = { code: string; name: string; as_of: string; value: number };
+  return ((data ?? []) as unknown as Row[]).map((r) => ({
+    code: r.code,
+    name: r.name,
+    as_of: r.as_of,
+    value: Number(r.value),
+  }));
 }

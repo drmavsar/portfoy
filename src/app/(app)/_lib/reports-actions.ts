@@ -102,16 +102,26 @@ export async function listRealizedForReport(sinceMonths: number = 24): Promise<R
     }
   }
 
-  // 2. realized_lots (backfill sonrası)
-  const { data: lotsRaw, error: lotsErr } = await supabase
-    .from("realized_lots")
-    .select(
-      "id, closed_at, sell_trade_id, buy_trade_id, asset_id, portfolio_id, quantity, cost_basis_try, proceeds_try, realized_pnl_try, net_realized_pnl_try, withholding_try, fees_allocated_try, holding_period_days, method",
-    )
-    .eq("user_id", user.id)
-    .gte("closed_at", sinceIso)
-    .order("closed_at", { ascending: false });
-  if (lotsErr) {
+  // 2. realized_lots (backfill sonrası) — sayfalı: lot sayısı (satış × lot)
+  // 1000'i aşınca gerçekleşen K/Z raporu sessizce eksik kalırdı.
+  let lotsRaw: unknown[];
+  try {
+    lotsRaw = await readAll<{ id: string }>(
+      (from, to) =>
+        supabase
+          .from("realized_lots")
+          .select(
+            "id, closed_at, sell_trade_id, buy_trade_id, asset_id, portfolio_id, quantity, cost_basis_try, proceeds_try, realized_pnl_try, net_realized_pnl_try, withholding_try, fees_allocated_try, holding_period_days, method",
+            { count: "exact" },
+          )
+          .eq("user_id", user.id)
+          .gte("closed_at", sinceIso)
+          .order("closed_at", { ascending: false })
+          .order("id", { ascending: true })
+          .range(from, to),
+      (r) => r.id,
+    );
+  } catch (lotsErr) {
     console.error("listRealizedForReport lots error", lotsErr);
     return [];
   }

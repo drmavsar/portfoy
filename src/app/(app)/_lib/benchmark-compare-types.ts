@@ -14,6 +14,12 @@ export const BENCH_META: Record<BenchCode, { label: string; unit: string }> = {
 
 export interface BenchResult {
   code: BenchCode;
+  /**
+   * false → bu benchmark güvenilir hesaplanamadı (bir işlem tarihinde seri
+   * henüz başlamamıştı ya da güncel fiyat yok). Eskiden o işlem benchmark'a
+   * eklenmeden nakdi yine "net yatırım"a sayılıyordu → benchmark sahte zarar.
+   */
+  available: boolean;
   /** Aynı nakit akışı benchmark'a uygulansaydı kalan pozisyonun bugünkü TL değeri. */
   finalValue: number;
   /** finalValue − netInvested. */

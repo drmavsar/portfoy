@@ -38,6 +38,8 @@ export interface TradeRow {
   quantity: number;
   price: number;
   currency: string;
+  /** Döviz cinsinden işlemde işlem anı kuru (TRY ise 1/null) */
+  fx_rate_to_try?: number | null;
   fees: number;
   notes: string | null;
 }
@@ -86,7 +88,7 @@ export async function listTrades(): Promise<TradeRow[]> {
   if (!(await isSupabaseConfigured())) return [];
   const supabase = await createClient();
   return readAll<TradeRow>((from, to) => supabase.from("trades")
-    .select("id, portfolio_id, custody_id, account_id, asset_id, beneficiary_id, side, executed_at, quantity, price, currency, fees, notes", { count: "exact" })
+    .select("id, portfolio_id, custody_id, account_id, asset_id, beneficiary_id, side, executed_at, quantity, price, currency, fx_rate_to_try, fees, notes", { count: "exact" })
     .order("executed_at", { ascending: false }).order("id", { ascending: true }).range(from, to), r => r.id);
 }
 

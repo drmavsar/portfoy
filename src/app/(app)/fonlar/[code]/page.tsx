@@ -18,6 +18,7 @@ import {
 } from "@/app/(app)/_lib/tefas/score-explain";
 import { listLatestFundPrices } from "@/app/(app)/_lib/tefas/prices-actions";
 import { createClient } from "@/lib/supabase/server";
+import { readAll } from "@/lib/supabase/read-all";
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
 import type { FundTaxKind } from "@/app/(app)/_lib/tefas/types";
 
@@ -48,14 +49,25 @@ async function fetchNavSeries(code: string, lookbackDays: number = 365 * 5) {
   const supabase = await createClient();
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - lookbackDays);
-  const { data } = await supabase
-    .from("fund_prices")
-    .select("as_of, nav")
-    .eq("fund_code", code)
-    .gte("as_of", cutoff.toISOString().slice(0, 10))
-    .order("as_of", { ascending: true })
-    .range(0, 9999); // 5Y = ~1250 satır, default 1000 limitini bypass et
-  return (data ?? []) as Array<{ as_of: string; nav: number }>;
+  // 5Y ≈ 1250 satır. `.range(0, 9999)` sunucunun 1000 satır sınırını AŞMIYOR
+  // (PostgREST max_rows uygular) → artan sırada en ESKİ 1000 satır geliyor,
+  // grafik ~1 yıl önce bitiyordu. Sayfalayarak oku.
+  try {
+    return await readAll<{ as_of: string; nav: number }>(
+      (from, to) =>
+        supabase
+          .from("fund_prices")
+          .select("as_of, nav", { count: "exact" })
+          .eq("fund_code", code)
+          .gte("as_of", cutoff.toISOString().slice(0, 10))
+          .order("as_of", { ascending: true })
+          .range(from, to),
+      (r) => r.as_of,
+    );
+  } catch (e) {
+    console.error("fetchNavSeries error", e);
+    return [];
+  }
 }
 
 /** Kategori peer'larını çek — score-explain similar_funds + category_rank için. */
