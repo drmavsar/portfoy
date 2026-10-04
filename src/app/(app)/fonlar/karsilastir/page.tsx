@@ -6,6 +6,7 @@ import { listLatestFundReturns } from "@/app/(app)/_lib/tefas/returns-actions";
 import { listLatestFundScores } from "@/app/(app)/_lib/tefas/scoring-actions";
 import { generateKomiteNotu } from "@/app/(app)/_lib/tefas/komite-notu";
 import { createClient } from "@/lib/supabase/server";
+import { readAll } from "@/lib/supabase/read-all";
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
 import type {
   Fund,
@@ -28,20 +29,29 @@ async function fetchNavSeries(
   const cutoff = new Date();
   cutoff.setFullYear(cutoff.getFullYear() - 5);
   const cutoffIso = cutoff.toISOString().slice(0, 10);
-  const { data } = await supabase
-    .from("fund_prices")
-    .select("fund_code, as_of, nav")
-    .in("fund_code", codes)
-    .gte("as_of", cutoffIso)
-    .order("fund_code")
-    .order("as_of")
-    .range(0, 49999); // 5 fon × ~1250 satır, default 1000 limitini bypass et
+  // 5 fon × ~1250 satır. `.range(0, 49999)` sunucunun 1000 satır sınırını
+  // AŞMIYOR → ilk fon 1000 satırın tamamını dolduruyor, diğerleri boş kalıp
+  // ortak başlangıç tarihi bulunamıyordu ("veri yok"). Sayfalayarak oku.
+  type Row = { fund_code: string; as_of: string; nav: number };
+  let data: Row[] = [];
+  try {
+    data = await readAll<Row>(
+      (from, to) =>
+        supabase
+          .from("fund_prices")
+          .select("fund_code, as_of, nav", { count: "exact" })
+          .in("fund_code", codes)
+          .gte("as_of", cutoffIso)
+          .order("fund_code")
+          .order("as_of")
+          .range(from, to),
+      (r) => `${r.fund_code}|${r.as_of}`,
+    );
+  } catch (e) {
+    console.error("karsilastir fetchNavSeries error", e);
+  }
   const out: Record<string, Array<{ as_of: string; nav: number }>> = {};
-  for (const row of (data ?? []) as Array<{
-    fund_code: string;
-    as_of: string;
-    nav: number;
-  }>) {
+  for (const row of data) {
     const list = out[row.fund_code] ?? [];
     list.push({ as_of: row.as_of, nav: Number(row.nav) });
     out[row.fund_code] = list;

@@ -2,6 +2,7 @@
 
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
 import { createClient } from "@/lib/supabase/server";
+import { readAll } from "@/lib/supabase/read-all";
 import { listAssets, listHoldings, listTrades } from "@/app/(app)/_lib/wealth-actions";
 import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
 import { listFundQuotes } from "@/app/(app)/_lib/tefas/prices-actions";
@@ -53,23 +54,48 @@ export async function benchmarkComparison(): Promise<BenchmarkCompareResult | nu
     return d.toISOString().slice(0, 10);
   })();
 
+  // Yalnız ihtiyaç duyulan serileri, SAYFALAYARAK oku. Eskiden filtresiz ve
+  // sayfasız okunuyordu: PostgREST 1000 satır sınırı EN ESKİ 1000 satırı
+  // döndürüyor (TLREF/CPI gibi ilgisiz seriler de sayıyordu) → "bugünkü"
+  // benchmark fiyatı aylar öncesinden kalıyordu.
   const supabase = await createClient();
-  const { data: bpData, error } = await supabase
-    .from("benchmark_points")
-    .select("as_of, value, benchmark_series!inner(code)")
-    .gte("as_of", fromDate)
-    .order("as_of", { ascending: true });
-  if (error) {
-    console.error("benchmarkComparison points error", error);
+  const { data: seriesRows, error: seriesErr } = await supabase
+    .from("benchmark_series")
+    .select("id, code")
+    .in("code", BENCH_CODES as unknown as string[]);
+  if (seriesErr) {
+    console.error("benchmarkComparison series error", seriesErr);
     return null;
   }
-  type BpRow = { as_of: string; value: number; benchmark_series: { code: string } | Array<{ code: string }> };
+  const codeById = new Map(
+    ((seriesRows ?? []) as Array<{ id: string; code: string }>).map((s) => [s.id, s.code]),
+  );
+  type BpRow = { series_id: string; as_of: string; value: number };
+  let bpData: BpRow[] = [];
+  if (codeById.size > 0) {
+    try {
+      bpData = await readAll<BpRow>(
+        (from, to) =>
+          supabase
+            .from("benchmark_points")
+            .select("series_id, as_of, value", { count: "exact" })
+            .in("series_id", Array.from(codeById.keys()))
+            .gte("as_of", fromDate)
+            .order("as_of", { ascending: true })
+            .order("series_id", { ascending: true })
+            .range(from, to),
+        (r) => `${r.series_id}|${r.as_of}`,
+      );
+    } catch (e) {
+      console.error("benchmarkComparison points error", e);
+      return null;
+    }
+  }
   const seriesPoints: Record<string, Array<[string, number]>> = {};
   let asOf = fromDate;
-  for (const r of (bpData ?? []) as unknown as BpRow[]) {
-    const s = Array.isArray(r.benchmark_series) ? r.benchmark_series[0] : r.benchmark_series;
-    const code = s?.code;
-    if (!code || !(BENCH_CODES as readonly string[]).includes(code)) continue;
+  for (const r of bpData) {
+    const code = codeById.get(r.series_id);
+    if (!code) continue;
     (seriesPoints[code] ??= []).push([r.as_of, Number(r.value)]);
     if (r.as_of > asOf) asOf = r.as_of;
   }
@@ -97,7 +123,17 @@ export async function benchmarkComparison(): Promise<BenchmarkCompareResult | nu
   for (const [sym, q] of Object.entries(stockQuotes)) priceBySymbol[sym] = q.price;
   for (const fq of fundQuotes) priceBySymbol[fq.fund_code] = fq.nav;
 
-  const holdingByAsset = new Map(holdings.map((h) => [h.asset_id, h]));
+  // v_holdings_wac (portföy, varlık) başına satırdır; aynı hisse birden fazla
+  // portföyde olabilir (ör. THYAO üç kişide). Eskiden Map son satırı tutuyordu
+  // → güncel değer tek portföyün adedinden, nakit akışı ise TÜM portföylerden
+  // → gerçek K/Z büyük ölçüde yanlıştı. Varlık bazında topla.
+  const holdingByAsset = new Map<string, { quantity: number; cost_basis_try: number }>();
+  for (const h of holdings) {
+    const cur = holdingByAsset.get(h.asset_id) ?? { quantity: 0, cost_basis_try: 0 };
+    cur.quantity += Number(h.quantity);
+    cur.cost_basis_try += Number(h.cost_basis_try);
+    holdingByAsset.set(h.asset_id, cur);
+  }
 
   // ---- Sembol bazında nakit akışı aynası -----------------------------------
   interface Acc {
@@ -109,6 +145,8 @@ export async function benchmarkComparison(): Promise<BenchmarkCompareResult | nu
     sellTry: number;
     // benchmark birimi (kod → birim adedi); alışta artar, satışta azalır
     units: Record<string, number>;
+    // işlem tarihinde fiyatı olmayan benchmark'lar (seri daha geç başlıyor)
+    missing: Set<string>;
   }
   const accs = new Map<string, Acc>();
   // Kronolojik sırayla işle (aynı gün fiyatı kullanılır).
@@ -126,37 +164,49 @@ export async function benchmarkComparison(): Promise<BenchmarkCompareResult | nu
         buyTry: 0,
         sellTry: 0,
         units: {},
+        missing: new Set(),
       };
       accs.set(t.asset_id, acc);
     }
     const date = t.executed_at.slice(0, 10);
-    const gross = Number(t.quantity) * Number(t.price);
-    const fees = Number(t.fees);
+    // Döviz cinsinden işlem → TRY (v_holdings_wac ile aynı kural)
+    const fx = t.currency === "TRY" ? 1 : Number(t.fx_rate_to_try ?? 1) || 1;
+    const gross = Number(t.quantity) * Number(t.price) * fx;
+    const fees = Number(t.fees) * fx;
     const cashTry = t.side === "buy" ? gross + fees : gross - fees;
     if (t.side === "buy") acc.buyTry += cashTry;
     else acc.sellTry += cashTry;
 
     for (const code of BENCH_CODES) {
       const pts = seriesPoints[code];
-      if (!pts) continue;
-      const px = nearestOnOrBefore(pts, date);
-      if (px == null || px <= 0) continue;
+      const px = pts ? nearestOnOrBefore(pts, date) : null;
+      if (px == null || px <= 0) {
+        acc.missing.add(code);
+        continue;
+      }
       const unitDelta = cashTry / px;
       acc.units[code] = (acc.units[code] ?? 0) + (t.side === "buy" ? unitDelta : -unitDelta);
     }
   }
 
-  const buildBenches = (units: Record<string, number>, netInvested: number, actualProfit: number): BenchResult[] =>
+  const buildBenches = (
+    units: Record<string, number>,
+    missing: Set<string>,
+    netInvested: number,
+    actualProfit: number,
+  ): BenchResult[] =>
     BENCH_CODES.map((code) => {
       const u = units[code] ?? 0;
       const px = latestPrice[code] ?? 0;
+      const available = !missing.has(code) && px > 0;
       const finalValue = u * px;
       const profit = finalValue - netInvested;
-      return { code, finalValue, profit, vsActual: profit - actualProfit };
+      return { code, available, finalValue, profit, vsActual: profit - actualProfit };
     });
 
   const symbols: SymbolCompare[] = [];
   const totalUnits: Record<string, number> = {};
+  const totalMissing = new Set<string>();
   let tBuy = 0;
   let tSell = 0;
   let tMv = 0;
@@ -182,8 +232,9 @@ export async function benchmarkComparison(): Promise<BenchmarkCompareResult | nu
       currentMv,
       actualProfit,
       priced,
-      benches: buildBenches(acc.units, netInvested, actualProfit),
+      benches: buildBenches(acc.units, acc.missing, netInvested, actualProfit),
     });
+    for (const c of acc.missing) totalMissing.add(c);
 
     tBuy += acc.buyTry;
     tSell += acc.sellTry;
@@ -205,7 +256,7 @@ export async function benchmarkComparison(): Promise<BenchmarkCompareResult | nu
       currentQty: 0,
       currentMv: tMv,
       actualProfit: totalActualProfit,
-      benches: buildBenches(totalUnits, totalNetInvested, totalActualProfit),
+      benches: buildBenches(totalUnits, totalMissing, totalNetInvested, totalActualProfit),
     },
     asOf,
     tradeCount: trades.length,
