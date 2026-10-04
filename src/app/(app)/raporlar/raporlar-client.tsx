@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 
 import { ExpenseComparison } from "./expense-comparison";
+import { XirrTab } from "./xirr-tab";
+import type { XirrReport } from "@/app/(app)/_lib/xirr-report";
 import { fmt } from "@/lib/finance/fmt";
 
 import type { RawRealizedLot, RawTxn } from "@/app/(app)/_lib/reports-actions";
@@ -85,11 +87,12 @@ interface Props {
   beneficiaries: BeneficiaryLite[];
   realValue: RealValueRow[];
   benchmark: BenchmarkCompareResult | null;
+  xirr: XirrReport | null;
 }
 
-type TabKey = "expenses" | "cashflow" | "performance" | "realvalue" | "benchmark";
+type TabKey = "expenses" | "cashflow" | "performance" | "realvalue" | "benchmark" | "xirr";
 
-export function RaporlarClient({ txns, realized, categories, beneficiaries, realValue, benchmark }: Props) {
+export function RaporlarClient({ txns, realized, categories, beneficiaries, realValue, benchmark, xirr }: Props) {
   const [tab, setTab] = useState<TabKey>("cashflow");
   const [rangeKey, setRangeKey] = useState<RangeKey>("ytd");
   const [customFrom, setCustomFrom] = useState<string>(isoStartOfYear());
@@ -418,7 +421,7 @@ export function RaporlarClient({ txns, realized, categories, beneficiaries, real
               : `${filteredRealized.length} kapanan lot`}
           </div>
         </div>
-        {tab !== "realvalue" && tab !== "benchmark" && (
+        {tab !== "realvalue" && tab !== "benchmark" && tab !== "xirr" && (
           <div className="page-actions" style={{ flexWrap: "wrap", gap: 6 }}>
             {PRESETS.map((p) => (
               <button
@@ -457,9 +460,14 @@ export function RaporlarClient({ txns, realized, categories, beneficiaries, real
             Benchmark
           </TabBtn>
         )}
+        {xirr && xirr.rows.length > 0 && (
+          <TabBtn active={tab === "xirr"} onClick={() => setTab("xirr")}>
+            Getiri (XIRR)
+          </TabBtn>
+        )}
       </div>
 
-      {rangeKey === "custom" && tab !== "realvalue" && tab !== "benchmark" && (
+      {rangeKey === "custom" && tab !== "realvalue" && tab !== "benchmark" && tab !== "xirr" && (
         <div className="card card-pad" style={{ marginBottom: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <span style={{ fontSize: 12, color: "var(--muted)" }}>Başlangıç</span>
           <input
@@ -484,6 +492,8 @@ export function RaporlarClient({ txns, realized, categories, beneficiaries, real
         <ExpenseComparison txns={txns} categories={categories} beneficiaries={beneficiaries} from={from} to={to} />
       ) : tab === "benchmark" ? (
         benchmark ? <BenchmarkTab data={benchmark} /> : null
+      ) : tab === "xirr" ? (
+        xirr ? <XirrTab data={xirr} /> : null
       ) : tab === "realvalue" ? (
         <RealValueTab rows={realValue} />
       ) : tab === "performance" ? (
