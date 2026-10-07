@@ -481,7 +481,14 @@ export default async function OzetPage() {
     }
   }
 
-  // Manşet "bugünkü değişim" yalnız PİYASA kaynaklı (fiyat/kur hareketi).
+  // Son gece kaydı (bugünden önceki en yeni snapshot): manşet ve sınıf
+  // kartları servet değişimini buna göre gösterir — nakit (maaş, harcama) dahil.
+  const lastNightSnap =
+    dailySnapshots
+      .filter((s) => s.snapshot_date < istanbulToday())
+      .sort((a, b) => (a.snapshot_date < b.snapshot_date ? 1 : -1))[0] ?? null;
+
+  // Yedek: gece kaydı yoksa yalnız PİYASA kaynaklı (fiyat/kur hareketi) değişim.
   // Nakit satırı bakiye farkıdır (maaş, transfer, hisse alımı dahil); onu da
   // toplamak bankadan hisseye 200 bin aktarınca "−200 bin" gösteriyordu (hisse
   // satırı yalnız fiyat değişimini içerdiği için akışın karşılığı yoktu).
@@ -534,6 +541,12 @@ export default async function OzetPage() {
       };
     }
   }
+  const wealthDayChange = lastNightSnap ? grandTotal - Number(lastNightSnap.total_wealth) : totalDayChange;
+  const wealthDayLabel =
+    !lastNightSnap || lastNightSnap.snapshot_date === istanbulYesterday()
+      ? "Bugünkü servet değişimi"
+      : `${lastNightSnap.snapshot_date.slice(8, 10)}.${lastNightSnap.snapshot_date.slice(5, 7)} akşamından bu yana servet değişimi`;
+
   const wealthRefs = [
     d30Point ? { key: "d30", label: "30 günde", point: d30Point } : null,
     ytdPoint ? { key: "ytd", label: `${currentYear} başından`, point: ytdPoint } : null,
@@ -642,12 +655,13 @@ export default async function OzetPage() {
               <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
                 <TotalWealthDisplay
                   totalTry={grandTotal}
-                  dayChangeTry={totalDayChange}
+                  dayChangeTry={wealthDayChange}
                   today={todayTr}
                   rates={nowRates}
                   prevRates={prevWealthPoint?.rates ?? null}
                   refs={wealthRefs}
-                  lastNight={prevWealthPoint ? { date: prevWealthPoint.date, totalTry: prevWealthPoint.totalTry } : null}
+                  dayLabel={wealthDayLabel}
+                  marketChangeTry={lastNightSnap ? totalDayChange : null}
                 />
                 {dailySnapshots.length >= 2 && (() => {
                   const values = dailySnapshots.map((s) => Number(s.total_wealth));
@@ -683,9 +697,13 @@ export default async function OzetPage() {
                 })()}
               </div>
               {(() => {
-                const equityDay = dayChangeMap.get("equity")?.change ?? 0;
-                const metalDay = dayChangeMap.get("metal")?.change ?? 0;
-                const fxDay = dayChangeMap.get("fx")?.change ?? 0;
+                // Gece kaydına göre sınıf değeri farkı: kartların toplamı manşetteki
+                // servet değişimine eşit. Kayıt yoksa piyasa kaynaklı değişim.
+                const sinceNight = (live: number, prev: number | string | null | undefined, market: number) =>
+                  lastNightSnap ? live - Number(prev ?? 0) : market;
+                const equityDay = sinceNight(investmentMv, lastNightSnap?.equity_mv, dayChangeMap.get("equity")?.change ?? 0);
+                const metalDay = sinceNight(metalTotal, lastNightSnap?.metal_try, dayChangeMap.get("metal")?.change ?? 0);
+                const fxDay = sinceNight(fxTotal, lastNightSnap?.fx_try, dayChangeMap.get("fx")?.change ?? 0);
                 const cashDay = dayChangeMap.get("cash_try")?.change ?? 0;
                 const dayPct = (change: number, value: number) =>
                   value > 0 ? (change / (value - change || value)) * 100 : 0;
@@ -698,7 +716,7 @@ export default async function OzetPage() {
                   iconName: IconKey,
                   iconColor: string,
                   classKey: string,
-                  /** Nakit: fiyat değil bakiye farkı (maaş, harcama, transfer) — yüzde anlamsız */
+                  /** Nakit: bakiye farkı (maaş, harcama, transfer) — yüzde gösterilmez */
                   flow = false,
                 ) => {
                   const color = change >= 0 ? "var(--positive)" : "var(--negative)";
@@ -727,15 +745,8 @@ export default async function OzetPage() {
                           {fmt.trydp(value)}
                         </div>
                         {flow ? (
-                          <div className="tabular" style={{ fontSize: 11 }}>
-                            {Math.abs(change) >= 1 ? (
-                              <>
-                                <span style={{ color }}>{signedTr(change, 0)} ₺</span>
-                                <span className="hint"> giriş-çıkış (dün akşamdan beri, piyasa değil)</span>
-                              </>
-                            ) : (
-                              <span className="hint">Dün akşamdan beri hareket yok</span>
-                            )}
+                          <div className="tabular" style={{ fontSize: 11, color: Math.abs(change) >= 1 ? color : "var(--muted)" }}>
+                            {Math.abs(change) >= 1 ? `${signedTr(change, 0)} ₺` : "0 ₺"}
                           </div>
                         ) : (
                           <div className="tabular" style={{ fontSize: 11, color }}>

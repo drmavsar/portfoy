@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 
 import { fmt } from "@/lib/finance/fmt";
@@ -24,7 +23,7 @@ interface WealthRef {
 interface Props {
   /** TL cinsinden toplam servet (anlık) */
   totalTry: number;
-  /** TL cinsinden bugünkü PİYASA kaynaklı değişim (nakit akışı hariç) */
+  /** TL cinsinden servet değişimi: son gece kaydından bu yana, nakit dahil */
   dayChangeTry: number;
   /** "YYYY-MM-DD" (İstanbul) */
   today: string;
@@ -34,20 +33,16 @@ interface Props {
   prevRates: UnitRates | null;
   /** Karşılaştırma noktaları (kendi günlerinin kuruyla) */
   refs: WealthRef[];
-  /** Bugünden önceki son gece kaydı: piyasa dışı değişimi (maaş, harcama) ayırmak için */
-  lastNight?: { date: string; totalTry: number } | null;
+  /** TRY değişiminin etiketi ("Bugünkü servet değişimi" ya da son kaydın tarihi) */
+  dayLabel?: string;
+  /** Aynı dönemde yalnız fiyat/kur kaynaklı değişim (TL); ayrı satırda gösterilir */
+  marketChangeTry?: number | null;
 }
 
 const MONTHS = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
 
 function shortDate(iso: string): string {
   return `${Number(iso.slice(8, 10))} ${MONTHS[Number(iso.slice(5, 7)) - 1]}${iso.slice(0, 4) === String(new Date().getFullYear()) ? "" : ` ${iso.slice(0, 4)}`}`;
-}
-
-function prevDay(iso: string): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
 }
 
 const UNITS: WealthUnit[] = ["TRY", "USD", "EUR", "XAU"];
@@ -62,7 +57,7 @@ function signed(v: number, d: number): string {
   return `${v >= 0 ? "+" : "−"}${fmt.tr(Math.abs(v), d)}`;
 }
 
-export function TotalWealthDisplay({ totalTry, dayChangeTry, today, rates, prevRates, refs, lastNight }: Props) {
+export function TotalWealthDisplay({ totalTry, dayChangeTry, today, rates, prevRates, refs, dayLabel, marketChangeTry }: Props) {
   const [unit, setUnit] = useState<WealthUnit>("TRY");
   const meta = UNIT_META[unit];
 
@@ -126,26 +121,22 @@ export function TotalWealthDisplay({ totalTry, dayChangeTry, today, rates, prevR
       </div>
       <div className="hint" style={{ fontSize: 11, marginTop: 4 }}>
         {unit === "TRY"
-          ? "Bugünkü piyasa etkisi (fiyat ve kur)"
+          ? (dayLabel ?? "Bugünkü servet değişimi")
           : dayChange == null
             ? "Dünkü kur yok — günlük değişim hesaplanamadı"
             : "Bugünkü değişim (kur hareketi dahil)"}
       </div>
-      {/* Maaş, harcama, bakiye güncellemesi gibi piyasa dışı hareketler ayrı
-          gösterilir; yoksa nakit kartındaki giriş başlıktaki değişimle çelişir. */}
-      {unit === "TRY" && lastNight && (() => {
-        const since = totalTry - lastNight.totalTry;
-        const flow = since - dayChangeTry;
-        if (Math.abs(flow) < 1) return null;
-        const when = lastNight.date === prevDay(today) ? "Dün akşamki" : `${shortDate(lastNight.date)} akşamki`;
-        return (
-          <div className="hint tabular" style={{ fontSize: 12, marginTop: 6, lineHeight: 1.5, maxWidth: 420 }}>
-            {when} kayda göre servet{" "}
-            <b style={{ color: since >= 0 ? "var(--positive)" : "var(--negative)" }}>{signed(since, 0)} ₺</b>: piyasa{" "}
-            {signed(dayChangeTry, 0)} ₺, giriş-çıkış ve bakiye güncellemesi {signed(flow, 0)} ₺
-          </div>
-        );
-      })()}
+      {unit === "TRY" && marketChangeTry != null && (
+        <div className="tabular" style={{ fontSize: 12, marginTop: 6 }}>
+          <span className="hint">Piyasa etkisi </span>
+          <span style={{ fontWeight: 600, color: marketChangeTry >= 0 ? "var(--positive)" : "var(--negative)" }}>
+            {signed(marketChangeTry, 0)} ₺
+            {totalTry - dayChangeTry > 0 && marketChangeTry !== 0 && (
+              <> · {signed((marketChangeTry / (totalTry - dayChangeTry)) * 100, 2)}%</>
+            )}
+          </span>
+        </div>
+      )}
 
       {/* Dönem karşılaştırmaları — birikim dahil servet değişimi */}
       {refs.length > 0 && (
@@ -161,25 +152,13 @@ export function TotalWealthDisplay({ totalTry, dayChangeTry, today, rates, prevR
               <span
                 key={r.key}
                 className="tabular"
-                title={`${shortDate(r.point.date)}: ${formatAmount(c.base, unit)} → bugün ${formatAmount(c.now, unit)}`}
+                title={`${shortDate(r.point.date)}: ${formatAmount(c.base, unit)} → bugün ${formatAmount(c.now, unit)} (${signed(c.abs, unit === "XAU" ? 1 : 0)} ${meta.suffix})`}
               >
                 <span className="hint">{r.label} </span>
                 <span style={{ color, fontWeight: 650 }}>{signed(c.pct * 100, 1)}%</span>
-                <span className="hint">
-                  {" "}
-                  ({signed(c.abs, unit === "XAU" ? 1 : 0)} {meta.suffix} · {shortDate(r.point.date)} → bugün)
-                </span>
               </span>
             );
           })}
-        </div>
-      )}
-      {refs.length > 0 && unit === "TRY" && (
-        <div className="hint" style={{ fontSize: 11, marginTop: 4 }}>
-          Birikim ve harcamalar dahil servet değişimi.{" "}
-          <Link href="/raporlar?tab=bridge" style={{ color: "var(--accent)" }}>
-            Tasarruf mu, piyasa mı?
-          </Link>
         </div>
       )}
     </div>
