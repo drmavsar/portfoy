@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import { fmt } from "@/lib/finance/fmt";
@@ -33,6 +34,20 @@ interface Props {
   prevRates: UnitRates | null;
   /** Karşılaştırma noktaları (kendi günlerinin kuruyla) */
   refs: WealthRef[];
+  /** Bugünden önceki son gece kaydı: piyasa dışı değişimi (maaş, harcama) ayırmak için */
+  lastNight?: { date: string; totalTry: number } | null;
+}
+
+const MONTHS = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
+
+function shortDate(iso: string): string {
+  return `${Number(iso.slice(8, 10))} ${MONTHS[Number(iso.slice(5, 7)) - 1]}${iso.slice(0, 4) === String(new Date().getFullYear()) ? "" : ` ${iso.slice(0, 4)}`}`;
+}
+
+function prevDay(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
 }
 
 const UNITS: WealthUnit[] = ["TRY", "USD", "EUR", "XAU"];
@@ -47,7 +62,7 @@ function signed(v: number, d: number): string {
   return `${v >= 0 ? "+" : "−"}${fmt.tr(Math.abs(v), d)}`;
 }
 
-export function TotalWealthDisplay({ totalTry, dayChangeTry, today, rates, prevRates, refs }: Props) {
+export function TotalWealthDisplay({ totalTry, dayChangeTry, today, rates, prevRates, refs, lastNight }: Props) {
   const [unit, setUnit] = useState<WealthUnit>("TRY");
   const meta = UNIT_META[unit];
 
@@ -111,11 +126,26 @@ export function TotalWealthDisplay({ totalTry, dayChangeTry, today, rates, prevR
       </div>
       <div className="hint" style={{ fontSize: 11, marginTop: 4 }}>
         {unit === "TRY"
-          ? "Bugünkü değişim"
+          ? "Bugünkü piyasa etkisi (fiyat ve kur)"
           : dayChange == null
             ? "Dünkü kur yok — günlük değişim hesaplanamadı"
             : "Bugünkü değişim (kur hareketi dahil)"}
       </div>
+      {/* Maaş, harcama, bakiye güncellemesi gibi piyasa dışı hareketler ayrı
+          gösterilir; yoksa nakit kartındaki giriş başlıktaki değişimle çelişir. */}
+      {unit === "TRY" && lastNight && (() => {
+        const since = totalTry - lastNight.totalTry;
+        const flow = since - dayChangeTry;
+        if (Math.abs(flow) < 1) return null;
+        const when = lastNight.date === prevDay(today) ? "Dün akşamki" : `${shortDate(lastNight.date)} akşamki`;
+        return (
+          <div className="hint tabular" style={{ fontSize: 12, marginTop: 6, lineHeight: 1.5, maxWidth: 420 }}>
+            {when} kayda göre servet{" "}
+            <b style={{ color: since >= 0 ? "var(--positive)" : "var(--negative)" }}>{signed(since, 0)} ₺</b>: piyasa{" "}
+            {signed(dayChangeTry, 0)} ₺, giriş-çıkış ve bakiye güncellemesi {signed(flow, 0)} ₺
+          </div>
+        );
+      })()}
 
       {/* Dönem karşılaştırmaları — birikim dahil servet değişimi */}
       {refs.length > 0 && (
@@ -128,12 +158,28 @@ export function TotalWealthDisplay({ totalTry, dayChangeTry, today, rates, prevR
             if (!c || c.pct == null) return null;
             const color = c.pct >= 0 ? "var(--positive)" : "var(--negative)";
             return (
-              <span key={r.key} className="tabular">
+              <span
+                key={r.key}
+                className="tabular"
+                title={`${shortDate(r.point.date)}: ${formatAmount(c.base, unit)} → bugün ${formatAmount(c.now, unit)}`}
+              >
                 <span className="hint">{r.label} </span>
                 <span style={{ color, fontWeight: 650 }}>{signed(c.pct * 100, 1)}%</span>
+                <span className="hint">
+                  {" "}
+                  ({signed(c.abs, unit === "XAU" ? 1 : 0)} {meta.suffix} · {shortDate(r.point.date)} → bugün)
+                </span>
               </span>
             );
           })}
+        </div>
+      )}
+      {refs.length > 0 && unit === "TRY" && (
+        <div className="hint" style={{ fontSize: 11, marginTop: 4 }}>
+          Birikim ve harcamalar dahil servet değişimi.{" "}
+          <Link href="/raporlar?tab=bridge" style={{ color: "var(--accent)" }}>
+            Tasarruf mu, piyasa mı?
+          </Link>
         </div>
       )}
     </div>
