@@ -647,6 +647,7 @@ export default async function OzetPage() {
                   rates={nowRates}
                   prevRates={prevWealthPoint?.rates ?? null}
                   refs={wealthRefs}
+                  lastNight={prevWealthPoint ? { date: prevWealthPoint.date, totalTry: prevWealthPoint.totalTry } : null}
                 />
                 {dailySnapshots.length >= 2 && (() => {
                   const values = dailySnapshots.map((s) => Number(s.total_wealth));
@@ -688,6 +689,7 @@ export default async function OzetPage() {
                 const cashDay = dayChangeMap.get("cash_try")?.change ?? 0;
                 const dayPct = (change: number, value: number) =>
                   value > 0 ? (change / (value - change || value)) * 100 : 0;
+                const signedTr = (n: number, d: number) => `${n >= 0 ? "+" : "−"}${fmt.tr(Math.abs(n), d)}`;
                 type IconKey = "wealth" | "diamond" | "swap" | "wallet";
                 const renderCell = (
                   label: string,
@@ -696,6 +698,8 @@ export default async function OzetPage() {
                   iconName: IconKey,
                   iconColor: string,
                   classKey: string,
+                  /** Nakit: fiyat değil bakiye farkı (maaş, harcama, transfer) — yüzde anlamsız */
+                  flow = false,
                 ) => {
                   const color = change >= 0 ? "var(--positive)" : "var(--negative)";
                   const pct = dayPct(change, value);
@@ -722,12 +726,23 @@ export default async function OzetPage() {
                         <div className="tabular" style={{ fontSize: 18, fontWeight: 600 }}>
                           {fmt.trydp(value)}
                         </div>
-                        <div className="tabular" style={{ fontSize: 11, color }}>
-                          {change >= 0 ? "+" : ""}{fmt.tr(change, 0)} ₺
-                          {value > 0 && change !== 0 && (
-                            <> · {change >= 0 ? "+" : ""}{pct.toFixed(2)}%</>
-                          )}
-                        </div>
+                        {flow ? (
+                          <div className="tabular" style={{ fontSize: 11 }}>
+                            {Math.abs(change) >= 1 ? (
+                              <>
+                                <span style={{ color }}>{signedTr(change, 0)} ₺</span>
+                                <span className="hint"> giriş-çıkış (dün akşamdan beri, piyasa değil)</span>
+                              </>
+                            ) : (
+                              <span className="hint">Dün akşamdan beri hareket yok</span>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="tabular" style={{ fontSize: 11, color }}>
+                            {signedTr(change, 0)} ₺
+                            {value > 0 && change !== 0 && <> · {signedTr(pct, 2)}%</>}
+                          </div>
+                        )}
                         {breakdown.length > 1 && (
                           <div style={{ marginTop: 8, display: "grid", gap: 3 }}>
                             {breakdown.map((p) => {
@@ -755,7 +770,7 @@ export default async function OzetPage() {
                                     {p.dayChange !== 0 && (
                                       <span style={{ color: pColor, marginLeft: 4 }}>
                                         {" "}
-                                        {p.dayChange >= 0 ? "+" : ""}{pPct.toFixed(1)}%
+                                        {signedTr(pPct, 1)}%
                                       </span>
                                     )}
                                   </span>
@@ -782,7 +797,7 @@ export default async function OzetPage() {
                     {renderCell("PORTFÖY", investmentMv, equityDay, "wealth", ASSET_CLASS.equity.color, "equity")}
                     {renderCell("ALTIN", metalTotal, metalDay, "diamond", ASSET_CLASS.metal.color, "metal")}
                     {renderCell("DÖVİZ", fxTotal, fxDay, "swap", ASSET_CLASS.fx.color, "fx")}
-                    {renderCell("NAKİT", cashTotal, cashDay, "wallet", ASSET_CLASS.cash.color, "cash_try")}
+                    {renderCell("NAKİT", cashTotal, cashDay, "wallet", ASSET_CLASS.cash.color, "cash_try", true)}
                   </div>
                 );
               })()}
