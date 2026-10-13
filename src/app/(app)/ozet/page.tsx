@@ -31,6 +31,7 @@ import {
 import { findStaleBalances } from "@/app/(app)/_lib/stale-balances";
 import { AssetCompositionChart } from "@/app/(app)/_components/asset-composition-chart";
 import { LiquidationCard } from "@/app/(app)/_components/liquidation-card";
+import { TrendChart } from "@/app/(app)/_components/trend-chart";
 import { WealthBridgeCard } from "@/app/(app)/_components/wealth-bridge-view";
 import { wealthBridgeReport } from "@/app/(app)/_lib/wealth-bridge-actions";
 import { liquidationSummary } from "@/lib/finance/liquidation";
@@ -663,38 +664,12 @@ export default async function OzetPage() {
                   dayLabel={wealthDayLabel}
                   marketChangeTry={lastNightSnap ? totalDayChange : null}
                 />
-                {dailySnapshots.length >= 2 && (() => {
-                  const values = dailySnapshots.map((s) => Number(s.total_wealth));
-                  const min = Math.min(...values);
-                  const max = Math.max(...values);
-                  const range = max - min || 1;
-                  const width = 280;
-                  const height = 90;
-                  const stepX = width / (values.length - 1);
-                  const points = values.map((v, i) => {
-                    const x = i * stepX;
-                    const y = height - ((v - min) / range) * height;
-                    return `${x.toFixed(1)},${y.toFixed(1)}`;
-                  });
-                  const path = `M ${points.join(" L ")}`;
-                  const areaPath = `${path} L ${width},${height} L 0,${height} Z`;
-                  const trendUp = values[values.length - 1] >= values[0];
-                  const color = trendUp ? "var(--positive)" : "var(--negative)";
-                  return (
-                    <div style={{ flex: 1, minWidth: 200 }}>
-                      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height, maxWidth: width }}>
-                        <defs>
-                          <linearGradient id="trendGrad" x1="0" x2="0" y1="0" y2="1">
-                            <stop offset="0%" stopColor={color} stopOpacity="0.3" />
-                            <stop offset="100%" stopColor={color} stopOpacity="0" />
-                          </linearGradient>
-                        </defs>
-                        <path d={areaPath} fill="url(#trendGrad)" />
-                        <path d={path} stroke={color} strokeWidth={1.5} fill="none" />
-                      </svg>
-                    </div>
-                  );
-                })()}
+                {dailySnapshots.length >= 2 && (
+                  <div style={{ flex: 1, minWidth: 200, display: "flex", gap: 20, flexWrap: "wrap" }}>
+                    <TrendChart id="trendWealth" label="Toplam servet" values={dailySnapshots.map((s) => Number(s.total_wealth))} />
+                    <TrendChart id="trendPortfolio" label="Portföy (hisse + fon)" values={dailySnapshots.map((s) => Number(s.equity_mv))} />
+                  </div>
+                )}
               </div>
               {(() => {
                 // Gece kaydına göre sınıf değeri farkı: kartların toplamı manşetteki
