@@ -672,14 +672,22 @@ export default async function OzetPage() {
                 )}
               </div>
               {(() => {
-                // Gece kaydına göre sınıf değeri farkı: kartların toplamı manşetteki
-                // servet değişimine eşit. Kayıt yoksa piyasa kaynaklı değişim.
-                const sinceNight = (live: number, prev: number | string | null | undefined, market: number) =>
-                  lastNightSnap ? live - Number(prev ?? 0) : market;
-                const equityDay = sinceNight(investmentMv, lastNightSnap?.equity_mv, dayChangeMap.get("equity")?.change ?? 0);
-                const metalDay = sinceNight(metalTotal, lastNightSnap?.metal_try, dayChangeMap.get("metal")?.change ?? 0);
-                const fxDay = sinceNight(fxTotal, lastNightSnap?.fx_try, dayChangeMap.get("fx")?.change ?? 0);
+                // Portföy / altın / döviz: yalnız fiyat ve kur değişimi (Portföy
+                // sayfasıyla aynı; üçünün toplamı "Piyasa etkisi" satırı). Alım-satım
+                // tutarı burada değişim sayılmaz — bugün işlem varsa net tutar ayrı
+                // satırda. Nakit: dün akşamdan beri bakiye farkı.
+                const equityDay = dayChangeMap.get("equity")?.change ?? 0;
+                const metalDay = dayChangeMap.get("metal")?.change ?? 0;
+                const fxDay = dayChangeMap.get("fx")?.change ?? 0;
                 const cashDay = dayChangeMap.get("cash_try")?.change ?? 0;
+                const netBuyToday = trades
+                  .filter((t) => istanbulToday(new Date(t.executed_at)) === todayTr)
+                  .reduce((sum, t) => {
+                    const fx = t.currency === "TRY" ? 1 : Number(t.fx_rate_to_try ?? 1) || 1;
+                    const gross = Number(t.quantity) * Number(t.price) * fx;
+                    const fees = Number(t.fees) * fx;
+                    return sum + (t.side === "buy" ? gross + fees : -(gross - fees));
+                  }, 0);
                 const dayPct = (change: number, value: number) =>
                   value > 0 ? (change / (value - change || value)) * 100 : 0;
                 const signedTr = (n: number, d: number) => `${n >= 0 ? "+" : "−"}${fmt.tr(Math.abs(n), d)}`;
@@ -693,6 +701,7 @@ export default async function OzetPage() {
                   classKey: string,
                   /** Nakit: bakiye farkı (maaş, harcama, transfer) — yüzde gösterilmez */
                   flow = false,
+                  note?: string,
                 ) => {
                   const color = change >= 0 ? "var(--positive)" : "var(--negative)";
                   const pct = dayPct(change, value);
@@ -727,6 +736,11 @@ export default async function OzetPage() {
                           <div className="tabular" style={{ fontSize: 11, color }}>
                             {signedTr(change, 0)} ₺
                             {value > 0 && change !== 0 && <> · {signedTr(pct, 2)}%</>}
+                          </div>
+                        )}
+                        {note && (
+                          <div className="hint tabular" style={{ fontSize: 11, marginTop: 2 }}>
+                            {note}
                           </div>
                         )}
                         {breakdown.length > 1 && (
@@ -780,7 +794,18 @@ export default async function OzetPage() {
                       borderTop: "1px solid var(--border-soft)",
                     }}
                   >
-                    {renderCell("PORTFÖY", investmentMv, equityDay, "wealth", ASSET_CLASS.equity.color, "equity")}
+                    {renderCell(
+                      "PORTFÖY",
+                      investmentMv,
+                      equityDay,
+                      "wealth",
+                      ASSET_CLASS.equity.color,
+                      "equity",
+                      false,
+                      Math.abs(netBuyToday) >= 1
+                        ? `Bugün net ${netBuyToday > 0 ? "alım" : "satış"} ${fmt.tr(Math.abs(netBuyToday), 0)} ₺`
+                        : undefined,
+                    )}
                     {renderCell("ALTIN", metalTotal, metalDay, "diamond", ASSET_CLASS.metal.color, "metal")}
                     {renderCell("DÖVİZ", fxTotal, fxDay, "swap", ASSET_CLASS.fx.color, "fx")}
                     {renderCell("NAKİT", cashTotal, cashDay, "wallet", ASSET_CLASS.cash.color, "cash_try", true)}
