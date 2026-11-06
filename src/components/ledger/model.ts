@@ -4,6 +4,10 @@
    gruplar ara toplam ve pay çubuğu taşır.
    ============================================================ */
 
+import { foldTr } from "@/lib/fold-tr";
+
+export { foldTr };
+
 export type LedgerSort = "date-desc" | "date-asc" | "amount-desc" | "amount-asc";
 
 export interface LedgerAccessors<T> {
@@ -16,20 +20,6 @@ export interface LedgerAccessors<T> {
 export interface FacetField<T> {
   id: string;
   value: (row: T) => string;
-}
-
-/** Türkçe büyük/küçük harf ve aksan farkını yok say: "MIGROS" = "Migros" = "mİgros". */
-export function foldTr(s: string): string {
-  return s
-    .toLocaleLowerCase("tr")
-    .replace(/ı/g, "i")
-    .replace(/ş/g, "s")
-    .replace(/ğ/g, "g")
-    .replace(/ü/g, "u")
-    .replace(/ö/g, "o")
-    .replace(/ç/g, "c")
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "");
 }
 
 /** Sorgu kelimelerinin hepsi geçmeli (sıra fark etmez). */
