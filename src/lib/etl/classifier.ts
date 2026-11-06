@@ -4,6 +4,7 @@ import {
   GARANTI_TAG_TO_CATEGORY_SLUG,
   type ParsedStatementRow,
 } from "@/lib/etl/parsers";
+import { ilikeMatches, resolveRules } from "@/lib/etl/rule-match";
 import type { DraftInsert, RuleRow, TxnDirection } from "@/lib/types/database";
 
 /**
@@ -72,7 +73,9 @@ export interface ClassifyResult {
 
 /**
  * Run the rule engine over parsed rows and produce DraftInsert payloads.
- * First-match wins (rules pre-sorted by priority ascending).
+ * Rules are evaluated by priority (ascending). Category and beneficiary come
+ * from the first matching rule that sets each; the remaining actions come from
+ * the first matching rule. Matching ignores Turkish case/diacritics.
  */
 export function classify({
   userId,
@@ -91,31 +94,27 @@ export function classify({
   for (const r of rows) {
     const merchantClean = cleanMerchant(r.merchantRaw ?? r.description);
     const installment = detectInstallment(r.description);
-    const description = (r.description ?? "").toLowerCase();
-    const merchantLower = (r.merchantRaw ?? "").toLowerCase();
+    const description = r.description ?? "";
+    const merchant = r.merchantRaw ?? "";
 
-    const match = sortedRules.find((rule) => {
+    // Kategori ve kişi ayrı ayrı çözülür; diğer alanlar ilk eşleşen kuraldan.
+    const resolved = resolveRules(sortedRules, (rule) => {
       if (rule.match_account_id && rule.match_account_id !== accountId) return false;
       if (rule.match_direction && rule.match_direction !== r.direction) return false;
       if (rule.match_min_amount !== null && r.amount < rule.match_min_amount) return false;
       if (rule.match_max_amount !== null && r.amount > rule.match_max_amount) return false;
-      if (rule.match_merchant_ilike) {
-        const needle = rule.match_merchant_ilike.replace(/%/g, "").toLowerCase();
-        if (!merchantLower.includes(needle)) return false;
-      }
-      if (rule.match_description_ilike) {
-        const needle = rule.match_description_ilike.replace(/%/g, "").toLowerCase();
-        if (!description.includes(needle)) return false;
-      }
+      if (rule.match_merchant_ilike && !ilikeMatches(rule.match_merchant_ilike, merchant)) return false;
+      if (rule.match_description_ilike && !ilikeMatches(rule.match_description_ilike, description)) return false;
       if (rule.match_regex) {
         try {
-          if (!new RegExp(rule.match_regex, "i").test(r.merchantRaw ?? "")) return false;
+          if (!new RegExp(rule.match_regex, "i").test(merchant)) return false;
         } catch {
           return false;
         }
       }
       return true;
     });
+    const match = resolved.first;
 
     if (match) hits.set(match.id, (hits.get(match.id) ?? 0) + 1);
 
@@ -123,7 +122,7 @@ export function classify({
     // rule matched, so manual rules always win.
     let hintedCategoryId: string | null = null;
     let hintConfidence: number | null = null;
-    if (!match?.set_category_id && r.sourceCategoryHint && categoryBySlug) {
+    if (!resolved.category_id && r.sourceCategoryHint && categoryBySlug) {
       const slug = GARANTI_TAG_TO_CATEGORY_SLUG[r.sourceCategoryHint];
       if (slug) {
         hintedCategoryId = categoryBySlug.get(slug) ?? null;
@@ -150,8 +149,8 @@ export function classify({
       currency: r.currency,
       merchant_raw: r.merchantRaw,
       merchant_clean: merchantClean,
-      suggested_category_id: match?.set_category_id ?? hintedCategoryId,
-      suggested_beneficiary_id: match?.set_beneficiary_id ?? null,
+      suggested_category_id: resolved.category_id ?? hintedCategoryId,
+      suggested_beneficiary_id: resolved.beneficiary_id,
       suggested_is_transfer: match?.set_is_transfer ?? false,
       suggested_counter_account_id: match?.set_counter_account_id ?? null,
       suggested_installment_total:

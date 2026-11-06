@@ -5,13 +5,9 @@
  * tarafından doğrudan test edilebilir. ekstre/actions.ts buradan import eder.
  */
 
-export interface ClassificationRule {
-  match_merchant_ilike: string | null;
-  match_description_ilike: string | null;
-  set_category_id: string | null;
-  set_beneficiary_id: string | null;
-  set_is_transfer: boolean | null;
-}
+import { resolveRules, ruleTextMatches, type MatchableRule } from "@/lib/etl/rule-match";
+
+export type ClassificationRule = MatchableRule;
 
 /** "15/01/2026", "15.01.2026" ve "15-01-2026" → "2026-01-15". Eskiden yalnız
  * "/" kabul ediliyordu; noktalı standart biçimdeki satırlar sessizce atlanıyordu. */
@@ -117,13 +113,13 @@ export function categorySlugCandidates(etiket: string): string[] {
   return [];
 }
 
-/** SQL ILIKE pattern (%, _) → RegExp; case-insensitive */
-export function ilikeToRegExp(pattern: string): RegExp {
-  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = escaped.replace(/%/g, ".*").replace(/_/g, ".");
-  return new RegExp("^" + re + "$", "i");
-}
+export { ilikeToRegExp } from "@/lib/etl/rule-match";
 
+/**
+ * Kuralları öncelik sırasında uygula. Kategori ve kişi ayrı ayrı çözülür
+ * (bkz. lib/etl/rule-match.ts); transfer bilgisi ilk eşleşen kuraldan gelir.
+ * Türkçe harf farkı yok sayılır: "%MİGROS%" = "MIGROS".
+ */
 export function applyRule(
   rules: ClassificationRule[],
   merchant: string,
@@ -133,23 +129,10 @@ export function applyRule(
   beneficiary_id: string | null;
   is_transfer: boolean | null;
 } {
-  for (const r of rules) {
-    let matched = false;
-    if (r.match_merchant_ilike) {
-      if (ilikeToRegExp(r.match_merchant_ilike).test(merchant)) matched = true;
-      else continue;
-    }
-    if (r.match_description_ilike) {
-      if (ilikeToRegExp(r.match_description_ilike).test(description)) matched = true;
-      else continue;
-    }
-    if (matched) {
-      return {
-        category_id: r.set_category_id,
-        beneficiary_id: r.set_beneficiary_id,
-        is_transfer: r.set_is_transfer,
-      };
-    }
-  }
-  return { category_id: null, beneficiary_id: null, is_transfer: null };
+  const r = resolveRules(rules, (rule) => ruleTextMatches(rule, merchant, description));
+  return {
+    category_id: r.category_id,
+    beneficiary_id: r.beneficiary_id,
+    is_transfer: r.first?.set_is_transfer ?? null,
+  };
 }

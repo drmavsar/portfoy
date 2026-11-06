@@ -244,3 +244,40 @@ describe("applyRule", () => {
     expect(applyRule(rules, "MIGROS", "Market").beneficiary_id).toBe("ben-ev");
   });
 });
+
+describe("applyRule — Türkçe ve alan alan çözüm", () => {
+  const mk = (o: Partial<ClassificationRule>): ClassificationRule => ({
+    match_merchant_ilike: null,
+    match_description_ilike: null,
+    set_category_id: null,
+    set_beneficiary_id: null,
+    set_is_transfer: null,
+    ...o,
+  });
+  it("Türkçe harfli kural ASCII ekstre satırını yakalar", () => {
+    const rules = [mk({ match_merchant_ilike: "%ÖZLEM KURT%", set_beneficiary_id: "ben-ahmet" })];
+    expect(applyRule(rules, "OZLEM KURT IZMIR", "Yeme İçme").beneficiary_id).toBe("ben-ahmet");
+  });
+  it("ilk kuralda kişi yoksa sonraki eşleşen kuralın kişisi kullanılır", () => {
+    const rules = [
+      mk({ match_merchant_ilike: "%A101%", set_category_id: "cat-market" }),
+      mk({ match_merchant_ilike: "%A101%IZMIR%", set_beneficiary_id: "ben-ahmet" }),
+    ];
+    expect(applyRule(rules, "A101 6227 IYTE GULBAHCE IZMIR", "Market")).toEqual({
+      category_id: "cat-market",
+      beneficiary_id: "ben-ahmet",
+      is_transfer: null,
+    });
+  });
+  it("transfer bilgisi ilk eşleşen kuraldan gelir", () => {
+    const rules = [
+      mk({ match_merchant_ilike: "%ENGİN ELÇİ%", set_is_transfer: false, set_beneficiary_id: "ben-ev" }),
+      mk({ match_description_ilike: "%Para Transferi%", set_is_transfer: true }),
+    ];
+    expect(applyRule(rules, "Engin Elçi-PAZAR -FAST-CEP ŞUBE-1", "Para Transferi")).toEqual({
+      category_id: null,
+      beneficiary_id: "ben-ev",
+      is_transfer: false,
+    });
+  });
+});
