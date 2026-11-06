@@ -145,8 +145,9 @@ export function EkstreClient({
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  /** Hesap değişince: hesabın sahibi varsa tüm satırları o kişiye sabitle;
-   *  yoksa rule-bazlı öneriyi (suggested_beneficiary_id) geri yükle. */
+  /** Hesap değişince kişiyi yeniden öner: önce kural (yer → kişi), kural
+   *  yoksa hesabın sahibi. Eskiden kart sahibi kuralları eziyordu; ana kart
+   *  "Mehmet"e ait olduğu için kurallar ekranda hiç görünmüyordu. */
   const applyAccountChange = (newAccountId: string) => {
     setAccountId(newAccountId);
     const account = accounts.find((a) => a.id === newAccountId);
@@ -158,7 +159,7 @@ export function EkstreClient({
             ...prev,
             rows: prev.rows.map((r) => ({
               ...r,
-              beneficiary_id: fixedBen ?? r.suggested_beneficiary_id,
+              beneficiary_id: r.suggested_beneficiary_id ?? fixedBen ?? r.beneficiary_id,
             })),
           }
         : prev,
@@ -177,8 +178,7 @@ export function EkstreClient({
         setError(r.error ?? "Parse hatası.");
         return;
       }
-      // Default kişi: rule önerisi > ilk beneficiary (Mehmet vb.). Hesap seçilince
-      // applyAccountChange tüm satırları gerekirse kart sahibine sabitler.
+      // Default kişi: kural önerisi > kart sahibi > ilk beneficiary (Mehmet vb.).
       const defaultBen = beneficiaries[0]?.id ?? null;
       if (!beneficiaryId && defaultBen) setBeneficiaryId(defaultBen);
       const rows: EditableRow[] = (r.rows ?? []).map((row) => ({
@@ -215,7 +215,7 @@ export function EkstreClient({
                   ...prev,
                   rows: prev.rows.map((row) => ({
                     ...row,
-                    beneficiary_id: fixedBen ?? row.beneficiary_id,
+                    beneficiary_id: row.suggested_beneficiary_id ?? fixedBen ?? row.beneficiary_id,
                   })),
                 }
               : prev,
