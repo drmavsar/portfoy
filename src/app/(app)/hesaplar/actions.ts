@@ -40,6 +40,8 @@ export interface BeneficiaryLite {
   name: string;
   slug: string;
   color: string | null;
+  /** "self" = kullanıcının kendisi; kendi kartı karmadır, kart sahibi kuralı ezmez */
+  role?: string | null;
 }
 
 export async function listCustodyLocations(): Promise<CustodyRow[]> {
@@ -93,7 +95,7 @@ export async function listBeneficiariesLite(): Promise<BeneficiaryLite[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("beneficiaries")
-    .select("id, name, slug, color")
+    .select("id, name, slug, color, role")
     .is("archived_at", null)
     .order("created_at");
   if (error) return [];

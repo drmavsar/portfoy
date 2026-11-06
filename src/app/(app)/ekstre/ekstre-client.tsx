@@ -10,6 +10,7 @@ import type { AccountRow, BeneficiaryLite } from "@/app/(app)/hesaplar/actions";
 import {
   commitStatementRows,
   parseStatementXls,
+  setCardOwner,
   type StatementPreviewRow,
 } from "./actions";
 
@@ -125,6 +126,8 @@ export function EkstreClient({
   const [result, setResult] = useState<ParsedResult | null>(null);
   const [accountId, setAccountId] = useState<string>("");
   const [beneficiaryId, setBeneficiaryId] = useState<string>("");
+  /** Kartın kayıtlı sahibi ("" = karma) */
+  const [cardOwnerId, setCardOwnerId] = useState<string>("");
   const [commitInfo, setCommitInfo] = useState<string | null>(null);
 
   const expenseCats = useMemo(
@@ -142,28 +145,66 @@ export function EkstreClient({
     setError(null);
     setAccountId("");
     setBeneficiaryId("");
+    setCardOwnerId("");
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  /** Hesap değişince kişiyi yeniden öner: önce kural (yer → kişi), kural
-   *  yoksa hesabın sahibi. Eskiden kart sahibi kuralları eziyordu; ana kart
-   *  "Mehmet"e ait olduğu için kurallar ekranda hiç görünmüyordu. */
-  const applyAccountChange = (newAccountId: string) => {
-    setAccountId(newAccountId);
-    const account = accounts.find((a) => a.id === newAccountId);
-    const fixedBen = account?.beneficiary_id ?? null;
-    if (fixedBen) setBeneficiaryId(fixedBen);
+  /**
+   * Satırın kişisi, öncelik sırasıyla:
+   * 1. Kartın sahibi (Ahmet Burak'ın / Salih'in kartı → her şey onların)
+   * 2. Hesabın sahibi, sahibi kullanıcının kendisi değilse
+   * 3. Yer kuralı (MIGROS ALYANS → Çayırova Ev, İzmir → Ahmet Burak …)
+   * 4. Varsayılan kişi
+   * Kullanıcının kendi kartı ve hesabı karmadır: yalnız kurallar karar verir.
+   * Eskiden ana kartın sahibi "Mehmet" tüm satırlara yazılıyor, kurallar
+   * ekranda hiç görünmüyordu.
+   */
+  const ownerOf = (acc: string): string | null => {
+    const owner = accounts.find((a) => a.id === acc)?.beneficiary_id ?? null;
+    if (!owner) return null;
+    return beneficiaries.find((b) => b.id === owner)?.role === "self" ? null : owner;
+  };
+  const pickBeneficiary = (
+    row: StatementPreviewRow,
+    card: string,
+    acc: string,
+  ): string | null => {
+    if (row.is_transfer) return null;
+    return (
+      card || ownerOf(acc) || row.suggested_beneficiary_id || beneficiaries[0]?.id || null
+    );
+  };
+  const reassignAll = (card: string, acc: string) =>
     setResult((prev) =>
       prev
         ? {
             ...prev,
             rows: prev.rows.map((r) => ({
               ...r,
-              beneficiary_id: r.suggested_beneficiary_id ?? fixedBen ?? r.beneficiary_id,
+              beneficiary_id: pickBeneficiary(r, card, acc),
             })),
           }
         : prev,
     );
+
+  const applyAccountChange = (newAccountId: string) => {
+    setAccountId(newAccountId);
+    const owner = ownerOf(newAccountId);
+    if (owner) setBeneficiaryId(owner);
+    reassignAll(cardOwnerId, newAccountId);
+  };
+
+  /** "Bu kart kimin?" — seçim kart kuralı olarak saklanır, sonraki
+   *  ekstrelerde otomatik uygulanır. Boş = karma (kurallar karar verir). */
+  const changeCardOwner = (owner: string) => {
+    setCardOwnerId(owner);
+    reassignAll(owner, accountId);
+    const last4 = result?.card_last4;
+    if (!last4) return;
+    startTransition(async () => {
+      const r = await setCardOwner(last4, owner || null);
+      if (!r.ok) setError(r.error ?? "Kart sahibi kaydedilemedi.");
+    });
   };
 
   const onUpload = () => {
@@ -178,16 +219,22 @@ export function EkstreClient({
         setError(r.error ?? "Parse hatası.");
         return;
       }
-      // Default kişi: kural önerisi > kart sahibi > ilk beneficiary (Mehmet vb.).
-      const defaultBen = beneficiaries[0]?.id ?? null;
-      if (!beneficiaryId && defaultBen) setBeneficiaryId(defaultBen);
+      const card = r.card_owner_id ?? "";
+      setCardOwnerId(card);
+      // Son 4 hane hesabın adında / IBAN'ında geçiyorsa hesabı otomatik seç
+      const last4 = r.card_last4;
+      const match = last4
+        ? accounts.find((a) => `${a.name} ${a.iban ?? ""}`.includes(last4))
+        : undefined;
+      const acc = match?.id ?? accountId;
+      if (match) setAccountId(match.id);
+      const fixed = card || ownerOf(acc) || beneficiaries[0]?.id || "";
+      if (fixed && (!beneficiaryId || card || match)) setBeneficiaryId(fixed);
       const rows: EditableRow[] = (r.rows ?? []).map((row) => ({
         ...row,
         selected: !row.is_transfer,
         category_id: row.suggested_category_id,
-        beneficiary_id: row.is_transfer
-          ? null
-          : (row.suggested_beneficiary_id ?? defaultBen),
+        beneficiary_id: pickBeneficiary(row, card, acc),
       }));
       setResult({
         source: r.source,
@@ -198,30 +245,6 @@ export function EkstreClient({
         rows,
         skipped: r.skipped_count ?? 0,
       });
-      if (r.card_last4) {
-        const last4 = r.card_last4 as string;
-        const match = accounts.find((a) => {
-          const haystack = `${a.name} ${a.iban ?? ""}`;
-          // ad veya IBAN içinde son 4 hane geçiyor mu (regex değil substring)
-          return haystack.includes(last4);
-        });
-        if (match) {
-          setAccountId(match.id);
-          if (match.beneficiary_id) setBeneficiaryId(match.beneficiary_id);
-          const fixedBen = match.beneficiary_id ?? null;
-          setResult((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  rows: prev.rows.map((row) => ({
-                    ...row,
-                    beneficiary_id: row.suggested_beneficiary_id ?? fixedBen ?? row.beneficiary_id,
-                  })),
-                }
-              : prev,
-          );
-        }
-      }
     });
   };
 
@@ -528,6 +551,33 @@ export function EkstreClient({
               />
             </div>
           </div>
+
+          {result.card_last4 && (
+            <div className="card card-pad" style={{ marginBottom: 12, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+              <label htmlFor="card-owner" style={{ fontWeight: 600 }}>
+                {result.source === "garanti_account" ? "Hesap" : "Kart"} •••• {result.card_last4} kimin?
+              </label>
+              <select
+                id="card-owner"
+                style={{ ...inp, width: "auto", minWidth: 220 }}
+                value={cardOwnerId}
+                onChange={(e) => changeCardOwner(e.target.value)}
+                disabled={busy}
+              >
+                <option value="">Karma: kurallar karar versin</option>
+                {beneficiaries.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}: tüm giderler
+                  </option>
+                ))}
+              </select>
+              <span className="hint" style={{ fontSize: 12 }}>
+                {cardOwnerId
+                  ? "Bu karttan yapılan her gider bu kişiye yazılır; seçim sonraki ekstreler için hatırlanır."
+                  : "Her gider, yerine göre kurallardan kişi alır. Ahmet Burak'ın ya da Salih'in kartıysa kişiyi seçin."}
+              </span>
+            </div>
+          )}
 
           <div className="card" style={{ marginBottom: 12 }}>
             <div
