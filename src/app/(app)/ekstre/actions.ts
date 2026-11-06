@@ -36,6 +36,8 @@ export interface StatementParseResult {
   error?: string;
   source?: StatementSource;
   card_last4?: string;
+  /** Bu kartın (son 4 hane) kayıtlı sahibi; varsa tüm giderler ona yazılır. */
+  card_owner_id?: string | null;
   account_label?: string; // hesap ekstresi için "1202 - 6676930 TL"
   period_start?: string;
   period_end?: string;
@@ -76,6 +78,7 @@ export async function parseStatementXls(
 
   let userCategories: { id: string; slug: string }[] = [];
   let rules: ClassificationRule[] = [];
+  let cardRules: { match_card_last4: string; set_beneficiary_id: string }[] = [];
   if (await isSupabaseConfigured()) {
     try {
       const supabase = await createClient();
@@ -88,18 +91,22 @@ export async function parseStatementXls(
         supabase
           .from("classification_rules")
           .select(
-            "match_merchant_ilike, match_description_ilike, set_category_id, set_beneficiary_id, set_is_transfer, priority, is_enabled",
+            "match_merchant_ilike, match_description_ilike, match_card_last4, set_category_id, set_beneficiary_id, set_is_transfer, priority, is_enabled",
           )
           .eq("is_enabled", true)
           .order("priority", { ascending: true }),
       ]);
       userCategories = (catRes.data ?? []) as { id: string; slug: string }[];
-      rules = ((ruleRes.data ?? []) as ClassificationRule[]).filter(
-        (r) => r.match_merchant_ilike || r.match_description_ilike,
+      const all = (ruleRes.data ?? []) as (ClassificationRule & { match_card_last4: string | null })[];
+      rules = all.filter((r) => r.match_merchant_ilike || r.match_description_ilike);
+      cardRules = all.filter(
+        (r): r is typeof r & { match_card_last4: string; set_beneficiary_id: string } =>
+          !!r.match_card_last4 && !!r.set_beneficiary_id && !r.match_merchant_ilike && !r.match_description_ilike,
       );
     } catch {
       userCategories = [];
       rules = [];
+      cardRules = [];
     }
   }
 
@@ -263,10 +270,15 @@ export async function parseStatementXls(
 
     rows.sort((a, b) => (a.occurred_on < b.occurred_on ? 1 : -1));
 
+    const card_owner_id = card_last4
+      ? (cardRules.find((r) => r.match_card_last4 === card_last4)?.set_beneficiary_id ?? null)
+      : null;
+
     return {
       ok: true,
       source,
       card_last4,
+      card_owner_id,
       account_label,
       period_start: periodStart,
       period_end: periodEnd,
@@ -398,4 +410,51 @@ export async function commitStatementRows(
   revalidatePath("/ozet");
   revalidatePath("/raporlar");
   return { ok: true, inserted: fresh.length, duplicates };
+}
+
+/**
+ * Kartın sahibini hatırla: Ahmet Burak'ın ya da Salih'in kartından yapılan
+ * her şey onlarındır. Kart kuralı (yalnız son 4 hane + kişi) olarak saklanır;
+ * `beneficiaryId` boşsa kural silinir ve kart "karma" olur (yer kuralları
+ * karar verir).
+ */
+export async function setCardOwner(
+  last4: string,
+  beneficiaryId: string | null,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!(await isSupabaseConfigured())) return { ok: false, error: "Supabase yapılandırılmamış." };
+  if (!/^\d{4}$/.test(last4)) return { ok: false, error: "Kart numarası okunamadı." };
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Giriş yapmadın." };
+
+  const { error: delErr } = await supabase
+    .from("classification_rules")
+    .delete()
+    .eq("user_id", user.id)
+    .eq("match_card_last4", last4)
+    .is("match_merchant_ilike", null)
+    .is("match_description_ilike", null);
+  if (delErr) return { ok: false, error: delErr.message };
+
+  if (beneficiaryId) {
+    const { data: ben } = await supabase
+      .from("beneficiaries")
+      .select("name")
+      .eq("id", beneficiaryId)
+      .single();
+    const name = (ben as { name?: string } | null)?.name ?? "kişi";
+    const { error } = await supabase.from("classification_rules").insert({
+      user_id: user.id,
+      name: `Kart •••• ${last4} → ${name}`,
+      priority: 1,
+      match_card_last4: last4,
+      set_beneficiary_id: beneficiaryId,
+    } as never);
+    if (error) return { ok: false, error: error.message };
+  }
+  revalidatePath("/ayarlar");
+  return { ok: true };
 }

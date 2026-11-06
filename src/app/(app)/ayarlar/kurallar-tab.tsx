@@ -62,6 +62,7 @@ export function KurallarTab({ initialRules, categories, beneficiaries, configure
     if (r.match_description_ilike) parts.push(`açıklama ⊃ "${r.match_description_ilike.replace(/%/g, "")}"`);
     if (r.match_merchant_ilike) parts.push(`merchant ⊃ "${r.match_merchant_ilike.replace(/%/g, "")}"`);
     if (r.match_min_amount != null) parts.push(`tutar ≥ ${r.match_min_amount}`);
+    if (r.match_card_last4) parts.push(`kart •••• ${r.match_card_last4}`);
     return parts.join(" ∧ ") || "—";
   };
 

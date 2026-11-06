@@ -206,6 +206,8 @@ export interface ClassificationRuleRow {
   match_merchant_ilike: string | null;
   match_description_ilike: string | null;
   match_min_amount: number | null;
+  /** Kart kuralı: bu karttan gelen her gider set_beneficiary_id'ye */
+  match_card_last4?: string | null;
   set_category_id: string | null;
   set_beneficiary_id: string | null;
   set_is_transfer: boolean | null;
@@ -219,7 +221,7 @@ export async function listClassificationRules(): Promise<ClassificationRuleRow[]
   const { data, error } = await supabase
     .from("classification_rules")
     .select(
-      "id, name, priority, is_enabled, match_merchant_ilike, match_description_ilike, match_min_amount, set_category_id, set_beneficiary_id, set_is_transfer, hit_count, last_hit_at",
+      "id, name, priority, is_enabled, match_merchant_ilike, match_description_ilike, match_min_amount, match_card_last4, set_category_id, set_beneficiary_id, set_is_transfer, hit_count, last_hit_at",
     )
     .order("priority", { ascending: true });
   if (error) {
@@ -263,7 +265,7 @@ export async function createClassificationRule(input: {
       set_is_transfer: input.set_is_transfer,
     } as never)
     .select(
-      "id, name, priority, is_enabled, match_merchant_ilike, match_description_ilike, match_min_amount, set_category_id, set_beneficiary_id, set_is_transfer, hit_count, last_hit_at",
+      "id, name, priority, is_enabled, match_merchant_ilike, match_description_ilike, match_min_amount, match_card_last4, set_category_id, set_beneficiary_id, set_is_transfer, hit_count, last_hit_at",
     )
     .single();
 
