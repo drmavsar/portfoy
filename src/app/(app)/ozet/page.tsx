@@ -17,6 +17,7 @@ import {
   getAssetBidRatios,
   getAssetChanges,
   getAssetRates,
+  getGoldPriceStatus,
   getTruncgilUpdateDate,
 } from "@/app/(app)/_lib/asset-rates";
 import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
@@ -93,7 +94,7 @@ export default async function OzetPage() {
     console.error("wealthBridgeReport error", e);
     return null;
   });
-  const [accounts, custodies, beneficiaries, fxRates, fxChanges, truncgilUpdate, holdings, assets, portfolios, trades, txns, wealthSnapshots, benchmarkPoints, accountActivity, prevYearEndSnapshot, bidRatios] = await Promise.all([
+  const [accounts, custodies, beneficiaries, fxRates, fxChanges, truncgilUpdate, holdings, assets, portfolios, trades, txns, wealthSnapshots, benchmarkPoints, accountActivity, prevYearEndSnapshot, bidRatios, goldStatus] = await Promise.all([
     listAccounts(),
     listCustodyLocations(),
     listBeneficiariesLite(),
@@ -110,6 +111,7 @@ export default async function OzetPage() {
     listAccountActivity(),
     getDailySnapshotOnOrBefore(prevYearEnd),
     getAssetBidRatios().catch(() => ({}) as Record<string, number>),
+    getGoldPriceStatus().catch(() => null),
   ]);
   const bridge = await bridgePromise;
 
@@ -806,7 +808,23 @@ export default async function OzetPage() {
                         ? `Bugün net ${netBuyToday > 0 ? "alım" : "satış"} ${fmt.tr(Math.abs(netBuyToday), 0)} ₺`
                         : undefined,
                     )}
-                    {renderCell("ALTIN", metalTotal, metalDay, "diamond", ASSET_CLASS.metal.color, "metal")}
+                    {renderCell(
+                      "ALTIN",
+                      metalTotal,
+                      metalDay,
+                      "diamond",
+                      ASSET_CLASS.metal.color,
+                      "metal",
+                      false,
+                      // Fiyatın kaynağı: canlidoviz canlı sayfa saati, ya da yedeğe düşüldüyse uyarı
+                      metalTotal > 0 && goldStatus
+                        ? goldStatus.source === "live"
+                          ? `canlidoviz canlı${goldStatus.lastUpdate ? ` · ${goldStatus.lastUpdate}` : ""}`
+                          : goldStatus.source === "daily"
+                            ? "canlidoviz · dünkü kapanış (canlı fiyat alınamadı)"
+                            : "canlidoviz alınamadı · yedek kaynak"
+                        : undefined,
+                    )}
                     {renderCell("DÖVİZ", fxTotal, fxDay, "swap", ASSET_CLASS.fx.color, "fx")}
                     {renderCell("NAKİT", cashTotal, cashDay, "wallet", ASSET_CLASS.cash.color, "cash_try", true)}
                   </div>

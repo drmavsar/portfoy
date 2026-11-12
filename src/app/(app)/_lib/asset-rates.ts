@@ -5,12 +5,15 @@
 // Altın türlerinde (gram/çeyrek/yarım/tam/cumhuriyet/ata/gümüş/ons) BİRİNCİL
 // kaynak canlidoviz'dir; Truncgil bu türleri ezmez (Truncgil coin primleri
 // canlidoviz'den ~%1,5-2,5 yüksekti ve kullanıcı canlidoviz'i referans alıyor).
+// canlidoviz fiyatı gün içi CANLIDIR (canlidoviz.com/altin-fiyatlari sayfası);
+// sayfa alınamazsa canlidoviz günlük serisinin son kapanışına (dün) düşülür.
 // Bilezik (22/18/14 ayar) canlidoviz gram altınından türetilir (canlidoviz'de
 // ayrı kalem yok; Truncgil bilezik primi canlidoviz gram referansıyla ~%0,8
 // sapıyordu). Truncgil yalnızca reşat + canlidoviz'in düştüğü boşlukları doldurur
 // ve FX'i override eder.
 //   FX  → Truncgil Selling (override) · taban canlidoviz · son çare TCMB
-//   Altın → canlidoviz (satış) · boşluk için Truncgil · gram yoksa Yahoo XAUUSD
+//   Altın → canlidoviz canlı satış · yedek canlidoviz dünkü kapanış · boşluk
+//           için Truncgil · gram yoksa Yahoo XAUUSD · son çare rate_snapshots
 //   Ons (XAU_OZ) → gram × 31.1035 (türetilir; ham ons değerleri tutarsızdı)
 //   Bilezik → canlidoviz gram × (ayar/24) × işçilik primi (canlidoviz kalibreli)
 //   Cache: 10 dakika
@@ -20,7 +23,7 @@
 
 import { getTcmbRates } from "./fx-rates";
 import { normalizeTruncgilDate } from "@/lib/finance/truncgil-date";
-import { fetchCanlidovizRates } from "./canlidoviz-rates";
+import { fetchCanlidovizLive, fetchCanlidovizRates, type CanlidovizRates } from "./canlidoviz-rates";
 import { fetchTradingViewQuotes } from "./tradingview-quotes";
 import { BILEZIK_ISCILIK, bidRatiosFromQuotes, type BidAskQuote } from "@/lib/finance/liquidation";
 
@@ -147,12 +150,38 @@ async function fetchTruncgilQuotes(): Promise<Record<string, BidAskQuote>> {
 }
 
 /**
- * Bozdurma oranları (alış / satış) — Truncgil kotasyonlarından. Uygulamadaki
- * değer × oran = bozdurulursa eline geçecek tutar. Truncgil düşerse boş döner
- * (bozdurma değeri "makas verisi yok" gösterilir; tahmini makas uydurulmaz).
+ * Bozdurma oranları (alış / satış). Uygulamadaki değer × oran = bozdurulursa
+ * eline geçecek tutar. Altın türlerinde canlidoviz canlı alış/satış (fiyatla
+ * aynı kaynak → bozdurma değeri = canlidoviz alış fiyatı); canlidoviz'in alış
+ * vermediği kodlar (döviz, reşat, makassız gümüş) ve canlı sayfa düştüğünde
+ * Truncgil. İkisi de yoksa boş (bozdurma "makas verisi yok"; makas uydurulmaz).
+ * Bilezik/ons oranı gramdan türer (bkz. bidRatiosFromQuotes).
  */
 export async function getAssetBidRatios(): Promise<Record<string, number>> {
-  return bidRatiosFromQuotes(await fetchTruncgilQuotes());
+  const [truncgil, live] = await Promise.all([fetchTruncgilQuotes(), fetchCanlidovizLive()]);
+  const quotes: Record<string, BidAskQuote> = { ...truncgil };
+  for (const [code, q] of Object.entries(live)) {
+    if (q.buying != null) quotes[code] = { buying: q.buying, selling: q.selling };
+  }
+  return bidRatiosFromQuotes(quotes);
+}
+
+export interface GoldPriceStatus {
+  /** live = canlidoviz canlı sayfa; daily = canlidoviz dünkü kapanış; none = canlidoviz yok */
+  source: "live" | "daily" | "none";
+  /** Canlı fiyatın saati ("HH:MM", İstanbul) */
+  lastUpdate: string | null;
+}
+
+/** Gram altın fiyatının o anki kaynağı — /ozet'te altın kartının altında gösterilir. */
+export async function getGoldPriceStatus(): Promise<GoldPriceStatus> {
+  try {
+    const r = await fetchCanlidovizRates(["XAU"]);
+    const source = r.sources.XAU ?? "none";
+    return { source, lastUpdate: r.lastUpdate.XAU?.slice(0, 5) ?? null };
+  } catch {
+    return { source: "none", lastUpdate: null };
+  }
 }
 
 async function fetchYahooXauUsd(): Promise<number | null> {
@@ -280,7 +309,9 @@ export async function getTruncgilUpdateDate(): Promise<string | null> {
 /**
  * Currency → günlük % değişim.
  *
- * Taban: canlidoviz (FX + altın; güvenilir, son iki günlük kapanıştan hesaplanır).
+ * Taban: canlidoviz. Altında canlı fiyatın sayfadaki önceki kapanışa (cp) göre
+ * değişimi — sitedeki %DEĞ ile aynı; canlı sayfa yoksa son iki günlük kapanış.
+ * FX'te son iki günlük kapanış.
  * Truncgil canlı (intraday) değişimi döndürdüğünde onun üzerine yazılır — böylece
  * Truncgil çalışırken taze intraday değişim, düştüğünde canlidoviz'in güvenilir
  * günlük değişimi gösterilir (eskiden Truncgil boşsa altın/döviz "+0" kalıyordu).
@@ -425,6 +456,42 @@ const EXPECTED_KEYS = [
   "BTC", "ETH", "SOL", "USDT", "BNB",
 ] as const;
 
+/** Fiyatı altın türlerinden gelen kodların hangi kaynaktan çözüldüğünü logla. */
+function logGoldSources(
+  canli: Pick<CanlidovizRates, "rates" | "sources" | "lastUpdate">,
+  fromTruncgil: Set<string>,
+  fromSnapshot: Set<string>,
+  out: Record<string, number>,
+): void {
+  const by: Record<string, string[]> = {};
+  for (const code of CANLI_GOLD) {
+    if (code === "XAU_OZ") continue; // gramdan türetilir
+    const src =
+      canli.sources[code] === "live"
+        ? "canlı"
+        : canli.sources[code] === "daily"
+          ? "dünkü kapanış"
+          : fromSnapshot.has(code)
+            ? "rate_snapshots"
+            : fromTruncgil.has(code)
+              ? "Truncgil"
+              : out[code] != null
+                ? "Yahoo"
+                : "yok";
+    (by[src] ??= []).push(code);
+  }
+  const live = by["canlı"]?.length ?? 0;
+  const total = CANLI_GOLD.size - 1;
+  if (live === total) {
+    console.info(`[asset-rates] altın: canlidoviz canlı ${live}/${total} · ${canli.lastUpdate.XAU ?? "?"}`);
+  } else {
+    const detail = Object.entries(by)
+      .map(([src, codes]) => `${src}: ${codes.join(",")}`)
+      .join(" · ");
+    console.warn(`[asset-rates] altın kaynakları — ${detail}`);
+  }
+}
+
 /** Tüm desteklenen para birimi → TRY birim fiyat map'i. */
 export async function getAssetRates(): Promise<Record<string, number>> {
   const [truncgil, fxFallback, crypto, canli] = await Promise.all([
@@ -432,7 +499,7 @@ export async function getAssetRates(): Promise<Record<string, number>> {
     getTcmbRates(),
     fetchCoingeckoPrices(),
     fetchCanlidovizRates().catch(
-      () => ({ rates: {} as Record<string, number>, changes: {} as Record<string, number> }),
+      (): CanlidovizRates => ({ rates: {}, changes: {}, sources: {}, quotes: {}, lastUpdate: {} }),
     ),
   ]);
 
@@ -443,8 +510,8 @@ export async function getAssetRates(): Promise<Record<string, number>> {
     if (typeof v === "number" && v > 0) out[k] = v;
   }
 
-  // 1.5) canlidoviz — FX + altın (güvenilir günlük kapanış). Truncgil canlıysa
-  //      bir sonraki adımda bunun üzerine yazar; Truncgil düştüğünde bu kalır.
+  // 1.5) canlidoviz — altın: canlı sayfa (yoksa dünkü kapanış); FX: günlük
+  //      kapanış. FX'te Truncgil bir sonraki adımda bunun üzerine yazar.
   for (const [k, v] of Object.entries(canli.rates)) {
     if (typeof v === "number" && v > 0) out[k] = v;
   }
@@ -461,6 +528,7 @@ export async function getAssetRates(): Promise<Record<string, number>> {
     }
     out[k] = v;
   }
+  const fromTruncgil = new Set(Object.keys(truncgil));
 
   // 2.5) Ons altın (XAU_OZ) = gram × 31.1035. canlidoviz item 81 ve Truncgil'in
   //      ons değerleri tutarsız (gerçeğin ~yarısı) geliyordu; ons uluslararası
@@ -501,12 +569,18 @@ export async function getAssetRates(): Promise<Record<string, number>> {
 
   // 5) Eksik kalanları DB'deki son iyi snapshot'tan doldur
   const missing = EXPECTED_KEYS.filter((k) => out[k] == null);
+  const fromSnapshot = new Set<string>();
   if (missing.length > 0) {
     const fallback = await loadFallbackRates();
     for (const k of missing) {
-      if (fallback[k] != null && fallback[k] > 0) out[k] = fallback[k];
+      if (fallback[k] != null && fallback[k] > 0) {
+        out[k] = fallback[k];
+        fromSnapshot.add(k);
+      }
     }
   }
+
+  logGoldSources(canli, fromTruncgil, fromSnapshot, out);
 
   // 6) Sağlıklı bir response yakaladıysak (USD + XAU varsa) snapshot'u güncelle
   if (out.USD && out.XAU) {
