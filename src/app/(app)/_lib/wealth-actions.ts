@@ -24,6 +24,8 @@ export interface PortfolioRow {
   name: string;
   slug: string;
   is_default: boolean;
+  /** Portföyün para birimi; "USD" ise Yatırımlar'da dolar olarak gösterilir. */
+  base_currency: string;
 }
 
 export interface TradeRow {
@@ -73,7 +75,7 @@ export async function listPortfolios(): Promise<PortfolioRow[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("portfolios")
-    .select("id, name, slug, is_default")
+    .select("id, name, slug, is_default, base_currency")
     .is("archived_at", null)
     .order("is_default", { ascending: false })
     .order("name");
@@ -166,6 +168,65 @@ export async function listHoldingsByCustody(): Promise<HoldingCustodyRow[]> {
   return Array.from(acc.values()).filter((r) => r.quantity > 1e-9);
 }
 
+/** İşlem para birimi ve kuru; TL-dışı işlemde kur zorunlu. */
+function tradeCurrency(input: { currency?: string; fx_rate_to_try?: number | null }):
+  | { currency: string; fx: number | null }
+  | { error: string } {
+  const currency = (input.currency ?? "TRY").toUpperCase();
+  if (currency === "TRY") return { currency, fx: null };
+  const fx = Number(input.fx_rate_to_try);
+  if (!(fx > 0)) return { error: `${currency}/TRY kuru gir.` };
+  return { currency, fx };
+}
+
+const US_EXCHANGE_SET = new Set(["NASDAQ", "NYSE", "AMEX"]);
+
+/**
+ * ABD hissesi ekle (ör. yeni halka arz). Varlık tablosu ortaktır; RLS yalnız
+ * equity_us + USD satırı eklemeye izin verir (0051 migration). Aynı sembol
+ * varsa mevcut satır döner.
+ */
+export async function createUsAsset(input: {
+  symbol: string;
+  name: string;
+  exchange: string;
+}): Promise<{ ok: true; row: AssetRow } | { ok: false; error: string }> {
+  if (!(await isSupabaseConfigured())) return { ok: false, error: "Supabase yapılandırılmamış." };
+  const symbol = input.symbol.trim().toUpperCase();
+  const name = input.name.trim();
+  const exchange = input.exchange.trim().toUpperCase();
+  if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)) return { ok: false, error: "Geçerli bir ABD hisse sembolü gir (ör. NVDA)." };
+  if (!name) return { ok: false, error: "Şirket adını gir." };
+  if (!US_EXCHANGE_SET.has(exchange)) return { ok: false, error: "Borsa NASDAQ, NYSE ya da AMEX olmalı." };
+
+  const supabase = await createClient();
+  const cols = "id, symbol, name, asset_class, currency, exchange, sector, external_url";
+  const { data: existing } = await supabase
+    .from("assets")
+    .select(cols)
+    .eq("symbol", symbol)
+    .eq("asset_class", "equity_us")
+    .maybeSingle();
+  if (existing) return { ok: true, row: existing as unknown as AssetRow };
+
+  const { data, error } = await supabase
+    .from("assets")
+    .insert({
+      symbol,
+      name,
+      asset_class: "equity_us",
+      currency: "USD",
+      exchange,
+      is_active: true,
+      external_url: `https://www.tradingview.com/symbols/${exchange}-${symbol}/`,
+    } as never)
+    .select(cols)
+    .single();
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/islemler");
+  return { ok: true, row: data as unknown as AssetRow };
+}
+
 export async function createTrade(input: {
   portfolio_id: string;
   custody_id: string | null;
@@ -177,6 +238,10 @@ export async function createTrade(input: {
   price: number;
   fees: number;
   notes: string | null;
+  /** İşlem para birimi (ABD hissesi: "USD"); verilmezse TRY */
+  currency?: string;
+  /** TL-dışı işlemde işlem anı kuru (ör. USD/TRY) */
+  fx_rate_to_try?: number | null;
 }): Promise<{ ok: true; row: TradeRow } | { ok: false; error: string }> {
   if (!(await isSupabaseConfigured())) {
     return { ok: false, error: "Supabase yapılandırılmamış." };
@@ -189,6 +254,8 @@ export async function createTrade(input: {
   if (!input.asset_id) return { ok: false, error: "Sembol seç." };
   if (!(input.quantity > 0)) return { ok: false, error: "Adet pozitif olmalı." };
   if (!(input.price >= 0)) return { ok: false, error: "Fiyat negatif olamaz." };
+  const ccy = tradeCurrency(input);
+  if ("error" in ccy) return { ok: false, error: ccy.error };
 
   const { data, error } = await supabase
     .from("trades")
@@ -202,12 +269,13 @@ export async function createTrade(input: {
       executed_at: input.executed_at,
       quantity: input.quantity,
       price: input.price,
-      currency: "TRY",
+      currency: ccy.currency,
+      fx_rate_to_try: ccy.fx,
       fees: input.fees,
       notes: input.notes?.trim() || null,
     } as never)
     .select(
-      "id, portfolio_id, custody_id, account_id, asset_id, beneficiary_id, side, executed_at, quantity, price, currency, fees, notes",
+      "id, portfolio_id, custody_id, account_id, asset_id, beneficiary_id, side, executed_at, quantity, price, currency, fx_rate_to_try, fees, notes",
     )
     .single();
 
@@ -234,6 +302,10 @@ export async function updateTrade(input: {
   price: number;
   fees: number;
   notes: string | null;
+  /** İşlem para birimi (ABD hissesi: "USD"); verilmezse TRY */
+  currency?: string;
+  /** TL-dışı işlemde işlem anı kuru (ör. USD/TRY) */
+  fx_rate_to_try?: number | null;
 }): Promise<{ ok: true; row: TradeRow } | { ok: false; error: string }> {
   if (!(await isSupabaseConfigured())) {
     return { ok: false, error: "Supabase yapılandırılmamış." };
@@ -242,6 +314,9 @@ export async function updateTrade(input: {
   if (!input.portfolio_id) return { ok: false, error: "Portföy seç." };
   if (!input.asset_id) return { ok: false, error: "Sembol seç." };
   if (!(input.quantity > 0)) return { ok: false, error: "Adet pozitif olmalı." };
+  // Para birimi verilmezse mevcut değer korunur (eski çağrılar TL işlemleri bozmasın)
+  const ccy = input.currency != null ? tradeCurrency(input) : null;
+  if (ccy && "error" in ccy) return { ok: false, error: ccy.error };
 
   const { data: prev } = await supabase
     .from("trades")
@@ -260,12 +335,13 @@ export async function updateTrade(input: {
       executed_at: input.executed_at,
       quantity: input.quantity,
       price: input.price,
+      ...(ccy ? { currency: ccy.currency, fx_rate_to_try: ccy.fx } : {}),
       fees: input.fees,
       notes: input.notes?.trim() || null,
     } as never)
     .eq("id", input.id)
     .select(
-      "id, portfolio_id, custody_id, account_id, asset_id, beneficiary_id, side, executed_at, quantity, price, currency, fees, notes",
+      "id, portfolio_id, custody_id, account_id, asset_id, beneficiary_id, side, executed_at, quantity, price, currency, fx_rate_to_try, fees, notes",
     )
     .single();
 

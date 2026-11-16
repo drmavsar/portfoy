@@ -5,7 +5,8 @@
 
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
 import { listBeneficiariesLite } from "@/app/(app)/hesaplar/actions";
-import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
+import { getEquityQuotes, type EquityRef } from "@/app/(app)/_lib/stock-prices";
+import { isEquity } from "@/app/(app)/_lib/us-equity";
 import { listFundQuotes } from "@/app/(app)/_lib/tefas/prices-actions";
 import {
   listAssets,
@@ -40,18 +41,18 @@ export async function xirrReport(): Promise<XirrReport | null> {
   const assetMap = new Map(assets.map((a) => [a.id, a]));
 
   // ---- Bugünkü piyasa değeri (portföy başına) -----------------------------
-  const equitySymbols: string[] = [];
+  const equities: EquityRef[] = [];
   const fundCodes: string[] = [];
   for (const h of holdings) {
     const a = assetMap.get(h.asset_id);
     if (!a) continue;
-    if (a.asset_class === "equity_tr") equitySymbols.push(a.symbol);
+    if (isEquity(a.asset_class)) equities.push(a);
     else if (a.asset_class === "fund") fundCodes.push(a.symbol);
   }
   const [stockQuotes, fundQuotes] = await Promise.all([
-    equitySymbols.length > 0
-      ? getStockPrices(equitySymbols)
-      : Promise.resolve({} as Awaited<ReturnType<typeof getStockPrices>>),
+    equities.length > 0
+      ? getEquityQuotes(equities)
+      : Promise.resolve({} as Awaited<ReturnType<typeof getEquityQuotes>>),
     fundCodes.length > 0
       ? listFundQuotes(fundCodes)
       : Promise.resolve([] as Awaited<ReturnType<typeof listFundQuotes>>),

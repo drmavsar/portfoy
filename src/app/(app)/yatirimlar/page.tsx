@@ -11,7 +11,8 @@ import {
   type HoldingRow,
   type PortfolioRow,
 } from "@/app/(app)/_lib/wealth-actions";
-import { getStockPrices, getStockTechnicals, type StockQuote, type StockTechnicals } from "@/app/(app)/_lib/stock-prices";
+import { getEquityQuotes, getStockTechnicals, type StockQuote, type StockTechnicals } from "@/app/(app)/_lib/stock-prices";
+import { formatNative, isEquity, nativeCostByHolding, type NativePosition } from "@/app/(app)/_lib/us-equity";
 import { listFundQuotes } from "@/app/(app)/_lib/tefas/prices-actions";
 import { RefreshButton } from "@/app/(app)/_components/refresh-button";
 import { buildTradePlan, type TradePlan } from "@/app/(app)/_lib/trade-plan";
@@ -35,6 +36,75 @@ interface EnrichedHolding extends HoldingRow {
   pnl_pct: number | null;
   day_change_try: number;
   day_pnl_pct: number | null;
+  /** Döviz cinsinden pozisyon (ABD hissesi): kendi para birimindeki değerler */
+  native: NativeHolding | null;
+}
+
+/** Bir pozisyonun kendi para birimindeki (USD) değerleri — dolar portföyü kartı için. */
+interface NativeHolding {
+  currency: string;
+  price: number | null;
+  change_pct: number | null;
+  day_change: number;
+  mv: number | null;
+  cost: number | null;
+  wac: number | null;
+  pnl: number | null;
+  pnl_pct: number | null;
+}
+
+/** Dolar portföyünün kendi para birimindeki toplamları. */
+interface NativeTotals {
+  currency: string;
+  mv: number;
+  cost: number;
+  pnl: number;
+  pnl_pct: number | null;
+  day_change: number;
+  day_change_pct: number | null;
+}
+
+function buildNativeHolding(qty: number, quote: StockQuote | undefined, pos: NativePosition | undefined): NativeHolding | null {
+  const nq = quote?.native;
+  if (!nq && !pos) return null;
+  const currency = nq?.currency ?? pos!.currency;
+  const cost = pos && pos.currency === currency ? pos.cost : null;
+  const price = nq?.price ?? null;
+  const mv = price != null ? qty * price : cost;
+  const pnl = mv != null && cost != null ? mv - cost : null;
+  return {
+    currency,
+    price,
+    change_pct: nq?.change_pct ?? null,
+    day_change: nq && nq.previous_close != null ? qty * (nq.price - nq.previous_close) : 0,
+    mv,
+    cost,
+    wac: cost != null && qty > 0 ? cost / qty : null,
+    pnl,
+    pnl_pct: pnl != null && cost != null && cost > 0 ? (pnl / cost) * 100 : null,
+  };
+}
+
+/** Portföy TL-dışı para birimindeyse ve tüm pozisyonlar o birimde değerlenebiliyorsa toplamlar. */
+function buildNativeTotals(baseCurrency: string, rows: EnrichedHolding[]): NativeTotals | null {
+  if (!baseCurrency || baseCurrency === "TRY" || rows.length === 0) return null;
+  if (!rows.every((r) => r.native && r.native.currency === baseCurrency && r.native.mv != null && r.native.cost != null)) {
+    return null;
+  }
+  const mv = rows.reduce((s, r) => s + (r.native!.mv ?? 0), 0);
+  const cost = rows.reduce((s, r) => s + (r.native!.cost ?? 0), 0);
+  const day_change = rows.reduce((s, r) => s + r.native!.day_change, 0);
+  const pnl = mv - cost;
+  const dayOpen = mv - day_change;
+  return {
+    currency: baseCurrency,
+    mv,
+    cost,
+    pnl,
+    pnl_pct: cost > 0 ? (pnl / cost) * 100 : null,
+    day_change,
+    day_change_pct: dayOpen > 0 ? (day_change / dayOpen) * 100 : null,
+  };
 }
 
 function qtyDecimals(assetClass: string | undefined, symbol: string | undefined): number {
@@ -44,6 +114,7 @@ function qtyDecimals(assetClass: string | undefined, symbol: string | undefined)
   }
   if (assetClass === "metal") return 2;
   if (assetClass === "fund") return 6; // Kesirli fon paylarını koru
+  if (assetClass === "equity_us") return 4; // ABD hisselerinde kesirli adet (Midas vb.)
   return 0;
 }
 
@@ -77,6 +148,8 @@ interface Group {
   day_change_pct: number | null;
   beneficiary_id: string | null;
   custody_slices: CustodySlice[];
+  /** Dolar portföyü: kendi para birimindeki toplamlar (kart bu birimde gösterilir) */
+  native: NativeTotals | null;
 }
 
 interface PersonSummary {
@@ -119,16 +192,16 @@ export default async function YatirimlarPage() {
     custodyIndex.set(key, arr);
   }
 
-  const bistSymbols = holdings
+  const heldEquities = holdings
     .map((h) => assetMap[h.asset_id])
-    .filter((a): a is AssetRow => !!a && a.asset_class === "equity_tr")
-    .map((a) => a.symbol);
+    .filter((a): a is AssetRow => !!a && isEquity(a.asset_class));
+  const bistSymbols = heldEquities.filter((a) => a.asset_class === "equity_tr").map((a) => a.symbol);
   const fundCodes = holdings
     .map((h) => assetMap[h.asset_id])
     .filter((a): a is AssetRow => !!a && a.asset_class === "fund")
     .map((a) => a.symbol);
   const [stockQuotes, technicals, fundQuotes] = await Promise.all([
-    getStockPrices(bistSymbols),
+    getEquityQuotes(heldEquities),
     getStockTechnicals(bistSymbols),
     listFundQuotes(fundCodes),
   ]);
@@ -147,6 +220,9 @@ export default async function YatirimlarPage() {
       market_time: null,
     };
   }
+
+  // Döviz cinsinden işlemlerden (ABD hissesi) kendi para birimindeki maliyet
+  const nativePositions = nativeCostByHolding(trades);
 
   const enriched: EnrichedHolding[] = holdings.map((h) => {
     const asset = assetMap[h.asset_id];
@@ -179,6 +255,7 @@ export default async function YatirimlarPage() {
       pnl_pct,
       day_change_try,
       day_pnl_pct,
+      native: buildNativeHolding(qty, quote, nativePositions.get(`${h.portfolio_id}|${h.asset_id}`)),
     };
   });
 
@@ -283,6 +360,7 @@ export default async function YatirimlarPage() {
         day_change_pct,
         beneficiary_id: portfolioBeneficiary.get(p.id) ?? null,
         custody_slices: buildCustodySlices(rows),
+        native: buildNativeTotals(p.base_currency, rows),
       };
     })
     .filter((g) => g.rows.length > 0)
@@ -535,6 +613,9 @@ export default async function YatirimlarPage() {
                     <div className="card-sub">
                       {g.rows.length} pozisyon · %{share.toFixed(1)} pay
                     </div>
+                    {g.native ? (
+                      <NativeGroupHead n={g.native} mvTry={g.mv} />
+                    ) : (
                     <div style={{ marginLeft: "auto", textAlign: "right" }}>
                       <div className="tabular" style={{ fontWeight: 700, fontSize: 16 }}>
                         {fmt.trydp(g.mv)}
@@ -563,6 +644,7 @@ export default async function YatirimlarPage() {
                         </div>
                       )}
                     </div>
+                    )}
                   </div>
                   <table className="dg">
                     <thead>
@@ -580,6 +662,9 @@ export default async function YatirimlarPage() {
                     </thead>
                     <tbody>
                       {g.rows.map((h) => {
+                        // Dolar portföyünde satırlar kendi para biriminde gösterilir
+                        const n = g.native ? h.native : null;
+                        if (n) return <NativeHoldingRow key={`${h.portfolio_id}-${h.asset_id}`} h={h} n={n} />;
                         const sign = h.pnl >= 0 ? "+" : "";
                         const color = h.pnl >= 0 ? "var(--positive)" : "var(--negative)";
                         const dailyPctColor =
@@ -611,6 +696,11 @@ export default async function YatirimlarPage() {
                             </td>
                             <td className="num tabular">
                               {h.quote ? fmt.tr(h.quote.price, priceDecimals(h.asset?.asset_class)) : "—"}
+                              {h.native?.price != null && (
+                                <div className="hint" style={{ fontSize: 10 }}>
+                                  {formatNative(h.native.price, h.native.currency)}
+                                </div>
+                              )}
                             </td>
                             <td className="num tabular" style={{ color: dailyPctColor }}>
                               {h.quote?.change_pct != null
@@ -661,17 +751,18 @@ export default async function YatirimlarPage() {
                           {g.portfolio.name} Toplam
                         </td>
                         <td className="num tabular" style={{ fontWeight: 700 }}>
-                          {fmt.tr(g.mv, 0)}
+                          {g.native ? formatNative(g.native.mv, g.native.currency) : fmt.tr(g.mv, 0)}
                         </td>
                         <td
                           className="num tabular"
                           style={{
                             fontWeight: 700,
-                            color: g.pnl >= 0 ? "var(--positive)" : "var(--negative)",
+                            color: (g.native?.pnl ?? g.pnl) >= 0 ? "var(--positive)" : "var(--negative)",
                           }}
                         >
-                          {g.pnl >= 0 ? "+" : ""}
-                          {fmt.tr(g.pnl, 0)}
+                          {g.native
+                            ? `${g.native.pnl >= 0 ? "+" : ""}${formatNative(g.native.pnl, g.native.currency)}`
+                            : `${g.pnl >= 0 ? "+" : ""}${fmt.tr(g.pnl, 0)}`}
                         </td>
                         <td />
                       </tr>
@@ -1222,5 +1313,86 @@ function CustodyBreakdown({
         );
       })}
     </div>
+  );
+}
+
+const signed = (v: number, text: string) => `${v >= 0 ? "+" : ""}${text}`;
+const toneOf = (v: number) => (v >= 0 ? "var(--positive)" : "var(--negative)");
+
+/** Dolar portföyü kart başlığı: değerler kendi para biriminde, TL karşılığı altında. */
+function NativeGroupHead({ n, mvTry }: { n: NativeTotals; mvTry: number }) {
+  return (
+    <div style={{ marginLeft: "auto", textAlign: "right" }}>
+      <div className="tabular" style={{ fontWeight: 700, fontSize: 16 }}>
+        {formatNative(n.mv, n.currency)}
+      </div>
+      <div className="tabular hint" style={{ fontSize: 11 }}>
+        ≈ {fmt.trydp(mvTry)}
+      </div>
+      <div className="tabular hint" style={{ fontSize: 11, color: toneOf(n.day_change) }}>
+        Bugün {signed(n.day_change, formatNative(n.day_change, n.currency))}
+        {n.day_change_pct != null && <> · {signed(n.day_change_pct, n.day_change_pct.toFixed(2))}%</>}
+      </div>
+      {n.pnl_pct != null && (
+        <div className="tabular hint" style={{ fontSize: 11, color: toneOf(n.pnl) }}>
+          Top. {signed(n.pnl, formatNative(n.pnl, n.currency))} · {signed(n.pnl_pct, n.pnl_pct.toFixed(2))}%
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Dolar portföyü satırı — fiyat, günlük K/Z, WAC, değer ve K/Z kendi para biriminde. */
+function NativeHoldingRow({ h, n }: { h: EnrichedHolding; n: NativeHolding }) {
+  const ccy = n.currency;
+  return (
+    <tr>
+      <td>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>
+          {h.asset?.external_url ? (
+            <a
+              href={h.asset.external_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "inherit", textDecoration: "none", borderBottom: "1px dotted var(--muted)" }}
+            >
+              {h.asset.symbol}
+            </a>
+          ) : (
+            h.asset?.symbol ?? "?"
+          )}
+        </div>
+        {h.asset && (
+          <div className="hint">
+            {h.asset.name}
+            {h.asset.exchange ? ` · ${h.asset.exchange}` : ""}
+          </div>
+        )}
+      </td>
+      <td className="num tabular">{n.price != null ? formatNative(n.price, ccy) : "—"}</td>
+      <td className="num tabular" style={{ color: n.change_pct == null ? "var(--muted)" : toneOf(n.change_pct) }}>
+        {n.change_pct != null ? `${signed(n.change_pct, n.change_pct.toFixed(2))}%` : "—"}
+      </td>
+      <td className="num tabular" style={{ color: toneOf(n.day_change) }}>
+        {n.day_change !== 0 ? signed(n.day_change, formatNative(n.day_change, ccy)) : "—"}
+      </td>
+      <td className="num tabular">{fmt.tr(Number(h.quantity), qtyDecimals(h.asset?.asset_class, h.asset?.symbol))}</td>
+      <td className="num tabular">{n.wac != null ? formatNative(n.wac, ccy) : "—"}</td>
+      <td className="num tabular" style={{ fontWeight: 600 }}>
+        {n.mv != null ? formatNative(n.mv, ccy) : "—"}
+        <div className="hint" style={{ fontSize: 10, fontWeight: 400 }}>≈ {fmt.tr(h.market_value, 0)} ₺</div>
+      </td>
+      <td className="num tabular" style={{ color: toneOf(n.pnl ?? 0), fontWeight: 600 }}>
+        {n.pnl != null ? signed(n.pnl, formatNative(n.pnl, ccy)) : "—"}
+        {n.pnl_pct != null && (
+          <div className="hint" style={{ fontSize: 10, color: toneOf(n.pnl ?? 0) }}>
+            {signed(n.pnl_pct, n.pnl_pct.toFixed(1))}%
+          </div>
+        )}
+      </td>
+      <td className="num">
+        <span className="hint" style={{ fontSize: 11 }}>—</span>
+      </td>
+    </tr>
   );
 }

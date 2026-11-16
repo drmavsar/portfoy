@@ -6,7 +6,8 @@ import {
   listPortfolios,
   listTrades,
 } from "@/app/(app)/_lib/wealth-actions";
-import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
+import { getEquityQuotes } from "@/app/(app)/_lib/stock-prices";
+import { isEquity } from "@/app/(app)/_lib/us-equity";
 
 import { HesaplarClient } from "./hesaplar-client";
 import {
@@ -30,11 +31,11 @@ export default async function HesaplarPage() {
     listTrades(),
   ]);
 
-  // BIST sembolleri için anlık fiyat
-  const bistSymbols = assets
-    .filter((a) => a.asset_class === "equity_tr")
-    .map((a) => a.symbol);
-  const stockQuotes = await getStockPrices(bistSymbols);
+  // Elde tutulan hisseler için anlık fiyat (BIST + ABD; ABD canlı kurla TL)
+  const heldAssetIds = new Set(holdings.map((h) => h.asset_id));
+  const stockQuotes = await getEquityQuotes(
+    assets.filter((a) => heldAssetIds.has(a.id) && isEquity(a.asset_class)),
+  );
 
   return (
     <HesaplarClient

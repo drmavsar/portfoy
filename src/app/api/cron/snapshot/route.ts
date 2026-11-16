@@ -21,7 +21,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 import { getAssetRates } from "@/app/(app)/_lib/asset-rates";
-import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
+import { getEquityQuotes } from "@/app/(app)/_lib/stock-prices";
+import { isEquity } from "@/app/(app)/_lib/us-equity";
 import { planYearEndSnapshot, type YearRow } from "@/app/(app)/_lib/year-end-wealth";
 import { istanbulToday } from "@/lib/finance/istanbul-date";
 
@@ -66,6 +67,7 @@ interface AssetRow {
   id: string;
   symbol: string;
   asset_class: string;
+  exchange?: string | null;
 }
 
 interface TradeRow {
@@ -120,7 +122,7 @@ async function computeUserSnapshot(
   if (assetIds.length > 0) {
     const { data: assetData, error: assetErr } = await supabase
       .from("assets")
-      .select("id, symbol, asset_class")
+      .select("id, symbol, asset_class, exchange")
       .in("id", assetIds);
     if (assetErr) throw new Error(`assets: ${assetErr.message}`);
     assets = (assetData ?? []) as AssetRow[];
@@ -158,16 +160,16 @@ async function computeUserSnapshot(
     }
   }
 
-  // Yatırım MV — BIST sembolleri için Yahoo quote çekilir.
-  const bistSymbols: string[] = [];
+  // Yatırım MV — BIST + ABD hisseleri anlık fiyatla (ABD canlı kurla TL).
+  const equities: AssetRow[] = [];
   for (const h of holdingRows) {
     const a = assetMap.get(h.asset_id);
-    if (a && a.asset_class === "equity_tr") bistSymbols.push(a.symbol);
+    if (a && isEquity(a.asset_class)) equities.push(a);
   }
-  const quotes = bistSymbols.length > 0 ? await getStockPrices(bistSymbols) : {};
+  const quotes = equities.length > 0 ? await getEquityQuotes(equities) : {};
 
-  // TÜM holding'ler dahil — BIST dışı varlıklar (equity_us, crypto, metal)
-  // Yahoo quote'u olmadığından cost_basis ile değerlenir; aksi halde
+  // TÜM holding'ler dahil — fiyatı çekilmeyen varlıklar (kripto, metal, fon)
+  // cost_basis ile değerlenir; aksi halde
   // total_wealth eksik kalırdı. Asset bulunamasa da (ör. is_active=false)
   // cost ile değerlenir — ozet sayfasıyla aynı; pozisyon sessizce 0'lanmaz.
   let investmentMv = 0;

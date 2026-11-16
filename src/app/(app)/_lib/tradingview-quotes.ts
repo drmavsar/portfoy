@@ -1,4 +1,4 @@
-// BIST anlık fiyatları — TradingView scanner REST (tek istekte toplu).
+// BIST ve ABD anlık fiyatları — TradingView scanner REST (tek istekte toplu).
 //
 // Neden Yahoo yerine: Yahoo'nun BIST (.IS) 5g/1g serisi seans sırasında
 // güncel mumları eksik/gecikmeli veriyor ve Vercel IP'sinden sık sık HTTP 429
@@ -9,7 +9,10 @@
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-const SCAN_URL = "https://scanner.tradingview.com/turkey/scan";
+const SCAN_URL = (market: "turkey" | "america") => `https://scanner.tradingview.com/${market}/scan`;
+
+/** ABD borsaları — varlıkta borsa bilinmiyorsa sırayla denenir (ilk bulunan kazanır). */
+export const US_EXCHANGES = ["NASDAQ", "NYSE", "AMEX"] as const;
 
 export interface TVQuote {
   symbol: string;
@@ -28,13 +31,18 @@ export interface TVQuote {
 const num = (x: number | null | undefined): number | null =>
   typeof x === "number" && Number.isFinite(x) ? x : null;
 
-async function scan(symbols: string[], columns: string[]): Promise<Record<string, Array<number | null>> | null> {
+/** Tam ticker ("BIST:THYAO", "NASDAQ:NVDA") → sütun değerleri. */
+async function scan(
+  market: "turkey" | "america",
+  tickers: string[],
+  columns: string[],
+): Promise<Record<string, Array<number | null>> | null> {
   const body = {
-    symbols: { tickers: symbols.map((s) => `BIST:${s}`), query: { types: [] } },
+    symbols: { tickers, query: { types: [] } },
     columns,
   };
   try {
-    const res = await fetch(SCAN_URL, {
+    const res = await fetch(SCAN_URL(market), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -49,7 +57,7 @@ async function scan(symbols: string[], columns: string[]): Promise<Record<string
     const json = (await res.json()) as { data?: Array<{ s: string; d: Array<number | null> }> };
     const out: Record<string, Array<number | null>> = {};
     for (const row of json.data ?? []) {
-      out[String(row.s).replace(/^BIST:/, "")] = row.d;
+      out[String(row.s)] = row.d;
     }
     return out;
   } catch {
@@ -78,12 +86,50 @@ function toQuote(sym: string, d: Array<number | null>, withPerf: boolean): TVQuo
 export async function fetchTradingViewQuotes(symbols: string[]): Promise<Record<string, TVQuote>> {
   const unique = Array.from(new Set(symbols.map((s) => s.toUpperCase())));
   if (unique.length === 0) return {};
-  const data = await scan(unique, ["close", "change", "change_abs", "open"]);
+  const data = await scan("turkey", unique.map((s) => `BIST:${s}`), ["close", "change", "change_abs", "open"]);
   if (!data) return {};
   const out: Record<string, TVQuote> = {};
-  for (const [sym, d] of Object.entries(data)) {
+  for (const [ticker, d] of Object.entries(data)) {
+    const sym = ticker.replace(/^BIST:/, "");
     const q = toQuote(sym, d, false);
     if (q) out[sym] = q;
+  }
+  return out;
+}
+
+/** "NVDA" + tercih edilen borsa → denenecek tam ticker'lar (tercih önce). */
+export function usTickerCandidates(symbol: string, exchange?: string | null): string[] {
+  const sym = symbol.toUpperCase();
+  const pref = (exchange ?? "").toUpperCase();
+  const order = (US_EXCHANGES as readonly string[]).includes(pref)
+    ? [pref, ...US_EXCHANGES.filter((e) => e !== pref)]
+    : [...US_EXCHANGES];
+  return order.map((e) => `${e}:${sym}`);
+}
+
+/**
+ * ABD hisseleri (USD) — TradingView "america" taraması. Borsa bilinmiyorsa
+ * NASDAQ / NYSE / AMEX birlikte sorulur; sembol başına ilk bulunan ticker
+ * kullanılır. Fiyatlar ve değişim USD'dir. Erişilemezse boş harita.
+ */
+export async function fetchTradingViewUsQuotes(
+  items: Array<{ symbol: string; exchange?: string | null }>,
+): Promise<Record<string, TVQuote>> {
+  const bySymbol = new Map<string, string[]>();
+  for (const it of items) bySymbol.set(it.symbol.toUpperCase(), usTickerCandidates(it.symbol, it.exchange));
+  if (bySymbol.size === 0) return {};
+  const tickers = Array.from(new Set([...bySymbol.values()].flat()));
+  const data = await scan("america", tickers, ["close", "change", "change_abs", "open"]);
+  if (!data) return {};
+  const out: Record<string, TVQuote> = {};
+  for (const [sym, candidates] of bySymbol) {
+    for (const t of candidates) {
+      const q = data[t] ? toQuote(sym, data[t], false) : null;
+      if (q) {
+        out[sym] = q;
+        break;
+      }
+    }
   }
   return out;
 }
@@ -96,15 +142,17 @@ export async function fetchTradingViewQuotes(symbols: string[]): Promise<Record<
 export async function fetchTradingViewQuotesExtended(symbols: string[]): Promise<Record<string, TVQuote>> {
   const unique = Array.from(new Set(symbols.map((s) => s.toUpperCase())));
   if (unique.length === 0) return {};
+  const tickers = unique.map((s) => `BIST:${s}`);
   let withPerf = true;
-  let data = await scan(unique, ["close", "change", "change_abs", "open", "Perf.W", "Perf.1M"]);
+  let data = await scan("turkey", tickers, ["close", "change", "change_abs", "open", "Perf.W", "Perf.1M"]);
   if (!data) {
     withPerf = false;
-    data = await scan(unique, ["close", "change", "change_abs", "open"]);
+    data = await scan("turkey", tickers, ["close", "change", "change_abs", "open"]);
   }
   if (!data) return {};
   const out: Record<string, TVQuote> = {};
-  for (const [sym, d] of Object.entries(data)) {
+  for (const [ticker, d] of Object.entries(data)) {
+    const sym = ticker.replace(/^BIST:/, "");
     const q = toQuote(sym, d, withPerf);
     if (q) out[sym] = q;
   }

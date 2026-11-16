@@ -1,4 +1,5 @@
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
+import { getAssetRates } from "@/app/(app)/_lib/asset-rates";
 import {
   listAssets,
   listPortfolios,
@@ -15,7 +16,7 @@ import { IslemlerClient } from "./islemler-client";
 export const dynamic = "force-dynamic";
 
 export default async function IslemlerPage() {
-  const [configured, trades, assets, portfolios, custodies, beneficiaries, realizedBySell] =
+  const [configured, trades, assets, portfolios, custodies, beneficiaries, realizedBySell, rates] =
     await Promise.all([
       isSupabaseConfigured(),
       listTrades(),
@@ -24,6 +25,7 @@ export default async function IslemlerPage() {
       listCustodyLocations(),
       listBeneficiariesLite(),
       listRealizedBySellTrade(),
+      getAssetRates().catch(() => ({}) as Record<string, number>),
     ]);
 
   return (
@@ -35,6 +37,7 @@ export default async function IslemlerPage() {
       custodies={custodies}
       beneficiaries={beneficiaries}
       configured={configured}
+      usdTry={typeof rates.USD === "number" && rates.USD > 0 ? rates.USD : null}
     />
   );
 }
