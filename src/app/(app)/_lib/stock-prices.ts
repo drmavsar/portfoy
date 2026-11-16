@@ -1,11 +1,13 @@
 "use server";
 
-// BIST hisse fiyatları — Yahoo Finance public endpoint
-// URL: https://query1.finance.yahoo.com/v8/finance/chart/<TICKER>.IS
-// Cache 5 dk (revalidate). Yahoo halka açık ama nazikçe kullanılmalı.
+// Hisse fiyatları — BIST (TRY) ve ABD (USD → canlı kurla TRY).
+// Birincil kaynak TradingView scanner; yedek Yahoo Finance public endpoint
+// (BIST: <TICKER>.IS, ABD: <TICKER>). Cache 5 dk (revalidate).
 
+import { getAssetChanges, getAssetRates } from "./asset-rates";
 import { buildBars, priorCloseFromBars, utcDate } from "./stock-prices-util";
-import { fetchTradingViewQuotes, fetchTradingViewQuotesExtended } from "./tradingview-quotes";
+import { fetchTradingViewQuotes, fetchTradingViewQuotesExtended, fetchTradingViewUsQuotes } from "./tradingview-quotes";
+import { toTryQuote, type NativeQuote } from "./us-equity";
 
 export interface StockQuote {
   symbol: string;
@@ -15,6 +17,8 @@ export interface StockQuote {
   currency: string;
   source: "yahoo" | "fallback" | "tefas" | "tradingview";
   market_time: number | null; // unix epoch (saniye)
+  /** ABD hissesi: kendi para birimindeki (USD) fiyat ve çevrim kurları. Fiyat alanları TL'dir. */
+  native?: NativeQuote;
 }
 
 interface YahooChartResponse {
@@ -40,9 +44,9 @@ function asYahooSymbol(symbol: string): string {
   return `${symbol}.IS`;
 }
 
-async function fetchOne(symbol: string): Promise<StockQuote | null> {
+async function fetchOne(symbol: string, yahooSymbol: string = asYahooSymbol(symbol)): Promise<StockQuote | null> {
   // range=5d → son birkaç işlem günü kapanışları (düzeltilmiş seri için)
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${asYahooSymbol(symbol)}?interval=1d&range=5d`;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=1d&range=5d`;
   try {
     const res = await fetch(url, {
       next: { revalidate: 300, tags: ["stock-prices"] },
@@ -112,12 +116,80 @@ export async function getStockPrices(symbols: string[]): Promise<Record<string, 
 
   // Yedek: TradingView'de bulunmayan semboller için Yahoo.
   if (missing.length > 0) {
-    const results = await Promise.all(missing.map(fetchOne));
+    const results = await Promise.all(missing.map((sym) => fetchOne(sym)));
     for (const r of results) {
       if (r) out[r.symbol] = r;
     }
   }
 
+  return out;
+}
+
+export interface EquityRef {
+  symbol: string;
+  asset_class: string;
+  exchange?: string | null;
+}
+
+/**
+ * ABD hisseleri için anlık fiyat — USD. TradingView "america" taraması
+ * (NASDAQ/NYSE/AMEX), bulunamayanlar için Yahoo (ticker olduğu gibi).
+ */
+export async function getUsStockPrices(items: Array<{ symbol: string; exchange?: string | null }>): Promise<Record<string, StockQuote>> {
+  if (items.length === 0) return {};
+  const out: Record<string, StockQuote> = {};
+  const tv = await fetchTradingViewUsQuotes(items);
+  const missing: string[] = [];
+  for (const it of items) {
+    const sym = it.symbol.toUpperCase();
+    const q = tv[sym];
+    if (q) {
+      const prev = q.changeAbs != null ? q.close - q.changeAbs : null;
+      out[it.symbol] = {
+        symbol: it.symbol,
+        price: q.close,
+        previous_close: prev != null && prev > 0 ? prev : null,
+        change_pct: q.changePct,
+        currency: "USD",
+        source: "tradingview",
+        market_time: null,
+      };
+    } else if (!missing.includes(it.symbol)) {
+      missing.push(it.symbol);
+    }
+  }
+  if (missing.length > 0) {
+    const results = await Promise.all(missing.map((s) => fetchOne(s, s.toUpperCase())));
+    for (const r of results) if (r) out[r.symbol] = { ...r, currency: r.currency || "USD" };
+  }
+  return out;
+}
+
+/**
+ * Hisse kotasyonları — BIST ve ABD birlikte, hepsi TL. ABD fiyatı canlı
+ * USD/TRY ile çevrilir; önceki kapanış dünkü kurla çevrildiği için TL günlük
+ * değişim hisse + kur etkisini birlikte gösterir. Dolar değerleri `native`
+ * alanında. Kur yoksa ABD kotasyonu dönmez (çağıran maliyete düşer).
+ */
+export async function getEquityQuotes(assets: EquityRef[]): Promise<Record<string, StockQuote>> {
+  const bist = Array.from(new Set(assets.filter((a) => a.asset_class === "equity_tr").map((a) => a.symbol)));
+  const usMap = new Map<string, EquityRef>();
+  for (const a of assets) if (a.asset_class === "equity_us") usMap.set(a.symbol, a);
+  const us = [...usMap.values()];
+
+  const [bistQuotes, usQuotes, rates, changes] = await Promise.all([
+    bist.length > 0 ? getStockPrices(bist) : Promise.resolve({} as Record<string, StockQuote>),
+    us.length > 0 ? getUsStockPrices(us) : Promise.resolve({} as Record<string, StockQuote>),
+    us.length > 0 ? getAssetRates() : Promise.resolve({} as Record<string, number>),
+    us.length > 0 ? getAssetChanges() : Promise.resolve({} as Record<string, number>),
+  ]);
+
+  const out: Record<string, StockQuote> = { ...bistQuotes };
+  for (const [sym, q] of Object.entries(usQuotes)) {
+    const fx = q.currency === "TRY" ? 1 : rates[q.currency];
+    if (!(typeof fx === "number" && fx > 0)) continue;
+    out[sym] = q.currency === "TRY" ? q : toTryQuote(q, fx, changes[q.currency] ?? null);
+  }
   return out;
 }
 

@@ -4,7 +4,8 @@ import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
 import { createClient } from "@/lib/supabase/server";
 import { readAll } from "@/lib/supabase/read-all";
 import { listAssets, listHoldings, listTrades } from "@/app/(app)/_lib/wealth-actions";
-import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
+import { getEquityQuotes } from "@/app/(app)/_lib/stock-prices";
+import { isEquity } from "@/app/(app)/_lib/us-equity";
 import { listFundQuotes } from "@/app/(app)/_lib/tefas/prices-actions";
 import {
   BENCH_CODES,
@@ -109,14 +110,13 @@ export async function benchmarkComparison(): Promise<BenchmarkCompareResult | nu
   // ---- Güncel hisse/fon fiyatları (açık pozisyon değeri) -------------------
   const heldEquity = holdings
     .map((h) => assetMap[h.asset_id])
-    .filter((a) => a && a.asset_class === "equity_tr")
-    .map((a) => a.symbol);
+    .filter((a) => a && isEquity(a.asset_class));
   const heldFunds = holdings
     .map((h) => assetMap[h.asset_id])
     .filter((a) => a && a.asset_class === "fund")
     .map((a) => a.symbol);
   const [stockQuotes, fundQuotes] = await Promise.all([
-    heldEquity.length > 0 ? getStockPrices(heldEquity) : Promise.resolve({} as Awaited<ReturnType<typeof getStockPrices>>),
+    heldEquity.length > 0 ? getEquityQuotes(heldEquity) : Promise.resolve({} as Awaited<ReturnType<typeof getEquityQuotes>>),
     heldFunds.length > 0 ? listFundQuotes(heldFunds) : Promise.resolve([] as Awaited<ReturnType<typeof listFundQuotes>>),
   ]);
   const priceBySymbol: Record<string, number> = {};

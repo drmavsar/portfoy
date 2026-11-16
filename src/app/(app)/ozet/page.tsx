@@ -20,7 +20,8 @@ import {
   getGoldPriceStatus,
   getTruncgilUpdateDate,
 } from "@/app/(app)/_lib/asset-rates";
-import { getStockPrices } from "@/app/(app)/_lib/stock-prices";
+import { getEquityQuotes } from "@/app/(app)/_lib/stock-prices";
+import { isEquity } from "@/app/(app)/_lib/us-equity";
 import { listTransactionsForReports } from "@/app/(app)/_lib/reports-actions";
 import { listBenchmarkPoints, listWealthSnapshots } from "@/app/(app)/_lib/wealth-snapshots-actions";
 import {
@@ -149,13 +150,11 @@ export default async function OzetPage() {
     g.byBen.set(benKey, (g.byBen.get(benKey) ?? 0) + v);
   }
 
-  // Yatırım MV (BIST anlık fiyat ile)
+  // Yatırım MV (BIST + ABD anlık fiyat; ABD canlı kurla TL)
   const assetMap = Object.fromEntries(assets.map((a) => [a.id, a]));
-  const bistSymbols = holdings
-    .map((h) => assetMap[h.asset_id])
-    .filter((a) => !!a && a.asset_class === "equity_tr")
-    .map((a) => a!.symbol);
-  const quotes = await getStockPrices(bistSymbols);
+  const quotes = await getEquityQuotes(
+    holdings.map((h) => assetMap[h.asset_id]).filter((a) => !!a && isEquity(a.asset_class)),
+  );
 
   const enriched = holdings.map((h) => {
     const asset = assetMap[h.asset_id];

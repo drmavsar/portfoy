@@ -9,6 +9,7 @@ import { Ledger, type LedgerExportColumn, type LedgerFacet } from "@/components/
 import { Icon } from "@/components/ui/icon";
 import { ModalPortal } from "@/components/ui/modal-portal";
 import { fmt } from "@/lib/finance/fmt";
+import { formatNative } from "@/app/(app)/_lib/us-equity";
 
 import type { BeneficiaryLite, CustodyRow } from "@/app/(app)/hesaplar/actions";
 import {
@@ -17,6 +18,7 @@ import {
   type RealizedBySell,
   type TradeRow,
   createTrade,
+  createUsAsset,
   deleteTrade,
   updateTrade,
 } from "@/app/(app)/_lib/wealth-actions";
@@ -63,6 +65,7 @@ function qtyDecimals(assetClass: string | undefined, symbol: string | undefined)
   if (assetClass === "crypto") return symbol === "BTC" ? 8 : 4;
   if (assetClass === "metal") return 2;
   if (assetClass === "fund") return 6; // TEFAS pay adetleri kesirli (~6 hane)
+  if (assetClass === "equity_us") return 4; // ABD hisselerinde kesirli adet (Midas vb.)
   return 0;
 }
 
@@ -103,18 +106,25 @@ interface Props {
   custodies: CustodyRow[];
   beneficiaries: BeneficiaryLite[];
   configured: boolean;
+  /** Güncel USD/TRY (ABD hissesi işleminde varsayılan kur) */
+  usdTry: number | null;
 }
 
 export function IslemlerClient({
   initialTrades,
   realizedBySell,
-  assets,
+  assets: initialAssets,
   portfolios,
   custodies,
   beneficiaries,
   configured,
+  usdTry,
 }: Props) {
   const [trades, setTrades] = useState<TradeRow[]>(initialTrades);
+  // Formdan eklenen ABD hissesi listeye hemen girsin
+  const [assets, setAssets] = useState<AssetRow[]>(initialAssets);
+  const onAssetCreated = (a: AssetRow) =>
+    setAssets((prev) => (prev.some((x) => x.id === a.id) ? prev : [...prev, a]));
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<TradeRow | null>(null);
   const [sideFilter, setSideFilter] = useState<"all" | "buy" | "sell">("all");
@@ -547,6 +557,8 @@ export function IslemlerClient({
           portfolios={portfolios}
           custodies={custodies}
           beneficiaries={beneficiaries}
+          usdTry={usdTry}
+          onAssetCreated={onAssetCreated}
           onClose={() => setModalOpen(false)}
           onSaved={(row) => onSaved(row, false)}
         />
@@ -557,6 +569,8 @@ export function IslemlerClient({
           portfolios={portfolios}
           custodies={custodies}
           beneficiaries={beneficiaries}
+          usdTry={usdTry}
+          onAssetCreated={onAssetCreated}
           initial={editing}
           onClose={() => setEditing(null)}
           onSaved={(row) => onSaved(row, true)}
@@ -571,6 +585,8 @@ function TradeModal({
   portfolios,
   custodies,
   beneficiaries,
+  usdTry,
+  onAssetCreated,
   initial,
   onClose,
   onSaved,
@@ -579,6 +595,8 @@ function TradeModal({
   portfolios: PortfolioRow[];
   custodies: CustodyRow[];
   beneficiaries: BeneficiaryLite[];
+  usdTry: number | null;
+  onAssetCreated: (a: AssetRow) => void;
   initial?: TradeRow;
   onClose: () => void;
   onSaved: (row: TradeRow) => void;
@@ -596,8 +614,33 @@ function TradeModal({
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [busy, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // ABD hissesi: fiyat/komisyon USD, işlem anı kuru ile TL maliyete çevrilir
+  const [fxRate, setFxRate] = useState(
+    initial?.fx_rate_to_try != null ? String(initial.fx_rate_to_try) : usdTry ? usdTry.toFixed(4) : "",
+  );
+  const [newUs, setNewUs] = useState<{ symbol: string; name: string; exchange: string } | null>(null);
+
+  const asset = assets.find((a) => a.id === assetId);
+  const isUsd = asset?.asset_class === "equity_us";
+  const ccy = isUsd ? "$" : "₺";
+  const fx = Number(fxRate);
 
   const gross = (Number(quantity) || 0) * (Number(price) || 0) + (Number(fees) || 0);
+
+  const addUsAsset = () => {
+    if (!newUs) return;
+    setError(null);
+    startTransition(async () => {
+      const r = await createUsAsset(newUs);
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      onAssetCreated(r.row);
+      setAssetId(r.row.id);
+      setNewUs(null);
+    });
+  };
 
   const submit = () => {
     setError(null);
@@ -615,6 +658,8 @@ function TradeModal({
             price: Number(price),
             fees: Number(fees) || 0,
             notes: notes || null,
+            currency: isUsd ? "USD" : "TRY",
+            fx_rate_to_try: isUsd ? fx : null,
           })
         : await createTrade({
             portfolio_id: portfolioId,
@@ -627,6 +672,8 @@ function TradeModal({
             price: Number(price),
             fees: Number(fees) || 0,
             notes: notes || null,
+            currency: isUsd ? "USD" : "TRY",
+            fx_rate_to_try: isUsd ? fx : null,
           });
       if (r.ok) onSaved(r.row);
       else setError(r.error);
@@ -674,8 +721,23 @@ function TradeModal({
               <Lbl>Sembol</Lbl>
               <select style={inp} value={assetId} onChange={(e) => setAssetId(e.target.value)}>
                 {assets.length === 0 && <option value="">— Sembol yok —</option>}
-                {assets.map((a) => <option key={a.id} value={a.id}>{a.symbol} — {a.name}</option>)}
+                {assets.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.symbol} — {a.name}
+                    {a.asset_class === "equity_us" ? ` (ABD${a.exchange ? ` · ${a.exchange}` : ""})` : ""}
+                  </option>
+                ))}
               </select>
+              {!isEdit && !newUs && (
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ marginTop: 6, fontSize: 11, padding: "2px 8px" }}
+                  onClick={() => setNewUs({ symbol: "", name: "", exchange: "NASDAQ" })}
+                >
+                  <Icon name="plus" size={11} /> ABD hissesi ekle
+                </button>
+              )}
             </div>
             <div>
               <Lbl>Yön</Lbl>
@@ -686,20 +748,76 @@ function TradeModal({
             </div>
           </div>
 
+          {newUs && (
+            <div style={{ padding: 12, border: "1px dashed var(--border)", borderRadius: 6, display: "grid", gap: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>Yeni ABD hissesi</div>
+              <div className="grid-base grid-3" style={{ gap: 10 }}>
+                <div>
+                  <Lbl>Sembol</Lbl>
+                  <input
+                    style={inp}
+                    value={newUs.symbol}
+                    onChange={(e) => setNewUs({ ...newUs, symbol: e.target.value.toUpperCase() })}
+                    placeholder="NVDA"
+                  />
+                </div>
+                <div>
+                  <Lbl>Şirket</Lbl>
+                  <input
+                    style={inp}
+                    value={newUs.name}
+                    onChange={(e) => setNewUs({ ...newUs, name: e.target.value })}
+                    placeholder="NVIDIA Corporation"
+                  />
+                </div>
+                <div>
+                  <Lbl>Borsa</Lbl>
+                  <select style={inp} value={newUs.exchange} onChange={(e) => setNewUs({ ...newUs, exchange: e.target.value })}>
+                    <option value="NASDAQ">NASDAQ</option>
+                    <option value="NYSE">NYSE</option>
+                    <option value="AMEX">AMEX</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button type="button" className="btn" onClick={() => setNewUs(null)} disabled={busy}>Vazgeç</button>
+                <button
+                  type="button"
+                  className="btn btn-prim"
+                  onClick={addUsAsset}
+                  disabled={busy || !newUs.symbol.trim() || !newUs.name.trim()}
+                >
+                  Ekle
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="grid-base grid-3" style={{ gap: 14 }}>
             <div>
               <Lbl>Adet</Lbl>
               <input type="number" step="0.0001" style={inp} value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
             </div>
             <div>
-              <Lbl>Fiyat (₺)</Lbl>
+              <Lbl>Fiyat ({ccy})</Lbl>
               <input type="number" step="0.01" style={inp} value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0,00" />
             </div>
             <div>
-              <Lbl>Komisyon (₺)</Lbl>
+              <Lbl>Komisyon ({ccy})</Lbl>
               <input type="number" step="0.01" style={inp} value={fees} onChange={(e) => setFees(e.target.value)} />
             </div>
           </div>
+
+          {isUsd && (
+            <div>
+              <Lbl>USD/TRY kuru</Lbl>
+              <input type="number" step="0.0001" style={inp} value={fxRate} onChange={(e) => setFxRate(e.target.value)} />
+              <div className="hint" style={{ fontSize: 11, marginTop: 4 }}>
+                Aracı kurumun dolar alırken uyguladığı kur. TL maliyet bu kurla hesaplanır
+                {usdTry ? ` · güncel satış ${usdTry.toFixed(4)}` : ""}.
+              </div>
+            </div>
+          )}
 
           <div className="grid-base grid-2" style={{ gap: 14 }}>
             <div>
@@ -723,7 +841,14 @@ function TradeModal({
           {gross > 0 && (
             <div style={{ padding: 10, background: "var(--surface-2)", borderRadius: 6, fontSize: 12, display: "flex", gap: 12 }}>
               <span className="hint">Brüt:</span>
-              <span className="tabular" style={{ fontWeight: 600 }}>{fmt.try(gross)}</span>
+              {isUsd ? (
+                <span className="tabular" style={{ fontWeight: 600 }}>
+                  {formatNative(gross, "USD")}
+                  {fx > 0 && <span className="hint" style={{ fontWeight: 400 }}> · ≈ {fmt.try(gross * fx)}</span>}
+                </span>
+              ) : (
+                <span className="tabular" style={{ fontWeight: 600 }}>{fmt.try(gross)}</span>
+              )}
             </div>
           )}
           {error && <div style={{ color: "var(--negative)", fontSize: 12 }}>{error}</div>}
@@ -731,7 +856,7 @@ function TradeModal({
 
         <div style={{ padding: "12px 20px", borderTop: "1px solid var(--border-soft)", display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button className="btn" onClick={onClose} disabled={busy}>İptal</button>
-          <button className="btn btn-prim" onClick={submit} disabled={busy || !quantity || !price || !portfolioId || !assetId}>
+          <button className="btn btn-prim" onClick={submit} disabled={busy || !quantity || !price || !portfolioId || !assetId || (isUsd && !(fx > 0))}>
             {busy ? "Kaydediliyor…" : (isEdit ? "Güncelle" : "Kaydet")}
           </button>
         </div>
