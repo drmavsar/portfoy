@@ -227,6 +227,11 @@ export async function createUsAsset(input: {
   return { ok: true, row: data as unknown as AssetRow };
 }
 
+// Komisyon her zaman pozitif girilir: alışta maliyete eklenir, satışta satış
+// tutarından düşülür (FIFO K/Z). Satışta eksi girilen komisyon K/Z'yi
+// komisyonun iki katı kadar şişiriyordu.
+const FEES_ERROR = "Komisyon negatif olamaz; satışta da pozitif gir (tutardan düşülür).";
+
 export async function createTrade(input: {
   portfolio_id: string;
   custody_id: string | null;
@@ -254,6 +259,7 @@ export async function createTrade(input: {
   if (!input.asset_id) return { ok: false, error: "Sembol seç." };
   if (!(input.quantity > 0)) return { ok: false, error: "Adet pozitif olmalı." };
   if (!(input.price >= 0)) return { ok: false, error: "Fiyat negatif olamaz." };
+  if (!(input.fees >= 0)) return { ok: false, error: FEES_ERROR };
   const ccy = tradeCurrency(input);
   if ("error" in ccy) return { ok: false, error: ccy.error };
 
@@ -314,6 +320,7 @@ export async function updateTrade(input: {
   if (!input.portfolio_id) return { ok: false, error: "Portföy seç." };
   if (!input.asset_id) return { ok: false, error: "Sembol seç." };
   if (!(input.quantity > 0)) return { ok: false, error: "Adet pozitif olmalı." };
+  if (!(input.fees >= 0)) return { ok: false, error: FEES_ERROR };
   // Para birimi verilmezse mevcut değer korunur (eski çağrılar TL işlemleri bozmasın)
   const ccy = input.currency != null ? tradeCurrency(input) : null;
   if (ccy && "error" in ccy) return { ok: false, error: ccy.error };

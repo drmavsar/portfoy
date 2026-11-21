@@ -625,7 +625,13 @@ function TradeModal({
   const ccy = isUsd ? "$" : "₺";
   const fx = Number(fxRate);
 
-  const gross = (Number(quantity) || 0) * (Number(price) || 0) + (Number(fees) || 0);
+  // Alışta komisyon maliyete eklenir, satışta tutardan düşülür (aracı kurumun
+  // net tutarıyla aynı). Eskiden satışta da ekleniyordu; net tutarı tutturmak
+  // için komisyon eksi giriliyor ve K/Z şişiyordu.
+  const feeNum = Number(fees) || 0;
+  const grossAmount = (Number(quantity) || 0) * (Number(price) || 0);
+  const gross = side === "sell" ? grossAmount - feeNum : grossAmount + feeNum;
+  const totalLabel = side === "sell" ? "Net tutar (komisyon düşülmüş):" : "Toplam maliyet (komisyon dahil):";
 
   const addUsAsset = () => {
     if (!newUs) return;
@@ -804,7 +810,7 @@ function TradeModal({
             </div>
             <div>
               <Lbl>Komisyon ({ccy})</Lbl>
-              <input type="number" step="0.01" style={inp} value={fees} onChange={(e) => setFees(e.target.value)} />
+              <input type="number" step="0.01" min="0" style={inp} value={fees} onChange={(e) => setFees(e.target.value)} />
             </div>
           </div>
 
@@ -840,7 +846,7 @@ function TradeModal({
 
           {gross > 0 && (
             <div style={{ padding: 10, background: "var(--surface-2)", borderRadius: 6, fontSize: 12, display: "flex", gap: 12 }}>
-              <span className="hint">Brüt:</span>
+              <span className="hint">{totalLabel}</span>
               {isUsd ? (
                 <span className="tabular" style={{ fontWeight: 600 }}>
                   {formatNative(gross, "USD")}
