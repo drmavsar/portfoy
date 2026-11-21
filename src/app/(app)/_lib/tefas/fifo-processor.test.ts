@@ -168,6 +168,22 @@ describe("processFifoSell — fees allocation", () => {
     expect(r.lots[1].proceeds_try).toBe(270);
     expect(r.total_fees_allocated_try).toBe(60);
   });
+
+  it("Döviz işlemde (ABD hissesi) alış ve satış masrafı işlem kuruyla TL'ye çevrilir", () => {
+    // alış 4 @ $100, masraf $1,5, kur 50 → maliyet 4*100*50 + 1,5*50 = 20.075
+    // satış 4 @ $110, masraf $1,5, kur 52 → gelir 4*110*52 − 1,5*52 = 22.802
+    const r = processFifoSell(
+      sell({ quantity: 4, price: 110, fees: 1.5, currency: "USD", fx_rate_to_try: 52 }),
+      [buy({ quantity: 4, price: 100, fees: 1.5, currency: "USD", fx_rate_to_try: 50 })],
+      resolveAs(BELIRSIZ),
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.lots[0].cost_basis_try).toBe(20075);
+    expect(r.lots[0].proceeds_try).toBe(22802);
+    expect(r.lots[0].fees_allocated_try).toBe(78);
+    expect(r.total_realized_pnl_try).toBe(2727);
+  });
 });
 
 describe("processFifoSell — stopaj kuralı", () => {

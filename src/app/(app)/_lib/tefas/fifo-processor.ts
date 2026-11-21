@@ -3,6 +3,8 @@
 // DB bağımlılığı YOK. Server-side processor bu modülü çağırır:
 //   1. Sell trade için açık buy lot'ları FIFO sırayla tüketir.
 //   2. Buy fees consumed_qty oranında cost basis'e dahil edilir.
+//      Masraf işlemin para birimindedir (ABD hissesi: USD) → işlem kuruyla
+//      TL'ye çevrilir, fiyatla aynı kural (fxToTry).
 //   3. Sell fees consumed_qty oranında lot'lara dağıtılır (audit).
 //   4. Her lot için resolveTax callback (acquired, sold) çağrılır →
 //      pure logic, tarihler farklı → lot bazlı farklı kural mümkün.
@@ -103,7 +105,10 @@ export function processFifoSell(
     return a.trade_id < b.trade_id ? -1 : a.trade_id > b.trade_id ? 1 : 0;
   });
 
-  const sellUnitTry = unitTry(sell.price, sell.currency, sell.fx_rate_to_try);
+  const sellFx = fxToTry(sell.currency, sell.fx_rate_to_try);
+  const sellUnitTry = sell.price * sellFx;
+  const sellFeesTry = sell.fees * sellFx;
+  const sellTaxesTry = sell.taxes * sellFx;
   const manualOverride = sell.taxes > 0;
 
   const lots: ConsumedLot[] = [];
@@ -119,14 +124,15 @@ export function processFifoSell(
     if (buy.executed_at > sell.executed_at) break;
 
     const consumed = Math.min(available, remaining);
-    const buyUnitTry = unitTry(buy.price, buy.currency, buy.fx_rate_to_try);
+    const buyFx = fxToTry(buy.currency, buy.fx_rate_to_try);
+    const buyUnitTry = buy.price * buyFx;
 
-    // Buy fees: consumed/buy.quantity oranında lot'a düşer.
-    const buyFeesShare = buy.quantity > 0 ? buy.fees * (consumed / buy.quantity) : 0;
+    // Buy fees: consumed/buy.quantity oranında lot'a düşer (TL'ye çevrilmiş).
+    const buyFeesShare = buy.quantity > 0 ? buy.fees * buyFx * (consumed / buy.quantity) : 0;
     const costBasis = consumed * buyUnitTry + buyFeesShare;
 
     // Sell fees: consumed/sell.quantity oranında lot'a düşer.
-    const sellFeesShare = sell.quantity > 0 ? sell.fees * (consumed / sell.quantity) : 0;
+    const sellFeesShare = sell.quantity > 0 ? sellFeesTry * (consumed / sell.quantity) : 0;
     const proceeds = consumed * sellUnitTry - sellFeesShare;
     const realizedPnl = proceeds - costBasis;
 
@@ -138,7 +144,7 @@ export function processFifoSell(
     let withholding = 0;
     if (manualOverride) {
       // Toplam sell.taxes lot'lara qty-oranında dağıtılır
-      withholding = sell.quantity > 0 ? sell.taxes * (consumed / sell.quantity) : 0;
+      withholding = sell.quantity > 0 ? sellTaxesTry * (consumed / sell.quantity) : 0;
       taxBasis = realizedPnl > 0 ? realizedPnl : 0;
     } else if (realizedPnl > 0 && tax.rate != null && tax.rate > 0) {
       taxBasis = realizedPnl;
@@ -204,9 +210,10 @@ export function processFifoSell(
   };
 }
 
-function unitTry(price: number, currency: string, fx: number | null): number {
-  if (currency === "TRY") return price;
-  return price * (fx ?? 1);
+/** İşlem para biriminden TL'ye çarpan: TRY → 1, diğerleri işlem anı kuru. */
+function fxToTry(currency: string, fx: number | null): number {
+  if (currency === "TRY") return 1;
+  return fx ?? 1;
 }
 
 function diffDays(fromIso: string, toIso: string): number {
