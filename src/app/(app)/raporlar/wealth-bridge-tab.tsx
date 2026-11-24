@@ -125,9 +125,12 @@ export function WealthBridgeTab({ data, initial = "year" }: { data: WealthBridge
                     </td>
                     <Cell v={m.parts.savings} />
                     {r.pre ? (
-                      <td colSpan={4} className="num pre-span">
-                        Piyasa ve diğer, ayrıştırılamadı: <span className={`tabular ${tone(m.parts.untracked)}`}>{signedMoney(m.parts.untracked)}</span>
-                      </td>
+                      <>
+                        <Cell v={m.parts.invest} />
+                        <td colSpan={3} className="num pre-span">
+                          Döviz, altın ve diğer, ayrıştırılamadı: <span className={`tabular ${tone(m.parts.untracked)}`}>{signedMoney(m.parts.untracked)}</span>
+                        </td>
+                      </>
                     ) : (
                       <>
                         <Cell v={m.parts.invest} />

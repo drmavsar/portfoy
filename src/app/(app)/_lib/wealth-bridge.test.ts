@@ -66,6 +66,47 @@ describe("köprü", () => {
     expect(p.savings + p.invest + p.fx + p.metal + p.other + p.untracked).toBeCloseTo(w.delta, 9);
   });
 
+  it("takip öncesi: ekstreden bilinen kişinin hisse getirisi ve temettü 'hisse & fon'a ayrılır", () => {
+    const b = base();
+    const daily = b.daily.map((d, i) => (i === 0 ? { ...d, investByPerson: { p1: 400, p2: 100 } } : d));
+    const w = bridgeWindow(
+      base({
+        daily,
+        txns: [...b.txns, { date: "2026-03-02", direction: "inflow", amount: 5, dividend: true }],
+        flows: [
+          ...b.flows,
+          { date: "2026-03-01", amount: 50, person: "p1" }, // p1 hisse sattı
+          { date: "2026-03-01", amount: -70, person: "p2" }, // dayanağı yok → sayılmaz
+        ],
+        equityAnchors: [
+          { date: "2025-12-31", person: "p1", label: "Mehmet", value: 300 },
+          { date: "2024-12-31", person: "p2", label: "Salih", value: 1 }, // başka yılın dayanağı
+        ],
+      }),
+      "2025-12-31",
+      "2026-05-17",
+    )!;
+    expect(w.untrackedUntil).toBe("2026-05-17");
+    expect(w.preKnown).toEqual(["Mehmet"]);
+    expect(w.parts.savings).toBe(80); // 100 − 20; temettü hariç
+    expect(w.parts.invest).toBe(400 - 300 + 50 + 5);
+    expect(w.parts.untracked).toBe(100 - 80 - 155);
+    const p = w.parts;
+    expect(p.savings + p.invest + p.fx + p.metal + p.other + p.untracked).toBeCloseTo(w.delta, 9);
+  });
+
+  it("takip öncesi temettü, dayanak olmasa da 'hisse & fon'da", () => {
+    const b = base();
+    const w = bridgeWindow(
+      base({ txns: [...b.txns, { date: "2026-03-02", direction: "inflow", amount: 5, dividend: true }] }),
+      "2025-12-31",
+      "2026-05-17",
+    )!;
+    expect(w.preKnown).toEqual([]);
+    expect(w.parts.invest).toBe(5);
+    expect(w.parts.untracked).toBe(100 - 80 - 5);
+  });
+
   it("kuru eksik gün önceki kurla devam eder", () => {
     const daily = base().daily.map((d, i) => (i === 1 ? { ...d, usdtry: null } : d));
     const w = bridgeWindow(base({ daily }), "2026-05-17", "2026-06-01")!;

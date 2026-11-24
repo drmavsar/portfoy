@@ -12,6 +12,7 @@ import {
   type BridgeInputs,
   type BridgeRow,
   type BridgeWindow,
+  type EquityAnchor,
 } from "@/app/(app)/_lib/wealth-bridge";
 import { istanbulToday } from "@/lib/finance/istanbul-date";
 import { createClient } from "@/lib/supabase/server";
@@ -31,6 +32,20 @@ export interface WealthBridgeReport {
   monthly: BridgeRow[];
 }
 
+/** Portföy → kişi: portföydeki işlemlerin çoğunluğunun beneficiary'si. */
+function portfolioPersons(trades: Array<{ portfolio_id: string; beneficiary_id: string | null }>): Map<string, string> {
+  const counts = new Map<string, Map<string, number>>();
+  for (const t of trades) {
+    if (!t.beneficiary_id) continue;
+    const m = counts.get(t.portfolio_id) ?? new Map<string, number>();
+    m.set(t.beneficiary_id, (m.get(t.beneficiary_id) ?? 0) + 1);
+    counts.set(t.portfolio_id, m);
+  }
+  const out = new Map<string, string>();
+  for (const [pid, m] of counts) out.set(pid, [...m.entries()].sort((a, b) => b[1] - a[1])[0][0]);
+  return out;
+}
+
 function lastDayOfPrevMonth(iso: string): string {
   const [y, m] = iso.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, 0)).toISOString().slice(0, 10);
@@ -41,20 +56,21 @@ export async function wealthBridgeReport(): Promise<WealthBridgeReport | null> {
   const supabase = await createClient();
   const today = istanbulToday();
 
-  const [dailyRows, wsRows, txRows, catRows, trades, assets, realizedBySell] = await Promise.all([
+  const [dailyRows, wsRows, txRows, catRows, trades, assets, realizedBySell, anchorRows, benRows] = await Promise.all([
     readAll<{
       snapshot_date: string;
       total_wealth: number;
       fx_try: number;
       metal_try: number;
       equity_mv: number;
+      equity_by_person: Record<string, number> | null;
       usdtry: number | null;
       xau_gram_try: number | null;
     }>(
       (f, t) =>
         supabase
           .from("daily_snapshots")
-          .select("snapshot_date, total_wealth, fx_try, metal_try, equity_mv, usdtry, xau_gram_try", { count: "exact" })
+          .select("snapshot_date, total_wealth, fx_try, metal_try, equity_mv, equity_by_person, usdtry, xau_gram_try", { count: "exact" })
           .lte("snapshot_date", today)
           .order("snapshot_date", { ascending: true })
           .range(f, t),
@@ -88,6 +104,9 @@ export async function wealthBridgeReport(): Promise<WealthBridgeReport | null> {
     listTrades(),
     listAssets(),
     listRealizedBySellTrade(),
+    // Günlük kayıt öncesi, aracı kurum ekstresinden bilinen kişi bazında hisse değerleri
+    supabase.from("equity_anchors").select("beneficiary_id, as_of, value_try"),
+    supabase.from("beneficiaries").select("id, name"),
   ]);
 
   const daily = dailyRows.map((d) => ({
@@ -96,6 +115,9 @@ export async function wealthBridgeReport(): Promise<WealthBridgeReport | null> {
     fx: Number(d.fx_try),
     metal: Number(d.metal_try),
     invest: Number(d.equity_mv),
+    investByPerson: d.equity_by_person
+      ? Object.fromEntries(Object.entries(d.equity_by_person).map(([k, v]) => [k, Number(v)]))
+      : undefined,
     usdtry: d.usdtry == null ? null : Number(d.usdtry),
     xau: d.xau_gram_try == null ? null : Number(d.xau_gram_try),
   }));
@@ -124,9 +146,20 @@ export async function wealthBridgeReport(): Promise<WealthBridgeReport | null> {
     });
   }
 
-  // Snapshot'taki yatırım değeri bütün pozisyonları kapsar → bütün işlemler
-  const flows = portfolioCashFlows(trades, assets, realizedBySell);
-  const input: BridgeInputs = { today, daily, manual, txns, flows };
+  // Snapshot'taki yatırım değeri bütün pozisyonları kapsar → bütün işlemler.
+  // Kişi: snapshot'ın equity_by_person'ı gibi portföy → kişi (portföydeki
+  // işlemlerin çoğunluğunun kişisi).
+  const personOf = portfolioPersons(trades);
+  const flows = portfolioCashFlows(trades, assets, realizedBySell).map((f) => ({
+    date: f.date,
+    amount: f.amount,
+    person: personOf.get(f.portfolioId) ?? null,
+  }));
+  const benName = new Map(((benRows.data ?? []) as Array<{ id: string; name: string }>).map((b) => [b.id, b.name]));
+  const equityAnchors: EquityAnchor[] = ((anchorRows.data ?? []) as Array<{ beneficiary_id: string; as_of: string; value_try: number }>)
+    .map((a) => ({ date: a.as_of, person: a.beneficiary_id, label: benName.get(a.beneficiary_id) ?? "?", value: Number(a.value_try) }))
+    .filter((a) => Number.isFinite(a.value));
+  const input: BridgeInputs = { today, daily, manual, txns, flows, equityAnchors };
 
   // Dönemler. "Başından" = kayıtlı gelir-giderin başladığı yıl sonu
   // (günlük kayıttan önceki son elle girilen yıl sonu); daha eski yıllarda
