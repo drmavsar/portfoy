@@ -13,6 +13,10 @@
                    düzeltmesi, kart borcu zamanlaması, kripto
    Günlük kayıt (daily_snapshots) başlamadan önceki kısım sınıflara
    ayrılamaz: yalnız tasarruf ve "ayrıştırılamayan" olarak gösterilir.
+   İstisna: o dönemin başında bir kişinin hisse değeri aracı kurum
+   ekstresinden biliniyorsa (equity_anchors) o kişinin hisse getirisi
+   (ilk günlük kayıttaki değeri − dayanak + net satış) ve dönemin
+   temettüleri "hisse & fon"a ayrılır; kalan ayrıştırılamayan olur.
    ============================================================ */
 
 export interface BridgeSnapshot {
@@ -22,6 +26,8 @@ export interface BridgeSnapshot {
   metal: number;
   /** Hisse + fon piyasa değeri (snapshot equity_mv) */
   invest: number;
+  /** Kişi bazında hisse + fon değeri (snapshot equity_by_person) */
+  investByPerson?: Record<string, number>;
   usdtry: number | null;
   xau: number | null;
 }
@@ -38,6 +44,17 @@ export interface BridgeTxn {
 export interface BridgeFlow {
   date: string;
   amount: number;
+  /** Portföyün kişisi (equity_by_person anahtarı); bilinmiyorsa yok */
+  person?: string | null;
+}
+
+/** Günlük kayıt öncesi bir tarihte, bir kişinin bilinen hisse değeri (aracı kurum ekstresi) */
+export interface EquityAnchor {
+  date: string;
+  person: string;
+  /** Kişinin adı (açıklama metni için) */
+  label: string;
+  value: number;
 }
 
 export interface BridgeAnchor {
@@ -54,6 +71,7 @@ export interface BridgeInputs {
   manual: Array<{ date: string; value: number }>;
   txns: BridgeTxn[];
   flows: BridgeFlow[];
+  equityAnchors?: EquityAnchor[];
 }
 
 export interface BridgeParts {
@@ -76,6 +94,8 @@ export interface BridgeWindow {
   dividends: number;
   /** Ayrıştırılamayan kısım bu tarihte biter (ilk günlük kayıt); yoksa null */
   untrackedUntil: string | null;
+  /** Takip öncesi dönemde hisse getirisi ekstreden ayrılan kişiler (adları) */
+  preKnown: string[];
 }
 
 const ZERO: BridgeParts = { savings: 0, invest: 0, fx: 0, metal: 0, other: 0, untracked: 0 };
@@ -144,6 +164,25 @@ function trackedParts(input: BridgeInputs, a: BridgeSnapshot, e: BridgeSnapshot)
   };
 }
 
+/**
+ * Takip öncesi (from, first] döneminde, from tarihinde hisse değeri bilinen
+ * kişilerin hisse getirisi: ilk günlük kayıttaki değeri − dayanak + net satış.
+ */
+function knownPreInvest(input: BridgeInputs, from: string, first: BridgeSnapshot) {
+  let value = 0;
+  const labels: string[] = [];
+  for (const a of input.equityAnchors ?? []) {
+    if (a.date !== from) continue;
+    const end = first.investByPerson?.[a.person];
+    if (end == null || !Number.isFinite(end)) continue;
+    let flow = 0;
+    for (const f of input.flows) if (f.person === a.person && f.date > from && f.date <= first.date) flow += f.amount;
+    value += end - a.value + flow;
+    labels.push(a.label);
+  }
+  return { value, labels };
+}
+
 function add(a: BridgeParts, b: BridgeParts): BridgeParts {
   return {
     savings: a.savings + b.savings,
@@ -175,6 +214,7 @@ export function bridgeWindow(input: BridgeInputs, from: string, to: string): Bri
   let dividends = 0;
   let trackedFrom: BridgeSnapshot | null = null;
   let untrackedUntil: string | null = null;
+  let preKnown: string[] = [];
 
   if (start.source === "daily") {
     trackedFrom = input.daily.find((d) => d.date === start.date) ?? null;
@@ -183,7 +223,12 @@ export function bridgeWindow(input: BridgeInputs, from: string, to: string): Bri
     const first = input.daily.find((d) => d.date > start.date) ?? null;
     if (!first) return null;
     const cf = cashflows(input, start.date, first.date);
-    parts = { ...ZERO, savings: cf.savings, untracked: first.total - start.value - cf.savings };
+    // Temettü her durumda yatırım getirisi; dayanağı olan kişilerin hisse
+    // getirisi de ayrılır, kalanı ayrıştırılamaz.
+    const known = knownPreInvest(input, start.date, first);
+    const invest = known.value + cf.dividends;
+    parts = { ...ZERO, savings: cf.savings, invest, untracked: first.total - start.value - cf.savings - invest };
+    preKnown = known.labels;
     income += cf.income;
     expense += cf.expense;
     dividends += cf.dividends;
@@ -206,6 +251,7 @@ export function bridgeWindow(input: BridgeInputs, from: string, to: string): Bri
     expense,
     dividends,
     untrackedUntil,
+    preKnown,
   };
 }
 

@@ -10,6 +10,7 @@ export interface PortfolioCashFlow {
   date: string;
   /** TRY: alım −(brüt + komisyon), satış +(brüt − komisyon) */
   amount: number;
+  portfolioId: string;
 }
 
 /**
@@ -43,6 +44,7 @@ export function portfolioCashFlows(
       return {
         date: istanbulToday(new Date(t.executed_at)),
         amount: (t.side === "buy" ? -(gross + fees) : gross - fees) * share,
+        portfolioId: t.portfolio_id,
       };
     })
     .filter((f) => f.amount !== 0)

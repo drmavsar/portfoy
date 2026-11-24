@@ -31,7 +31,7 @@ export const BRIDGE_PARTS: Array<{ key: keyof BridgeParts; label: string; hint: 
   { key: "fx", label: "Döviz kuru", hint: "Döviz hesaplarının kur değişimi (USD/TRY ile)" },
   { key: "metal", label: "Altın", hint: "Altın hesaplarının gram fiyatı değişimi" },
   { key: "other", label: "Diğer", hint: "Kayda girmemiş gelir-gider, faiz, bakiye düzeltmesi, kart zamanlaması" },
-  { key: "untracked", label: "Takip öncesi piyasa ve diğer", hint: "Günlük servet kaydı başlamadan önce; sınıflara ayrılamıyor" },
+  { key: "untracked", label: "Takip öncesi piyasa ve diğer", hint: "Günlük servet kaydı başlamadan önce; döviz, altın, nakit ve ekstresi olmayan hisseler ayrılamıyor" },
 ];
 
 /** Tek cümlelik sonuç. Sayılardan sonra ek kullanılmaz (₺53'ü / %50'si gibi ek uyumu sorunlu). */
@@ -141,10 +141,19 @@ export function BridgeBars({ window: w, compact = false }: { window: BridgeWindo
 
 export function UntrackedNote({ window: w }: { window: BridgeWindow }) {
   if (!w.untrackedUntil) return null;
+  const known = w.preKnown.join(", ");
   return (
     <p className="hint bridge-note">
-      {trDate(w.start.date)} ile {trDate(w.untrackedUntil)} arasında günlük servet kaydı yok. O dönemin piyasa etkisi hisse,
-      döviz ve altın olarak ayrılamıyor; tasarruf yine gelir-gider kayıtlarından ölçülüyor.
+      {trDate(w.start.date)} ile {trDate(w.untrackedUntil)} arasında günlük servet kaydı yok.{" "}
+      {known ? (
+        <>
+          O dönemde {known} hisselerinin getirisi aracı kurum ekstresinden hesaplanıp “Hisse ve fon”a eklendi (temettüler
+          dahil); döviz, altın, nakit ve ekstresi olmayan hisselerin etkisi ayrılamıyor.
+        </>
+      ) : (
+        <>O dönemin piyasa etkisi hisse, döviz ve altın olarak ayrılamıyor (temettüler “Hisse ve fon”da).</>
+      )}{" "}
+      Tasarruf yine gelir-gider kayıtlarından ölçülüyor.
     </p>
   );
 }
