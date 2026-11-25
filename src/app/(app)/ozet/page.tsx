@@ -21,6 +21,8 @@ import {
   getTruncgilUpdateDate,
 } from "@/app/(app)/_lib/asset-rates";
 import { getEquityQuotes } from "@/app/(app)/_lib/stock-prices";
+import { listFundQuotes } from "@/app/(app)/_lib/tefas/prices-actions";
+import { fundQuotesAsStockQuotes } from "@/app/(app)/_lib/tefas/fund-quotes";
 import { isEquity } from "@/app/(app)/_lib/us-equity";
 import { listTransactionsForReports } from "@/app/(app)/_lib/reports-actions";
 import { listBenchmarkPoints, listWealthSnapshots } from "@/app/(app)/_lib/wealth-snapshots-actions";
@@ -150,11 +152,20 @@ export default async function OzetPage() {
     g.byBen.set(benKey, (g.byBen.get(benKey) ?? 0) + v);
   }
 
-  // Yatırım MV (BIST + ABD anlık fiyat; ABD canlı kurla TL)
+  // Yatırım MV (BIST + ABD anlık fiyat, ABD canlı kurla TL; fonlar son TEFAS
+  // NAV'ıyla — Portföy sayfası ve gece snapshot'ıyla aynı değer)
   const assetMap = Object.fromEntries(assets.map((a) => [a.id, a]));
-  const quotes = await getEquityQuotes(
-    holdings.map((h) => assetMap[h.asset_id]).filter((a) => !!a && isEquity(a.asset_class)),
-  );
+  const fundCodes = holdings
+    .map((h) => assetMap[h.asset_id])
+    .filter((a) => !!a && a.asset_class === "fund")
+    .map((a) => a.symbol);
+  const [equityQuotes, fundQuotes] = await Promise.all([
+    getEquityQuotes(
+      holdings.map((h) => assetMap[h.asset_id]).filter((a) => !!a && isEquity(a.asset_class)),
+    ),
+    listFundQuotes(fundCodes),
+  ]);
+  const quotes = { ...equityQuotes, ...fundQuotesAsStockQuotes(fundQuotes) };
 
   const enriched = holdings.map((h) => {
     const asset = assetMap[h.asset_id];
@@ -374,6 +385,8 @@ export default async function OzetPage() {
       addSlice("metal", "Altın & Gümüş", ASSET_CLASS.metal.color, h.mv);
     } else if (asset?.asset_class === "fx") {
       addSlice("fx", "Döviz", ASSET_CLASS.fx.color, h.mv);
+    } else if (asset?.asset_class === "fund") {
+      addSlice("fund", ASSET_CLASS.fund.label, ASSET_CLASS.fund.color, h.mv);
     } else {
       addSlice("other", "Diğer", ASSET_CLASS.other.color, h.mv);
     }
@@ -439,7 +452,8 @@ export default async function OzetPage() {
     if (quote.market_time && (!quoteLatestUnix || quote.market_time > quoteLatestUnix)) {
       quoteLatestUnix = quote.market_time;
     }
-    if (asset.asset_class === "equity_tr" || asset.asset_class === "equity_us") {
+    if (asset.asset_class === "equity_tr" || asset.asset_class === "equity_us" || asset.asset_class === "fund") {
+      // Fonlar "Portföy (hisse + fon)" satırında; NAV günde bir yayınlanır.
       bumpDay("equity", "Hisse", ASSET_CLASS.equity.color, dayDelta, h.mv, "TradingView · 15dk", null);
     } else if (asset.asset_class === "crypto") {
       bumpDay("crypto", "Kripto", ASSET_CLASS.crypto.color, dayDelta, h.mv, "TradingView · 15dk", null);

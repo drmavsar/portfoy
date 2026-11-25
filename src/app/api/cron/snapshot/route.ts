@@ -22,6 +22,7 @@ import { createClient } from "@supabase/supabase-js";
 
 import { getAssetRates } from "@/app/(app)/_lib/asset-rates";
 import { getEquityQuotes } from "@/app/(app)/_lib/stock-prices";
+import { fundQuotesAsStockQuotes, loadFundQuotes, type FundQuote } from "@/app/(app)/_lib/tefas/fund-quotes";
 import { isEquity } from "@/app/(app)/_lib/us-equity";
 import { planYearEndSnapshot, type YearRow } from "@/app/(app)/_lib/year-end-wealth";
 import { istanbulToday } from "@/lib/finance/istanbul-date";
@@ -166,10 +167,26 @@ async function computeUserSnapshot(
     const a = assetMap.get(h.asset_id);
     if (a && isEquity(a.asset_class)) equities.push(a);
   }
-  const quotes = equities.length > 0 ? await getEquityQuotes(equities) : {};
+  const equityQuotes = equities.length > 0 ? await getEquityQuotes(equities) : {};
 
-  // TÜM holding'ler dahil — fiyatı çekilmeyen varlıklar (kripto, metal, fon)
-  // cost_basis ile değerlenir; aksi halde
+  // Fonlar son TEFAS NAV'ıyla (Özet ve Portföy sayfalarıyla aynı). NAV okunamazsa
+  // fon maliyetle değerlenir; snapshot yine yazılır.
+  const fundCodes = holdingRows
+    .map((h) => assetMap.get(h.asset_id))
+    .filter((a): a is AssetRow => !!a && a.asset_class === "fund")
+    .map((a) => a.symbol);
+  let fundQuotes: FundQuote[] = [];
+  if (fundCodes.length > 0) {
+    try {
+      fundQuotes = await loadFundQuotes(supabase, fundCodes);
+    } catch (e) {
+      console.error("[snapshot] fon NAV okunamadı, maliyetle değerleniyor", e);
+    }
+  }
+  const quotes = { ...equityQuotes, ...fundQuotesAsStockQuotes(fundQuotes) };
+
+  // TÜM holding'ler dahil — fiyatı çekilmeyen varlıklar (kripto, metal, NAV'ı
+  // olmayan fon) cost_basis ile değerlenir; aksi halde
   // total_wealth eksik kalırdı. Asset bulunamasa da (ör. is_active=false)
   // cost ile değerlenir — ozet sayfasıyla aynı; pozisyon sessizce 0'lanmaz.
   let investmentMv = 0;
