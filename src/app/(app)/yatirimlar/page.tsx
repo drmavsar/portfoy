@@ -14,6 +14,7 @@ import {
 import { getEquityQuotes, getStockTechnicals, type StockQuote, type StockTechnicals } from "@/app/(app)/_lib/stock-prices";
 import { formatNative, isEquity, nativeCostByHolding, type NativePosition } from "@/app/(app)/_lib/us-equity";
 import { listFundQuotes } from "@/app/(app)/_lib/tefas/prices-actions";
+import { fundQuotesAsStockQuotes } from "@/app/(app)/_lib/tefas/fund-quotes";
 import { RefreshButton } from "@/app/(app)/_components/refresh-button";
 import { buildTradePlan, type TradePlan } from "@/app/(app)/_lib/trade-plan";
 import {
@@ -208,18 +209,7 @@ export default async function YatirimlarPage() {
 
   // Fon NAV'larını StockQuote şekline sokup hisse fiyatlarıyla aynı haritaya
   // koy — enrichment/render mantığı fonlar için de değişmeden çalışsın.
-  const quotes: Record<string, StockQuote> = { ...stockQuotes };
-  for (const fq of fundQuotes) {
-    quotes[fq.fund_code] = {
-      symbol: fq.fund_code,
-      price: fq.nav,
-      previous_close: fq.previous_nav,
-      change_pct: fq.change_pct,
-      currency: "TRY",
-      source: "tefas",
-      market_time: null,
-    };
-  }
+  const quotes: Record<string, StockQuote> = { ...stockQuotes, ...fundQuotesAsStockQuotes(fundQuotes) };
 
   // Döviz cinsinden işlemlerden (ABD hissesi) kendi para birimindeki maliyet
   const nativePositions = nativeCostByHolding(trades);
