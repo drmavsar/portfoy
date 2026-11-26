@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 
 import { createServerClient } from "@supabase/ssr";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/lib/types/database";
 
@@ -49,4 +50,21 @@ export async function createServiceClient() {
       },
     },
   );
+}
+
+/**
+ * Gerçek service-role istemcisi: oturum çerezi taşımaz, RLS'i atlar.
+ *
+ * `createServiceClient` kullanıcı çerezlerini de geçirdiği için oturum açıkken
+ * istekler kullanıcının access token'ıyla (authenticated rolü) gider ve RLS
+ * uygulanır. Yalnız okuma politikası olan global tablolara (ör. fund_prices)
+ * yazmak için bunu kullan. Anahtar yoksa anon'a düşmez, null döner.
+ */
+export function createAdminClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createSupabaseClient<Database>(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 }
