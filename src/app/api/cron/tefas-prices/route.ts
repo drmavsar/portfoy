@@ -1,8 +1,9 @@
 /**
  * Vercel Cron — günlük TEFAS NAV ingest'i.
  *
- * vercel.json: { schedule: "0 16 * * *" } → UTC 16:00 (TR 19:00).
- * TEFAS akşam NAV yayını sonrası.
+ * vercel.json: { schedule: "0 16 * * *" } → UTC 16:00 (TR 19:00). Günün NAV'ı
+ * sabah (~09:30 TR) yayınlanır; asıl koşu `/api/cron/tefas-prices-morning`
+ * (UTC 07:00). Bu akşam koşusu geç yayınlanan fonları yakalar.
  *
  * Authorization: Bearer ${CRON_SECRET} (Vercel cron + manuel curl).
  *
