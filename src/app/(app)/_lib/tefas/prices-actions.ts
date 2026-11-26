@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { isSupabaseConfigured } from "@/app/(app)/ayarlar/actions";
-import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { loadFundQuotes, type FundQuote } from "./fund-quotes";
 import {
   fetchTefasNav,
@@ -118,7 +118,10 @@ export async function upsertFundPrices(
   if (!(await isSupabaseConfigured())) {
     return { ok: false, error: "Supabase yapılandırılmamış." };
   }
-  const supabase = await createServiceClient();
+  // fund_prices yalnız okunabilir (RLS); çerezli istemci oturum açıkken
+  // kullanıcı rolüyle yazıp reddediliyordu. Çerezsiz service-role şart.
+  const supabase = createAdminClient();
+  if (!supabase) return { ok: false, error: "SUPABASE_SERVICE_ROLE_KEY tanımlı değil." };
   const payload = rows.map((r) => ({
     fund_code: r.fund_code,
     as_of: r.as_of,
@@ -189,6 +192,8 @@ export async function refreshHeldFundPrices(): Promise<{
   codes: string[];
   /** TEFAS'tan gelen son fiyatın tarihi (fon başına) */
   latest?: Array<{ code: string; as_of: string }>;
+  /** Fiyat geldi ama veritabanına yazılamadı */
+  saveError?: string;
 }> {
   if (!(await isSupabaseConfigured())) {
     return { ok: false, updated: 0, failed: [], codes: [] };
@@ -246,5 +251,6 @@ export async function refreshHeldFundPrices(): Promise<{
     failed: fetched.failed ?? [],
     codes,
     latest: (fetched.prices ?? []).map((p) => ({ code: p.code, as_of: p.as_of })),
+    saveError: upsertError,
   };
 }

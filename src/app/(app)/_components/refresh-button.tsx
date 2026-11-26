@@ -69,6 +69,7 @@ export function describeFundRefresh(res: FundRefreshResult): { text: string; war
   if (res.failed.length > 0) {
     return { text: `TEFAS'tan alınamadı: ${res.failed.join(", ")}`, warn: true };
   }
+  if (res.saveError) return { text: "Fon fiyatı kaydedilemedi", warn: true };
   const dates = (res.latest ?? []).map((l) => l.as_of).sort();
   const last = dates[dates.length - 1];
   if (!last) return null;
