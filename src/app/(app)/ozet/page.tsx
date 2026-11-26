@@ -24,6 +24,7 @@ import { getEquityQuotes } from "@/app/(app)/_lib/stock-prices";
 import { listFundQuotes } from "@/app/(app)/_lib/tefas/prices-actions";
 import { fundQuotesAsStockQuotes } from "@/app/(app)/_lib/tefas/fund-quotes";
 import { isEquity } from "@/app/(app)/_lib/us-equity";
+import { allocateByValue, classDayChanges, marketEffect } from "@/app/(app)/_lib/day-change";
 import { listTransactionsForReports } from "@/app/(app)/_lib/reports-actions";
 import { listBenchmarkPoints, listWealthSnapshots } from "@/app/(app)/_lib/wealth-snapshots-actions";
 import {
@@ -487,8 +488,8 @@ export default async function OzetPage() {
       cashEntry.change = cashTotal - prevCash;
       cashEntry.source =
         prev.snapshot_date === yesterdayIso
-          ? "bakiye değişimi (giriş/çıkış dahil, toplama katılmaz) · dün 23:00'tan beri"
-          : `bakiye değişimi (giriş/çıkış dahil, toplama katılmaz) · ${prev.snapshot_date} 23:00'tan beri`;
+          ? "bakiye değişimi (giriş/çıkış dahil) · dün 23:00'tan beri"
+          : `bakiye değişimi (giriş/çıkış dahil) · ${prev.snapshot_date} 23:00'tan beri`;
       cashEntry.lastUpdate = prev.snapshot_date;
     } else {
       cashEntry.change = 0;
@@ -558,6 +559,48 @@ export default async function OzetPage() {
     }
   }
   const wealthDayChange = lastNightSnap ? grandTotal - Number(lastNightSnap.total_wealth) : totalDayChange;
+
+  // Bugünkü net alım-satım (TL): alım +, satış −
+  const netBuyToday = trades
+    .filter((t) => istanbulToday(new Date(t.executed_at)) === todayTr)
+    .reduce((sum, t) => {
+      const fx = t.currency === "TRY" ? 1 : Number(t.fx_rate_to_try ?? 1) || 1;
+      const gross = Number(t.quantity) * Number(t.price) * fx;
+      const fees = Number(t.fees) * fx;
+      return sum + (t.side === "buy" ? gross + fees : -(gross - fees));
+    }, 0);
+
+  // Kartlar manşetle aynı tabana göre: şu anki değer − son gece kaydı. Böylece
+  // Portföy + Altın + Döviz + Nakit kartları toplanınca manşeti verir. Kayıt
+  // yoksa piyasa kaynaklı (önceki kapanışa göre) değişime düşülür.
+  const cardDay = classDayChanges(
+    { equity: investmentMv, metal: metalTotal, fx: fxTotal, cash: cashTotal },
+    lastNightSnap,
+    {
+      equity: dayChangeMap.get("equity")?.change ?? 0,
+      metal: dayChangeMap.get("metal")?.change ?? 0,
+      fx: dayChangeMap.get("fx")?.change ?? 0,
+      cash: dayChangeMap.get("cash_try")?.change ?? 0,
+    },
+  );
+  if (lastNightSnap) {
+    // Kişi satırları da aynı tabana: portföy kişi bazında kayıtta var; altın ve
+    // döviz kaydı kişi bazında tutulmadığından sınıf değişimi değer payıyla
+    // dağıtılır (aynı fiyat hareketi).
+    const prevEquity = (lastNightSnap.equity_by_person ?? {}) as Record<string, number>;
+    for (const e of classBreakdown.get("equity")?.values() ?? []) {
+      e.dayChange = e.value - Number(prevEquity[e.id] ?? 0);
+    }
+    for (const [key, change] of [["metal", cardDay.metal], ["fx", cardDay.fx]] as const) {
+      const inner = classBreakdown.get(key);
+      if (!inner) continue;
+      for (const r of allocateByValue(Array.from(inner.values()), change)) {
+        const e = inner.get(r.id);
+        if (e) e.dayChange = r.dayChange;
+      }
+    }
+  }
+  const marketChange = lastNightSnap ? marketEffect(cardDay, netBuyToday) : null;
   const wealthDayLabel =
     !lastNightSnap || lastNightSnap.snapshot_date === istanbulYesterday()
       ? "Bugünkü servet değişimi"
@@ -677,7 +720,7 @@ export default async function OzetPage() {
                   prevRates={prevWealthPoint?.rates ?? null}
                   refs={wealthRefs}
                   dayLabel={wealthDayLabel}
-                  marketChangeTry={lastNightSnap ? totalDayChange : null}
+                  marketChangeTry={marketChange}
                 />
                 {dailySnapshots.length >= 2 && (
                   <div style={{ flex: 1, minWidth: 200, display: "flex", gap: 20, flexWrap: "wrap" }}>
@@ -687,22 +730,13 @@ export default async function OzetPage() {
                 )}
               </div>
               {(() => {
-                // Portföy / altın / döviz: yalnız fiyat ve kur değişimi (Portföy
-                // sayfasıyla aynı; üçünün toplamı "Piyasa etkisi" satırı). Alım-satım
-                // tutarı burada değişim sayılmaz — bugün işlem varsa net tutar ayrı
-                // satırda. Nakit: dün akşamdan beri bakiye farkı.
-                const equityDay = dayChangeMap.get("equity")?.change ?? 0;
-                const metalDay = dayChangeMap.get("metal")?.change ?? 0;
-                const fxDay = dayChangeMap.get("fx")?.change ?? 0;
-                const cashDay = dayChangeMap.get("cash_try")?.change ?? 0;
-                const netBuyToday = trades
-                  .filter((t) => istanbulToday(new Date(t.executed_at)) === todayTr)
-                  .reduce((sum, t) => {
-                    const fx = t.currency === "TRY" ? 1 : Number(t.fx_rate_to_try ?? 1) || 1;
-                    const gross = Number(t.quantity) * Number(t.price) * fx;
-                    const fees = Number(t.fees) * fx;
-                    return sum + (t.side === "buy" ? gross + fees : -(gross - fees));
-                  }, 0);
+                // Dört kart da son gece kaydına göre (şu anki değer − kayıttaki
+                // değer); toplamları manşetteki servet değişimine eşittir. Bugün
+                // alım-satım varsa net tutar Portföy kartının altında yazar.
+                const equityDay = cardDay.equity;
+                const metalDay = cardDay.metal;
+                const fxDay = cardDay.fx;
+                const cashDay = cardDay.cash;
                 const dayPct = (change: number, value: number) =>
                   value > 0 ? (change / (value - change || value)) * 100 : 0;
                 const signedTr = (n: number, d: number) => `${n >= 0 ? "+" : "−"}${fmt.tr(Math.abs(n), d)}`;
