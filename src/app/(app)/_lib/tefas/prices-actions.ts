@@ -187,6 +187,8 @@ export async function refreshHeldFundPrices(): Promise<{
   updated: number;
   failed: string[];
   codes: string[];
+  /** TEFAS'tan gelen son fiyatın tarihi (fon başına) */
+  latest?: Array<{ code: string; as_of: string }>;
 }> {
   if (!(await isSupabaseConfigured())) {
     return { ok: false, updated: 0, failed: [], codes: [] };
@@ -212,14 +214,37 @@ export async function refreshHeldFundPrices(): Promise<{
 
   const fetched = await fetchTefasPrices(codes, { maxAttempts: 2 });
   let updated = 0;
+  let upsertError: string | undefined;
   if (fetched.prices && fetched.prices.length > 0) {
     const res = await upsertFundPrices(
       fetched.prices.map((p) => ({ fund_code: p.code, as_of: p.as_of, nav: p.nav })),
     );
     if (res.ok) updated = fetched.prices.length;
+    else upsertError = res.error;
+  }
+
+  // Teşhis: Hobby planda log 1 saat tutulur; buton sonrası Vercel loglarında
+  // TEFAS'ın ne döndürdüğü (tarih/fiyat ya da hata nedeni) görünsün.
+  const got = (fetched.prices ?? []).map((p) => `${p.code} ${p.as_of} ${p.nav}`);
+  const failures = (fetched.failures ?? []).map(
+    (f) =>
+      `${f.code}:${f.reason}${f.http_status ? `/${f.http_status}` : ""}` +
+      `${f.error_message ? ` ${f.error_message}` : ""}` +
+      `${f.body_snippet ? ` «${f.body_snippet.slice(0, 160)}»` : ""}`,
+  );
+  if (failures.length > 0 || upsertError) {
+    console.warn("[fund-refresh]", { codes, got, failures, upsertError });
+  } else {
+    console.info("[fund-refresh]", { codes, got });
   }
 
   revalidatePath("/yatirimlar");
   revalidatePath("/ozet");
-  return { ok: true, updated, failed: fetched.failed ?? [], codes };
+  return {
+    ok: !upsertError && (fetched.failed ?? []).length === 0,
+    updated,
+    failed: fetched.failed ?? [],
+    codes,
+    latest: (fetched.prices ?? []).map((p) => ({ code: p.code, as_of: p.as_of })),
+  };
 }

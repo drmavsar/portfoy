@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  describeFetchError,
   fetchOneFundDetailed,
   fetchTefasNav,
   fetchTefasNavHistory,
@@ -488,5 +489,19 @@ describe("fetchTefasNavHistory — bulk history", () => {
     }) as unknown as typeof fetch;
     await fetchTefasNavHistory(["HFI"], { fetchImpl, periodMonths: 60 });
     expect(body.periyod).toBe(60);
+  });
+});
+
+describe("describeFetchError", () => {
+  it("appends the undici cause so 'fetch failed' is diagnosable", () => {
+    const err = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("Connect Timeout Error"), { code: "UND_ERR_CONNECT_TIMEOUT" }),
+    });
+    expect(describeFetchError(err)).toBe("fetch failed (UND_ERR_CONNECT_TIMEOUT Connect Timeout Error)");
+  });
+
+  it("falls back to the message or string form", () => {
+    expect(describeFetchError(new Error("boom"))).toBe("boom");
+    expect(describeFetchError("x")).toBe("x");
   });
 });
