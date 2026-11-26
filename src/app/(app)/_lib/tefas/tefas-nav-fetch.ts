@@ -124,6 +124,21 @@ function defaultHeaders(baseUrl: string): Record<string, string> {
   };
 }
 
+/**
+ * undici "fetch failed" tek başına sebep söylemez; asıl neden `cause`ta
+ * (ECONNRESET, UND_ERR_CONNECT_TIMEOUT, ENOTFOUND, sertifika hatası…).
+ */
+export function describeFetchError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause = (err as { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const c = cause as { code?: unknown; message?: unknown };
+    const detail = [c.code, c.message].filter((v) => typeof v === "string" && v).join(" ");
+    if (detail) return `${err.message} (${detail})`;
+  }
+  return err.message;
+}
+
 /** HTML detect (kolay heuristic). */
 function looksLikeHtml(body: string, contentType: string | null): boolean {
   if (contentType && /text\/html/i.test(contentType)) return true;
@@ -195,7 +210,7 @@ export async function fetchOneFundDetailed(
     });
   } catch (err) {
     clearTimeout(timer);
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = describeFetchError(err);
     const reason: NavFailureReason = /abort/i.test(msg) ? "timeout" : "network_error";
     return {
       ok: false,
@@ -459,7 +474,7 @@ async function fetchOneFundHistory(
     });
   } catch (err) {
     clearTimeout(timer);
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = describeFetchError(err);
     const reason: NavFailureReason = /abort/i.test(msg) ? "timeout" : "network_error";
     return { ok: false, failure: { code, reason, error_message: msg } };
   }
